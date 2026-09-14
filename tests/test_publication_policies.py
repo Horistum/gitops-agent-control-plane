@@ -17,9 +17,9 @@ class PublicationPolicyTests(unittest.TestCase):
         self.assertIn("GitHub Private Vulnerability Reporting", text)
         self.assertIn("Do not open a public GitHub issue", text)
 
-    def test_release_policy_uses_contract_v4_and_separate_semver(self):
+    def test_release_policy_uses_contract_v5_and_separate_semver(self):
         text = (ROOT / "docs" / "RELEASES.md").read_text()
-        self.assertIn("gitops-agent-control-plane/v4", text)
+        self.assertIn("gitops-agent-control-plane/v5", text)
         self.assertIn("vMAJOR.MINOR.PATCH", text)
         self.assertIn("v0.1.0", text)
 
@@ -30,7 +30,7 @@ class PublicationPolicyTests(unittest.TestCase):
 
     def test_publication_clean_room_tracks_discovered_scenarios(self):
         scenario_files = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
-        self.assertGreaterEqual(len(scenario_files), 13)
+        self.assertGreaterEqual(len(scenario_files), 15)
         text = (ROOT / "docs" / "PUBLICATION.md").read_text()
         self.assertIn("all documented conformance scenarios", text)
         self.assertIn("examples/scenarios/", text)

@@ -1,6 +1,6 @@
 {
-  "schema": 3,
-  "reference_contract": "gitops-agent-control-plane/v4",
+  "schema": 4,
+  "reference_contract": "gitops-agent-control-plane/v5",
   "executor_mode": "trusted-fixture-local",
   "developer_allowed_paths": [
     "src/**"

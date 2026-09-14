@@ -24,6 +24,7 @@ from reference_runtime.contracts import (
 from reference_runtime.events import EventLog
 from reference_runtime.executor import ExecutionResult, LocalFixtureExecutor
 from reference_runtime.schema_validation import SchemaValidationError, load_schema, validate_json_file
+from reference_runtime.scenarios import build_request
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT = ROOT / "examples" / "minimal-product"
@@ -48,7 +49,7 @@ class MatcherTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 safe_relative_path(value)
 
-    def test_authority_snapshot_uses_same_matcher_and_is_nonempty(self):
+    def test_authority_source_is_nonempty_and_owns_probe_definition(self):
         policy = load_json(ROOT / "config" / "reference-policy.json")
         snapshot = digest_paths(PRODUCT, policy["authority_paths"])
         self.assertGreaterEqual(len(snapshot["files"]), 9)
@@ -67,6 +68,10 @@ class PolicyAndReviewTests(unittest.TestCase):
         validate_policy(self.policy)
         validate_json_file(ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json")
         validate_json_file(ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json")
+        validate_json_file(
+            PRODUCT / ".agent-control" / "verification-probes.json",
+            ROOT / "schemas" / "verification-probes.schema.json",
+        )
 
     def test_critical_and_medium_risk_are_reachable(self):
         engine = BaseEngine.__new__(BaseEngine)
@@ -85,16 +90,35 @@ class PolicyAndReviewTests(unittest.TestCase):
 
     def test_quality_gate_flags_are_active_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
-            product = Path(directory) / "product"
-            shutil.copytree(PRODUCT, product)
-            gates_path = product / ".agent-control" / "quality-gates.json"
+            controller_product = Path(directory) / "controller-product"
+            workspace = Path(directory) / "workspace"
+            shutil.copytree(PRODUCT, controller_product)
+            shutil.copytree(PRODUCT, workspace)
+            (workspace / ".agent-control" / "verification-probes.json").unlink()
+            gates_path = workspace / ".agent-control" / "quality-gates.json"
             gates = json.loads(gates_path.read_text())
             gates["require_controller_probes"] = False
             gates_path.write_text(json.dumps(gates))
             engine = BaseEngine.__new__(BaseEngine)
-            engine.workspace = product
+            engine.workspace = workspace
+            engine.controller_authority_dir = controller_product / ".agent-control"
             with self.assertRaisesRegex(PolicyConfigurationError, "require_controller_probes"):
                 engine.load_authority()
+
+    def test_probe_contract_rejects_unknown_exception_and_fixed_examples(self):
+        unknown_exception = {
+            "id": "x", "target": "src/x.py", "callable": "x",
+            "cases": {"generator": "blank-whitespace", "count": 1},
+            "oracle": {"kind": "raises", "exception": "RuntimeError"},
+        }
+        with self.assertRaisesRegex(PolicyConfigurationError, "supported exception"):
+            BaseEngine._validate_probe(unknown_exception)
+        fixed_example = {
+            "id": "x", "target": "src/x.py", "callable": "x",
+            "args": ["public"], "kwargs": {}, "expect": {"return": "public"},
+        }
+        with self.assertRaisesRegex(PolicyConfigurationError, "fields invalid"):
+            BaseEngine._validate_probe(fixed_example)
 
     def test_proposal_source_guard_is_rechecked_on_resume_path(self):
         engine = BaseEngine.__new__(BaseEngine)
@@ -131,10 +155,30 @@ class PolicyAndReviewTests(unittest.TestCase):
         self.assertEqual(review["verdict"], "block")
         self.assertFalse(review["checks"]["controller_probes_green"])
 
+    def test_candidate_workspace_does_not_contain_probe_definition(self):
+        goal = load_json(ROOT / "examples" / "goal.example.json")
+        request = build_request(ROOT, "happy-path", goal)
+        with tempfile.TemporaryDirectory() as directory:
+            engine = BaseEngine(ROOT, request, Path(directory))
+            self.assertFalse((engine.workspace / ".agent-control" / "verification-probes.json").exists())
+            self.assertTrue(engine.verification_definition_path().is_file())
+            self.assertEqual(engine.authority["verification_probes"]["schema"], 2)
+
 
 class _NoJUnitExecutor:
     def run(self, argv: list[str], cwd: Path, **kwargs) -> ExecutionResult:
         return ExecutionResult(argv=argv, returncode=2, stdout="", stderr="runner failed before writing junit", timed_out=False, duration_ms=1)
+
+
+class _CaptureExecutor:
+    def __init__(self):
+        self.argv: list[str] | None = None
+        self.pass_fds: tuple[int, ...] = ()
+
+    def run(self, argv: list[str], cwd: Path, **kwargs) -> ExecutionResult:
+        self.argv = list(argv)
+        self.pass_fds = tuple(kwargs.get("pass_fds", ()))
+        return ExecutionResult(argv=argv, returncode=2, stdout="", stderr="captured", timed_out=False, duration_ms=1)
 
 
 class ExecutorAndEvidenceTests(unittest.TestCase):
@@ -179,30 +223,62 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
             self.assertFalse(junit.exists())
             self.assertFalse(result["authoritative"])
 
-    def test_probe_requires_controller_completion_receipt(self):
+    def test_probe_secret_and_definition_are_not_in_worker_argv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            capture = _CaptureExecutor()
+            engine = BaseEngine.__new__(BaseEngine)
+            engine.repo = ROOT
+            engine.workspace = root
+            engine.evidence = evidence
+            engine.executor = capture
+            engine.controller_authority_dir = PRODUCT / ".agent-control"
+            probe = load_json(PRODUCT / ".agent-control" / "verification-probes.json")["acceptance"][0]
+            engine.authority = {"verification_probes": {"baseline": [], "acceptance": [probe]}}
+            engine.git = lambda *args, **kwargs: "a" * 40
+            result = engine.run_probes("candidate", {probe["id"]})
+            joined = " ".join(capture.argv or [])
+            self.assertNotIn("--nonce", joined)
+            self.assertNotIn("--probe-json", joined)
+            self.assertNotIn("receipt_key", joined)
+            self.assertIn("--control-fd", joined)
+            self.assertEqual(len(capture.pass_fds), 1)
+            self.assertFalse(result["all_completed"])
+
+    def test_probe_requires_parent_signed_completion_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "src").mkdir()
             (root / "src" / "service.py").write_text("import os\nos._exit(0)\n")
             evidence = root / "evidence"
             evidence.mkdir()
+            controller = Path(directory) / "controller"
+            controller.mkdir()
+            probe = {
+                "id": "exit-zero",
+                "target": "src/service.py",
+                "callable": "value",
+                "cases": {"generator": "random-name-whitespace", "count": 1},
+                "oracle": {"kind": "normalize-whitespace"},
+            }
+            (controller / "verification-probes.json").write_text(json.dumps({"schema": 2, "baseline": [probe], "acceptance": [probe]}))
             engine = BaseEngine.__new__(BaseEngine)
             engine.repo = ROOT
             engine.workspace = root
             engine.evidence = evidence
             engine.executor = LocalFixtureExecutor(2)
-            engine.authority = {"verification_probes": {"baseline": [{
-                "id": "exit-zero",
-                "target": "src/service.py",
-                "callable": "value",
-                "args": [],
-                "kwargs": {},
-                "expect": {"return": 1},
-            }], "acceptance": []}}
+            engine.controller_authority_dir = controller
+            engine.authority = {"verification_probes": {"baseline": [probe], "acceptance": [probe]}}
             engine.git = lambda *args, **kwargs: "a" * 40
             result = engine.run_probes("candidate", {"exit-zero"})
             self.assertFalse(result["all_completed"])
             self.assertFalse(result["all_passed"])
+            row = result["probes"][0]
+            self.assertEqual(row["receipt_count"], 1)
+            self.assertTrue(row["receipt_valid"])
+            self.assertFalse(row["receipt"]["completed"])
 
     def test_event_chain_detects_unrehashed_mutation(self):
         with tempfile.TemporaryDirectory() as directory:

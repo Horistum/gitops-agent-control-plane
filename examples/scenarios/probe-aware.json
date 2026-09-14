@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "probe-aware",
+  "expected_status": "FAILED_VERIFICATION",
+  "developer_fixture": "probe-aware",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null
+}

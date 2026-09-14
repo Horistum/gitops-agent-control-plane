@@ -32,6 +32,8 @@ class LocalFixtureExecutor:
 
     It bounds wall-clock/CPU/process resources and cleans the spawned process
     group, but it is deliberately not a filesystem/network security sandbox.
+    Selected controller-owned file descriptors may be inherited by a trusted
+    verifier parent; candidate child processes must not inherit those secrets.
     """
 
     def __init__(self, timeout_seconds: int):
@@ -66,7 +68,15 @@ class LocalFixtureExecutor:
             return True
         return False
 
-    def run(self, argv: list[str], cwd: Path, *, env_extra: dict[str, str] | None = None) -> ExecutionResult:
+    def run(
+        self,
+        argv: list[str],
+        cwd: Path,
+        *,
+        env_extra: dict[str, str] | None = None,
+        pass_fds: tuple[int, ...] = (),
+        stdin_data: str | None = None,
+    ) -> ExecutionResult:
         env = {
             "PATH": os.environ.get("PATH", ""),
             "PYTHONIOENCODING": "utf-8",
@@ -76,21 +86,26 @@ class LocalFixtureExecutor:
         if env_extra:
             env.update(env_extra)
         start = time.monotonic()
-        proc = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            start_new_session=True,
-            preexec_fn=self._limits if os.name == "posix" else None,
-        )
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "text": True,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "stdin": subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
+            "env": env,
+            "start_new_session": True,
+            "preexec_fn": self._limits if os.name == "posix" else None,
+        }
+        if os.name == "posix":
+            popen_kwargs["pass_fds"] = pass_fds
+        elif pass_fds:
+            raise RuntimeError("pass_fds verifier control channel requires POSIX")
+
+        proc = subprocess.Popen(argv, **popen_kwargs)
         timed_out = False
         group_terminated = False
         try:
-            stdout, stderr = proc.communicate(timeout=self.timeout_seconds)
+            stdout, stderr = proc.communicate(input=stdin_data, timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
             group_terminated = self._kill_process_group(proc)
