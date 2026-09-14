@@ -1,110 +1,70 @@
 # Operations
 
-## Control Center versus state
+## Normal operating states
 
-The command issue is where an owner sees status and sends commands. The authoritative execution
-state is the `loop-state` Git branch.
+The portable state vocabulary is `RUNNING`, `WAITING_EXTERNAL`, `NEEDS_DECISION`, `BLOCKED_POLICY`, `FAILED`, `PAUSED` and `IDLE`.
 
-The state branch contains:
+The current backend may use additional internal phase names. Operator-facing tooling should map them to this stable vocabulary.
 
-- `state.json`: current snapshot;
-- `events/NNNNNNNN.json`: hash-linked transition receipts;
-- `runs/*.json`: immutable external-effect receipts;
-- `reports/*.md`: task reports;
-- `DASHBOARD.md`: human-readable state projection.
+## Owner control surface
 
-Never repair a stuck task by hand-editing these files and force-pushing the branch.
-
-## Runtime states
-
-Operator-facing states include:
-
-- `RUNNING`;
-- `WAITING_EXTERNAL`;
-- `NEEDS_DECISION`;
-- `BLOCKED_POLICY`;
-- `FAILED`;
-- `PAUSED`;
-- `IDLE`.
-
-The controller can wait on CI, quota/cooldown or an external PR without that being a failed task.
-
-## Owner commands
-
-Use only exact commands displayed by the current control center. Core commands include:
+Use `scripts/control.py`, which currently supports:
 
 ```text
-/loop pause
-/loop drain
-/loop refresh
-/loop resume
-/loop activate <fingerprint>
-/loop retry <TASK>
-/loop replan <TASK> <approval-hash>
-/loop approve <TASK> <approval-hash>
-/loop cancel-goal <GOAL> <goal-hash>
+refresh
+pause
+drain
+resume
+activate --fingerprint HASH
+retry --task ID
+approve --task ID --hash HASH
+replan --task ID --hash HASH
+cancel-goal --goal ID --hash HASH
 ```
 
-A valid command is:
+The wrapper exists so backend command syntax can change without rewriting operational documentation.
 
-- authored by an authorized owner user;
-- a new comment;
-- unedited;
-- one line;
-- not replayed.
+## Safe pause vs drain
 
-Commands never waive hard safety gates.
+`pause` prevents further progress at the next controller boundary. It does not invent a successful outcome for a pending operation.
 
-## Pause versus drain
+`drain` allows an active task to reach its verified terminal boundary and then pauses before selecting another task. Prefer drain for planned maintenance and upgrades.
 
-`pause` is immediate emergency stop behavior.
+## Runtime/config changes
 
-`drain` lets the active task reach a verified terminal boundary and then pauses before selecting new
-work. Prefer drain for planned maintenance/upgrades.
+Changing policy, runtime code, trusted role instructions or model binding changes runtime identity. The controller must pause and require fresh explicit activation so evidence from an older execution epoch cannot satisfy a newly configured system.
 
-## Policy/runtime changes
+## Failure handling
 
-Policy fingerprint includes configuration and trusted runtime/role hashes. A runtime/configuration
-change requires restart and explicit reactivation.
+Use `retry` only for genuinely retryable infrastructure/transient failures. Retry must not bypass a risk decision.
 
-Do not “preserve” an old activation across changed authority. The new fingerprint is precisely the
-point.
+Use `replan` when the current plan/candidate should be discarded and fresh planning is required. Replan invalidates candidate-level evidence rather than pretending old tests/reviews apply to the new plan.
 
-## Logs
+Use `cancel-goal` to end the exact active goal when its product pull request is still safely cancellable.
 
-Default reference locations:
+## Observability
+
+The current adapter stores local health/log data under:
 
 ```text
-~/.local/state/flow-loop/health.json
-~/.local/state/flow-loop/logs/
-journalctl --user -u flow-loop
+~/.local/state/agent-control-plane/
 ```
 
-Model raw output is intentionally not dumped into Git. Durable receipts carry bounded structured
-evidence instead.
+Typical diagnostics:
 
-## Recovery principles
+```bash
+systemctl --user status agent-control-plane --no-pager
+journalctl --user -u agent-control-plane -n 200 --no-pager
+```
 
-1. stop competing writers before recovery;
-2. inspect remote `loop-state` first;
-3. do not equate network failure with missing state;
-4. do not delete/recreate state after an ambiguous push;
-5. reconcile exact PR/SHA/check state before repeating an external effect;
-6. transfer controller identity only at an idle, paused boundary;
-7. never run two hosts with the same `controller_id` against one state branch.
+Backend-specific low-level diagnostics may exist, but normal operation should use the generic control surface and control-center issue.
 
-## Quota
+## Host transfer
 
-ChatGPT/Codex quota exhaustion becomes `quota_wait` and configured cooldown. It must not trigger API
-billing fallback.
+A planned transfer requires drain/pause, no active task or pending effect, old writer stopped, explicit writer identity transfer, new-host verification and fresh activation.
+
+Never run two hosts under the same single-writer identity.
 
 ## Upgrades
 
-The reference v1 installer is for the exact compatible commit in `COMPATIBILITY.json`.
-
-FlowAI-Control 0.3.0's upstream `upgrade_v030.py` was built around the original pilot where the
-controller source repository and control/state repository were the same. Do not point it at a
-tenant-separated control repo and assume provenance will work.
-
-A future compatible reference revision should update `COMPATIBILITY.json`, validate the new runtime,
-drain the old service and install the new immutable runtime with an explicit new fingerprint.
+Upgrades are owner-operated trust-boundary changes, not ordinary product tasks. A new adapter/runtime version must be pinned, reviewed, verified against this reference contract and installed only at a safe state boundary. Compatibility changes belong in `COMPATIBILITY.json` and adapter-specific code.
