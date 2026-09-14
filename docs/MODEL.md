@@ -1,157 +1,117 @@
-# Agent and model execution model
+# Agent and reasoning model
 
-This document describes both meanings of “model” that matter here: the multi-role engineering model
-and the concrete LLM selection.
+## Why multiple roles
 
-## 1. Five trusted roles
+A single model call that plans, implements, tests and approves its own work is cheap and epistemically weak. The reference therefore separates responsibilities even when several roles use the same underlying model family.
 
-FlowAI-Control 0.3.0 ships five reviewed role instruction files inside the controller runtime:
+Role separation is about **independent context and responsibility**, not theatrical job titles. Different phases receive different evidence, structured output schemas and authority.
 
-| Role | Responsibility |
-|---|---|
-| `chief-architect` | discovery-level and highest-risk goal/plan acceptance |
-| `task-architect` | task architecture, invariants, working set and architecture acceptance |
-| `developer` | bounded implementation proposal |
-| `tester` | independent test design and independent executable test proposal |
-| `reviewer` | independent review and challenge review |
+## Canonical roles
 
-The tenant repository does not redefine these role prompts. Their bytes are included in the policy
-fingerprint through the runtime, so silently swapping role instructions changes execution identity.
+### Discovery / chief architecture
 
-## 2. Controller phases and role mapping
+Reads product-authored roadmap and release state, identifies one admissible work item, rejects work with unresolved dependencies and requests bounded additional context instead of guessing. Discovery does not edit product files.
 
-The controller has more phases than roles because one trusted role may serve multiple independent
-gates:
+### Task architect
 
-| Phase | Role / executor | Main output |
-|---|---|---|
-| `discovery` | chief architect | one authorized task candidate |
-| `baseline` | controller test runner | exact baseline receipt |
-| `architect` | task architect | working set, invariants, plan, risk |
-| `test_design` | tester | independent scenarios |
-| `chief_plan` | chief architect | high-risk plan gate |
-| `developer` | developer | edits + acceptance evidence |
-| `verify` | controller test runner | candidate test receipt |
-| `tester` | tester | independent test edits/evidence |
-| `independent_verify` | controller test runner | executable independent receipt |
-| `reviewer` | reviewer | findings + acceptance evidence |
-| `challenge_review` | reviewer | adversarial second review when policy triggers it |
-| `architect_accept` | task architect | architecture/acceptance verdict |
-| `chief_accept` | chief architect | highest-risk goal acceptance |
-| `publish/ci/merge/postmerge` | controller + GitHub | deterministic lifecycle evidence |
+Converts one accepted work item into a precise working set, states invariants and non-goals, identifies compatibility constraints, defines verification and classifies risk based on the actual change.
 
-Adaptive routing may skip phases that are not required for the current risk, but it cannot skip a
-phase whose stronger risk classification makes it mandatory.
+### Developer
 
-## 3. Strict structured output
+Proposes the smallest implementation satisfying the plan, edits only the approved working set, maps changes to acceptance criteria and never claims that tests were executed by the model. The controller applies edits.
 
-A model does not return prose for the controller to “interpret generously.” Every active phase has a
-strict JSON schema.
+### Independent tester
 
-All model phases carry:
+Designs negative, boundary, regression and compatibility scenarios, adds executable tests within the independent-test namespace where allowed and assesses acceptance coverage separately from the implementation rationale.
 
-- `verdict`;
-- `summary`;
-- `risk`;
-- `requested_files`;
-- `requested_searches`;
-- `requested_facts`;
-- typed findings.
+### Reviewer
 
-Phase-specific payloads add task selection, plan, edits, test scenarios or acceptance evidence.
-Missing required fields, unexpected fields, malformed enums or oversized structures are protocol
-failures.
+Inspects the exact candidate diff and evidence, reports correctness, architecture, security, compatibility, scope and testing findings and distinguishes blocking findings from maintainability suggestions.
 
-This is intentional. An autonomous controller whose protocol means “whatever the model probably
-intended” is just a very expensive ambiguity generator.
+## Full phase graph
 
-## 4. Model sessions are data-only
-
-The Codex session is deliberately weaker than the controller:
-
-- read-only sandbox;
-- no shell tool;
-- no unified exec;
-- no multi-agent delegation;
-- no web search;
-- no GitHub token inherited;
-- no product Git checkout as a writable model workspace;
-- no permission to claim that it executed tests.
-
-The controller supplies bounded repository context and can satisfy explicit
-`requested_files` / `requested_searches` / `requested_facts` requests within policy budgets.
-
-Repository content and prior reports are framed as untrusted data, not instructions.
-
-## 5. Model selection
-
-`policy.models` maps trusted role name to a Codex model name. A `default` key is the fallback:
-
-```json
-{
-  "models": {
-    "default": "MODEL_NAME",
-    "chief-architect": "OPTIONAL_STRONGER_MODEL"
-  }
-}
+```text
+discovery
+  -> task architecture
+  -> independent test design
+  -> chief plan gate
+  -> implementation
+  -> deterministic local verification
+  -> independent tests
+  -> deterministic independent verification
+  -> review
+  -> challenge review
+  -> architecture acceptance
+  -> chief acceptance
+  -> publish candidate
+  -> external CI
+  -> merge authority gate
+  -> merge
+  -> post-merge verification
 ```
 
-An empty object delegates selection to the installed Codex CLI default.
+Low and medium risk may skip selected management/redundancy phases, but never deterministic verification, independent testing/review, candidate CI or post-merge evidence.
 
-Do not encode behavioral authority in model names. Safety comes from controller policy, role
-contracts, structured output and deterministic gates. A stronger model may improve proposal quality,
-but it does not gain extra privileges.
+## Structured outputs
 
-## 6. Context is phase-scoped
+Every role returns a strict machine-readable result containing a verdict, summary, risk, bounded context requests, findings and phase-specific data such as task, plan, edits, test scenarios or acceptance evidence.
 
-Two policy structures bound context:
+Unknown fields and missing required fields are protocol errors. Permissive parsing quietly turns model mistakes into controller assumptions.
 
-- `phase_context_paths`: which already-approved authority files each phase may see;
-- `phase_context_bytes`: maximum phase budget.
+A role may request more context, but only through a concrete bounded request such as an exact path, symbol search or documented lifecycle fact.
 
-Every phase path must also exist in top-level `context_paths`. This prevents a role-specific context
-entry from secretly expanding authority.
+## Context retrieval
 
-The reference keeps discovery broad enough to understand the roadmap and keeps later phases focused
-on architecture and quality contracts.
+Each phase starts with a policy-approved authority subset and may request more through bounded channels:
 
-## 7. Evidence is not opinion
+- exact repository files;
+- exact literal/symbol searches;
+- documented lifecycle facts such as a specific pull request or recent merge evidence.
 
-There are two fundamentally different evidence classes:
+The controller performs retrieval. The model does not receive a general repository token or unrestricted shell merely because context is missing.
 
-**Model evidence** says a role inspected a candidate and produced a typed verdict tied to exact
-candidate identity.
+## Model selection
 
-**Executable evidence** says the controller actually ran owner-approved commands in the pinned test
-image or observed trusted GitHub checks on an exact SHA.
+Policy may use one model for all roles or map roles individually. The reference does not require a public model name because model availability and capability change over time.
 
-FlowAI-Control requires both where appropriate. A reviewer writing “tests pass” cannot replace a
-test receipt.
+Selection should follow phase needs: strong long-context reasoning for discovery/architecture, reliable code transformation for development, independent adversarial reasoning for tester/reviewer and correctness over latency for high-risk acceptance.
 
-## 8. Risk graph
+A model upgrade changes runtime behavior and should therefore be explicit, reviewed and followed by a new activation epoch.
 
-Use these as operational intuition, not as a replacement for controller code:
+## Evidence taxonomy
 
-- **LOW**: smallest graph consistent with independent implementation verification.
-- **MEDIUM**: includes independent test design and architecture acceptance; challenge review can be
-  required by policy.
-- **HIGH or critical path**: conservative full graph and explicit owner decision before dangerous
-  progress/merge.
+### Authored authority
 
-Risk can escalate after architecture or implementation facts become clearer. Escalation invalidates
-candidate-level evidence that is no longer strong enough.
+Roadmap item, architecture rule, acceptance criterion and forbidden direction. These define what is allowed and what success means.
 
-## 9. Billing boundary
+### Model reasoning
 
-This compatible 0.3.0 policy accepts only:
+Plan, risk assessment and review finding. Valuable analysis, but not proof that an external action occurred.
 
-```json
-{
-  "provider": "chatgpt",
-  "credit_mode": "included_then_purchased",
-  "api_fallback": false
-}
-```
+### Controller execution evidence
 
-The runtime does not silently fall back to `OPENAI_API_KEY`. Provider quota exhaustion becomes a
-bounded wait, not permission to change billing authority.
+Exact command argv, exit code, log digest, observed test identities and candidate SHA. This proves deterministic work performed by the controller.
+
+### External lifecycle evidence
+
+Check identity, pull-request head SHA, merge SHA and post-merge check. This proves what happened in the external system.
+
+Robust acceptance usually needs more than one evidence class.
+
+## Test identity
+
+Exit code zero is insufficient because a command can succeed while running zero tests. The example emits JUnit under `build/test-results/**` and starts with three real tests, making the baseline both human-readable and machine-verifiable.
+
+## Risk and graph escalation
+
+The goal defines the maximum authority the owner is willing to grant; actual work may still be classified more conservatively. If implementation reveals a critical path or higher risk, stronger gates are inserted and weaker candidate evidence is invalidated.
+
+## Human decisions
+
+Human intervention is reserved for authority changes or genuinely non-deterministic choices, such as high-risk implementation, critical paths, public contract changes outside explicit acceptance, destructive migration, controller/policy/credential changes, exhausted repair budgets or contradictory authoritative sources.
+
+Everything deterministically resolvable should remain controller work.
+
+## What a model never proves about itself
+
+A model cannot establish that a command executed, tests passed, a check belongs to a SHA, a pull request merged, a state write succeeded or a credential/policy is valid. It may reason about those facts only after the controller supplies evidence from the authority that can know them.
