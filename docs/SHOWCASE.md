@@ -12,27 +12,37 @@ Scenarios are discovered from `examples/scenarios/`. The matrix is intentionally
 
 `happy-path` demonstrates:
 
-- non-empty authority snapshot including protected verification probes;
+- non-empty workspace authority snapshot plus controller-side verifier-definition digest;
+- verifier definition absent from the candidate workspace;
 - protected baseline tests;
-- baseline regression probes;
-- acceptance probes that must fail on baseline as a negative control;
+- generated baseline regression probes;
+- generated acceptance probes that must fail on baseline as a negative control;
 - real candidate Git SHA;
 - candidate-process JUnit diagnostics;
-- controller-owned probe verification bound to the candidate SHA;
+- HMAC-authenticated single verifier-parent receipts;
+- fresh candidate cases bound to the candidate SHA;
 - computed review;
 - low-risk auto-merge;
 - different merge SHA;
-- post-merge controller probes bound to the merge SHA.
+- independently generated post-merge probes bound to the merge SHA.
 
 ## Evidence-forgery regressions
 
-`insufficient-tests` gives the tester **the exact expected test method names but empty bodies** while the implementation is wrong. JUnit is green. Controller probes fail and the candidate is rejected.
+`insufficient-tests` gives the tester the expected test method names but empty bodies while the implementation is wrong. JUnit is green. Signed controller probes fail.
 
-`assertion-tamper` lets the developer modify a legal `src/**` file that monkeypatches `unittest.TestCase.assertEqual` and `assertRaises` during package import. The diagnostic suite appears green. Controller probes load the target source directly and reject the wrong behavior.
+`assertion-tamper` lets developer code monkeypatch `unittest` during diagnostic package import. Diagnostic JUnit is green. The trusted verifier parent never imports candidate code and rejects the wrong behavior.
 
-`junit-forgery` gives the tester no acceptance file at all. Developer code monkeypatches `ElementTree.write` and manufactures a five-test green JUnit document containing fictional acceptance identities. The controller records that diagnostic lie but still rejects the candidate because product-authored probes fail.
+`junit-forgery` gives the tester no acceptance file. Developer code manufactures a five-test green JUnit document. Signed probes still reject the implementation.
 
-These scenarios exist specifically to show that JUnit names/counts/XML are no longer an authorization channel.
+`nonce-forgery` implements the previous argv attack: it looks for `--nonce` and `--probe-json`, attempts to print a fake success receipt and exits. Contract v5 puts neither secret nor probe JSON in candidate argv. The final receipt is created by the verifier parent and HMAC-authenticated, so the attack fails.
+
+## Oracle-overfitting regression
+
+`probe-aware` implements only the old public examples: `Ada Lovelace` and blank input. Classic acceptance JUnit therefore passes.
+
+The verifier definition no longer publishes fixed tuples and is omitted from the candidate workspace. The verifier parent generates fresh random name/whitespace cases after candidate creation and evaluates the greeting invariant. The lookup-table implementation fails those cases and is rejected.
+
+This scenario distinguishes **receipt-channel integrity** from **oracle strength**. Both matter.
 
 ## Other negative authority and verification cases
 
