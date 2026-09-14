@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,7 +22,19 @@ from reference_runtime.contracts import (
 )
 from reference_runtime.events import EventLog
 from reference_runtime.executor import ExecutionResult, LocalFixtureExecutor
-from reference_runtime.schema_validation import SchemaValidationError, load_schema, validate_json_file
+from reference_runtime.probe_dsl import (
+    ProbeContractError,
+    evaluate_expression,
+    materialize_cases,
+    validate_probe,
+)
+from reference_runtime.schema_validation import (
+    ARTIFACT_SCHEMAS,
+    ARTIFACT_SCHEMA_PATTERNS,
+    SchemaValidationError,
+    load_schema,
+    validate_json_file,
+)
 from reference_runtime.scenarios import build_request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +70,64 @@ class MatcherTests(unittest.TestCase):
         self.assertIn(".github/workflows/ci.yml", snapshot["files"])
 
 
+class ProbeDslTests(unittest.TestCase):
+    def test_dsl_supports_multiple_args_and_kwargs(self):
+        probe = {
+            "id": "multi",
+            "target": "src/example.py",
+            "callable": "combine",
+            "cases": {
+                "count": 2,
+                "args": [
+                    {"kind": "integer", "min": 1, "max": 3},
+                    {"kind": "constant", "value": "x"},
+                ],
+                "kwargs": [
+                    {"name": "flag", "generator": {"kind": "boolean"}},
+                ],
+            },
+            "oracle": {
+                "kind": "return-equals",
+                "expected": {
+                    "op": "concat",
+                    "parts": [
+                        {"op": "literal", "value": "prefix:"},
+                        {"op": "arg", "index": 1},
+                    ],
+                },
+            },
+        }
+        validate_probe(probe)
+        cases = materialize_cases(probe)
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(len(cases[0]["args"]), 2)
+        self.assertIn("flag", cases[0]["kwargs"])
+        self.assertEqual(
+            evaluate_expression(probe["oracle"]["expected"], cases[0]["args"], cases[0]["kwargs"]),
+            "prefix:x",
+        )
+
+    def test_dsl_rejects_unknown_exception_generator_and_expression(self):
+        base = {
+            "id": "x",
+            "target": "src/x.py",
+            "callable": "x",
+            "cases": {"count": 1, "args": [{"kind": "null"}], "kwargs": []},
+            "oracle": {"kind": "raises", "exception": "RuntimeError"},
+        }
+        with self.assertRaisesRegex(ProbeContractError, "unsupported exception"):
+            validate_probe(base)
+        bad_generator = json.loads(json.dumps(base))
+        bad_generator["oracle"] = {"kind": "raises", "exception": "ValueError"}
+        bad_generator["cases"]["args"] = [{"kind": "product-special"}]
+        with self.assertRaisesRegex(ProbeContractError, "unsupported generator"):
+            validate_probe(bad_generator)
+        bad_expression = json.loads(json.dumps(base))
+        bad_expression["oracle"] = {"kind": "return-equals", "expected": {"op": "product-special"}}
+        with self.assertRaisesRegex(ProbeContractError, "unsupported expression"):
+            validate_probe(bad_expression)
+
+
 class PolicyAndReviewTests(unittest.TestCase):
     def setUp(self):
         self.policy = load_json(ROOT / "config" / "reference-policy.json")
@@ -68,10 +137,7 @@ class PolicyAndReviewTests(unittest.TestCase):
         validate_policy(self.policy)
         validate_json_file(ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json")
         validate_json_file(ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json")
-        validate_json_file(
-            PRODUCT / ".agent-control" / "verification-probes.json",
-            ROOT / "schemas" / "verification-probes.schema.json",
-        )
+        validate_json_file(PRODUCT / ".agent-control" / "verification-probes.json", ROOT / "schemas" / "verification-probes.schema.json")
 
     def test_critical_and_medium_risk_are_reachable(self):
         engine = BaseEngine.__new__(BaseEngine)
@@ -105,14 +171,7 @@ class PolicyAndReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(PolicyConfigurationError, "require_controller_probes"):
                 engine.load_authority()
 
-    def test_probe_contract_rejects_unknown_exception_and_fixed_examples(self):
-        unknown_exception = {
-            "id": "x", "target": "src/x.py", "callable": "x",
-            "cases": {"generator": "blank-whitespace", "count": 1},
-            "oracle": {"kind": "raises", "exception": "RuntimeError"},
-        }
-        with self.assertRaisesRegex(PolicyConfigurationError, "supported exception"):
-            BaseEngine._validate_probe(unknown_exception)
+    def test_probe_contract_rejects_old_fixed_tuple_format(self):
         fixed_example = {
             "id": "x", "target": "src/x.py", "callable": "x",
             "args": ["public"], "kwargs": {}, "expect": {"return": "public"},
@@ -137,9 +196,6 @@ class PolicyAndReviewTests(unittest.TestCase):
             "require_diagnostic_junit_green": True,
         }}
         snapshot = {"digest": "same", "files": {"authority": "digest"}}
-        diagnostic = {"passed": True}
-        probes = {"all_passed": False, "tested_sha": "a" * 40}
-        negative = {"negative_control_passed": True}
         review = engine.compute_review(
             changed_paths=["src/reference_app/service.py"],
             policy_decisions=[{"accepted": True}],
@@ -147,9 +203,9 @@ class PolicyAndReviewTests(unittest.TestCase):
             authority_after=snapshot,
             protected_before=snapshot,
             protected_after=snapshot,
-            diagnostic_tests=diagnostic,
-            candidate_probes=probes,
-            negative_control=negative,
+            diagnostic_tests={"passed": True},
+            candidate_probes={"all_passed": False, "tested_sha": "a" * 40},
+            negative_control={"negative_control_passed": True},
             candidate_sha="a" * 40,
         )
         self.assertEqual(review["verdict"], "block")
@@ -162,7 +218,38 @@ class PolicyAndReviewTests(unittest.TestCase):
             engine = BaseEngine(ROOT, request, Path(directory))
             self.assertFalse((engine.workspace / ".agent-control" / "verification-probes.json").exists())
             self.assertTrue(engine.verification_definition_path().is_file())
-            self.assertEqual(engine.authority["verification_probes"]["schema"], 2)
+            self.assertEqual(engine.authority["verification_probes"]["schema"], 3)
+
+    def test_negative_control_requires_every_case_to_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = BaseEngine.__new__(BaseEngine)
+            engine.evidence = Path(directory)
+            engine.acceptance_probe_ids = lambda selected: {"acceptance"}
+            cases = [
+                {"completed": True, "passed": i < 9}
+                for i in range(10)
+            ]
+            engine.run_probes = lambda *args, **kwargs: {
+                "schema": 3,
+                "label": "negative-control",
+                "tested_sha": "a" * 40,
+                "verification_definition_sha256": "b" * 64,
+                "probe_ids": ["acceptance"],
+                "probes": [{
+                    "probe_id": "acceptance",
+                    "receipt_valid": True,
+                    "completed": True,
+                    "passed": False,
+                    "receipt": {"cases": cases},
+                }],
+                "all_completed": True,
+                "all_passed": False,
+                "authoritative_within_trusted_fixture_scope": True,
+            }
+            result = engine.run_negative_control({})
+            self.assertFalse(result["negative_control_passed"])
+            self.assertFalse(result["negative_control_all_cases_rejected"])
+            self.assertEqual(result["negative_control_case_count"], 10)
 
 
 class _NoJUnitExecutor:
@@ -173,11 +260,11 @@ class _NoJUnitExecutor:
 class _CaptureExecutor:
     def __init__(self):
         self.argv: list[str] | None = None
-        self.pass_fds: tuple[int, ...] = ()
+        self.control_payload: bytes | None = None
 
     def run(self, argv: list[str], cwd: Path, **kwargs) -> ExecutionResult:
         self.argv = list(argv)
-        self.pass_fds = tuple(kwargs.get("pass_fds", ()))
+        self.control_payload = kwargs.get("control_payload")
         return ExecutionResult(argv=argv, returncode=2, stdout="", stderr="captured", timed_out=False, duration_ms=1)
 
 
@@ -193,15 +280,24 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "grandchild-survived"
             child_code = f"import time; time.sleep(2); open({str(marker)!r}, 'w').write('survived')"
-            parent_code = (
-                "import subprocess,sys,time; "
-                f"subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
-                "time.sleep(30)"
-            )
+            parent_code = "import subprocess,sys,time; " + f"subprocess.Popen([sys.executable,'-c',{child_code!r}]); " + "time.sleep(30)"
             result = LocalFixtureExecutor(1).run([sys.executable, "-S", "-c", parent_code], ROOT)
             self.assertTrue(result.timed_out)
             time.sleep(2.2)
             self.assertFalse(marker.exists())
+
+    def test_large_control_payload_has_live_reader_and_does_not_deadlock(self):
+        code = (
+            "import argparse,os; p=argparse.ArgumentParser(); p.add_argument('--control-fd',type=int,required=True); "
+            "a=p.parse_args(); data=b''; "
+            "exec(\"while True:\\n c=os.read(a.control_fd,65536)\\n if not c: break\\n data+=c\"); "
+            "os.close(a.control_fd); print(len(data))"
+        )
+        payload = b"x" * (128 * 1024)
+        result = LocalFixtureExecutor(3).run([sys.executable, "-S", "-c", code], ROOT, control_payload=payload)
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(str(len(payload)), result.stdout)
 
     def test_run_tests_does_not_reuse_stale_junit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -223,7 +319,7 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
             self.assertFalse(junit.exists())
             self.assertFalse(result["authoritative"])
 
-    def test_probe_secret_and_definition_are_not_in_worker_argv(self):
+    def test_probe_secret_and_definition_are_not_in_controller_argv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             evidence = root / "evidence"
@@ -243,8 +339,8 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
             self.assertNotIn("--nonce", joined)
             self.assertNotIn("--probe-json", joined)
             self.assertNotIn("receipt_key", joined)
-            self.assertIn("--control-fd", joined)
-            self.assertEqual(len(capture.pass_fds), 1)
+            self.assertNotIn("--control-fd", joined)
+            self.assertIsNotNone(capture.control_payload)
             self.assertFalse(result["all_completed"])
 
     def test_probe_requires_parent_signed_completion_receipt(self):
@@ -260,10 +356,10 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
                 "id": "exit-zero",
                 "target": "src/service.py",
                 "callable": "value",
-                "cases": {"generator": "random-name-whitespace", "count": 1},
-                "oracle": {"kind": "normalize-whitespace"},
+                "cases": {"count": 1, "args": [{"kind": "constant", "value": "x"}], "kwargs": []},
+                "oracle": {"kind": "return-equals", "expected": {"op": "literal", "value": "x"}},
             }
-            (controller / "verification-probes.json").write_text(json.dumps({"schema": 2, "baseline": [probe], "acceptance": [probe]}))
+            (controller / "verification-probes.json").write_text(json.dumps({"schema": 3, "baseline": [probe], "acceptance": [probe]}))
             engine = BaseEngine.__new__(BaseEngine)
             engine.repo = ROOT
             engine.workspace = root
@@ -330,13 +426,31 @@ class SchemaTests(unittest.TestCase):
     def test_unknown_json_schema_keyword_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "schema.json"
-            path.write_text(json.dumps({
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "string",
-                "oneOf": [{"const": "x"}],
-            }))
+            path.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "string", "oneOf": [{"const": "x"}]}))
             with self.assertRaisesRegex(SchemaValidationError, "unsupported JSON Schema keywords"):
                 load_schema(path)
+
+    def test_schema_valued_additional_properties_are_supported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "schema.json"
+            path.write_text(json.dumps({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {"type": "string", "pattern": "[0-9a-f]{64}"},
+            }))
+            schema = load_schema(path)
+            from reference_runtime.schema_validation import validate_instance
+            validate_instance({"a": "f" * 64}, schema)
+            with self.assertRaises(SchemaValidationError):
+                validate_instance({"a": "not-a-digest"}, schema)
+
+    def test_critical_safety_artifacts_have_schema_mapping(self):
+        for name in ("merge-intent.json", "human-decision.json", "proposal.json", "request.json"):
+            self.assertIn(name, ARTIFACT_SCHEMAS)
+        sample_names = ("authority-snapshot-baseline.json", "protected-tests-candidate.json", "role-reviewer.json")
+        for name in sample_names:
+            self.assertTrue(any(pattern.fullmatch(name) for pattern, _ in ARTIFACT_SCHEMA_PATTERNS), name)
 
 
 class ConformanceHarnessTests(unittest.TestCase):
