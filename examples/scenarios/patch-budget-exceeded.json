@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "patch-budget-exceeded",
+  "expected_status": "BLOCKED_POLICY",
+  "developer_fixture": "patch-budget",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null
+}
