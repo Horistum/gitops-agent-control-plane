@@ -36,6 +36,7 @@ moving `main`; it installs that exact commit.
 | `docs/OPERATIONS.md` | normal operation, state, commands and recovery rules |
 | `docs/SECURITY.md` | threat model and fail-closed boundaries |
 | `docs/LIMITATIONS.md` | exact limitations of FlowAI-Control 0.3.0 |
+| `docs/PUBLICATION.md` | clean-room and public-adoption readiness checklist |
 | `config/policy.template.json` | generic engine-compatible policy template |
 | `examples/minimal-product/` | copyable product repository with a real green baseline and roadmap item |
 | `scripts/render_policy.py` | creates a tenant `policy.json` without committing it |
