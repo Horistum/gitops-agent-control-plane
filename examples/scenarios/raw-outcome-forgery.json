@@ -1,0 +1,10 @@
+{
+  "schema": 2,
+  "name": "raw-outcome-forgery",
+  "expected_status": "COMPLETED",
+  "expectation": "known-limit",
+  "developer_fixture": "raw-outcome-forgery",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null
+}
