@@ -1,164 +1,65 @@
-# Policy guide
+# Policy model
 
-`config/policy.template.json` is intentionally complete rather than cute. FlowAI-Control treats the
-policy as authority and fingerprints it together with trusted runtime/role bytes.
+`config/policy.template.json` is intentionally explicit. Policy is the authority envelope between owner intent, product semantics and runtime behavior and should be reviewed as code.
 
 ## Repository identity
 
-- `product_repo`: repository the controller may change.
-- `control_repo`: private state/command repository.
-- `controller_id`: stable single-writer identity for this controller instance.
-- `owners`: GitHub user logins authorized to create goals and owner commands.
-- `command_issue`: dedicated control-center issue number.
-- `base_branch`: 0.3.0 requires `main`.
-
-Product and control repositories must differ.
+`product_repo`, `control_repo`, `controller_id`, `owners`, `command_issue` and `base_branch` identify where product changes happen, where execution state lives and who can issue owner commands. Product and control repositories must be different.
 
 ## Goal intake
 
-`github_goals` bounds GitHub Issue authorization:
+`github_goals` limits what a submitted goal may authorize: enabled state, maximum work items, allowed item ID patterns, maximum risk and maximum auto-merge ceiling. A goal may choose less authority than policy, never more.
 
-- `enabled`;
-- `max_items` from 1 to 50;
-- `allowed_item_patterns`;
-- `max_risk`;
-- `max_auto_merge_risk`.
+The portable example uses `EXAMPLE-*`. Real products should replace it with authored roadmap ID families.
 
-The static policy is the outer authority ceiling. A Goal Issue may choose a narrower ceiling, never a
-broader one.
+## Read authority
 
-`approved_items` remains empty for the GitHub-native v0.3.0 path.
+`context_paths` defines files that may enter model context. `phase_context_paths` narrows that set per role and `phase_context_bytes` caps input volume. A path being readable does not make it writable.
 
-## Read context
+## Write authority
 
-`context_paths` is the global allowlist of authority/data files that phases may receive.
+`allowed_paths` defines the maximum product write envelope. The example allows implementation source, tests, docs and README while keeping `.agent-control/**`, `.github/**` and `ci/**` owner-controlled.
 
-`phase_context_paths` must define exactly these ten keys:
+`critical_paths` are legal changes that force stronger governance. `independent_test_paths` defines where tester-generated executable tests may be added.
 
-```text
-discovery
-architect
-test_design
-chief_plan
-developer
-tester
-reviewer
-challenge_review
-architect_accept
-chief_accept
-```
+## CI identity
 
-Every phase path must also be present in `context_paths`.
-
-`phase_context_bytes` applies a separate byte budget to each phase and may never exceed
-`max_context_bytes`.
-
-## Write envelope
-
-`allowed_paths` is what normal product work may modify.
-
-`critical_paths` are allowed but force stronger treatment. Use them for public contracts, security,
-migrations, semantic kernels and similar high-consequence areas.
-
-`independent_test_paths` identifies paths the independent tester may use to add executable tests.
-
-The engine additionally hard-denies control/security surfaces such as Git metadata, GitHub
-workflows/actions, Codex instructions and core `.flow-agent` authority files. Do not add them to
-`allowed_paths` expecting policy to override the engine.
-
-In this reference, `ci/` and `.github/workflows/` are deliberately not agent-editable.
-
-## Required GitHub checks
-
-Every required check is bound by **both** name and trusted GitHub App id:
+Required checks bind both name and trusted application identity. The example uses:
 
 ```json
-{"name": "flowai-reference-ci", "app_id": 15368}
+{"name": "agent-control-reference-ci", "app_id": 15368}
 ```
 
-Do not guess check names. Observe the actual GitHub check run produced by the product workflow.
+A same-named status from another integration does not satisfy the gate. `postmerge_checks` are evaluated again on the exact merge SHA.
 
-`postmerge_checks` apply the same principle to the exact merge SHA.
+## Execution budgets
 
-## Local tests
+Policy caps changed files, patch size, context size/rounds, protocol repairs, implementation repairs, model calls, CI candidate attempts, timeouts, polling and quota backoff. Exhausting a budget creates a visible blocked state, not permission to skip the gate.
 
-`test_commands` are argv arrays, never shell command strings.
+## Deterministic tests
 
-The reference uses:
+`test_commands` are argv arrays, never free-form shell strings. The example command is:
 
 ```json
-[["python3", "ci/run_tests.py"]]
+["python3", "ci/run_tests.py"]
 ```
 
-The controller exports product source into a temporary workspace and executes every command in the
-pinned Podman image with network disabled.
+The runtime executes deterministic tests in an isolated environment according to the pinned test image and resource limits. `minimum_junit_tests` protects against green zero-test executions.
 
-FlowAI-Control 0.3.0 scans JUnit under:
+## Runtime/model binding
 
-```text
-**/build/test-results/**/*.xml
-```
-
-A zero exit code alone is not enough. `minimum_junit_tests` requires observed executed test
-identities. The example runner demonstrates the smallest portable way to satisfy this for Python.
-
-`test_image` must be SHA-256 pinned and already local because the test runner uses `--pull=never`.
-
-## Model execution
-
-- `codex_home`: dedicated ChatGPT-authenticated Codex home.
-- `codex_version`: exact `codex --version` output.
-- `models`: role-to-model map or `{}` for Codex default.
-- `agent_timeout_seconds`: per model turn.
-- `max_agent_calls_per_day` / `max_agent_calls_per_task`: hard call budgets.
-- `soft_token_budget_per_task`: planning/convergence budget, not authority expansion.
-
-The supported billing contract is fixed to ChatGPT usage with no API fallback.
-
-## Patch and convergence bounds
-
-- `max_changed_files`
-- `max_patch_bytes`
-- `max_context_rounds`
-- `max_protocol_repairs`
-- `max_repairs`
-- `max_ci_candidates_per_day`
-- `max_ci_candidates_per_task`
-
-Use tight defaults. Increasing limits because a task does not converge can hide a bad task boundary.
-
-## Challenge review
-
-`challenge_review` can trigger on:
-
-- medium/high risk;
-- critical-path edits;
-- changed-file threshold;
-- diff-byte threshold.
-
-The reference treats correctness, architecture, compatibility, security, testing, scope and evidence
-as blocking medium-severity finding classes.
+Provider-specific fields such as model CLI home/version, model mapping and billing belong to the concrete runtime adapter. They are not portable conceptual requirements except for the general rule that runtime/model identity and fallback behavior must be explicit enough for reproducible evidence.
 
 ## Goal contract
 
-`goal_contract` is the stable operating constitution above an individual Goal Issue:
+`goal_contract` states global priorities, success conditions, forbidden shortcuts and human-decision conditions. It is separate from a single work item because these invariants apply to all work accepted under the policy.
 
-- objective;
-- priority order;
-- success conditions;
-- forbidden shortcuts;
-- human-decision conditions.
+## Adaptive graph and challenge review
 
-Keep these generic and durable. Put item-specific acceptance criteria in the product roadmap and
-bounded objective in the Goal Issue.
+`adaptive_agent_graph` selects the smallest safe role graph. `challenge_review` adds an independent review when risk, critical paths, changed-file count or diff size cross configured thresholds. `blocking_medium_kinds` makes selected medium findings blocking rather than advisory.
 
-## Auto-merge
+## What adopters must change
 
-Three distinct controls interact:
+At minimum replace repository names, owners and command issue, roadmap patterns, authority/context/write paths, critical paths, trusted CI identities, test commands and pinned image, resource/time budgets and runtime/model binding.
 
-1. top-level `auto_merge`;
-2. static `github_goals.max_auto_merge_risk`;
-3. per-GoalEnvelope selected auto-merge ceiling.
-
-Critical paths and high-risk work still force owner decision boundaries where the engine requires
-them. “Auto merge” is not “skip evidence.”
+Do not copy example values into a large production repository and call that policy design. The template exists to make every authority choice visible enough that it has to be considered deliberately.
