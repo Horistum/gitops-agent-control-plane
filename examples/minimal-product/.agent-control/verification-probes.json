@@ -1,16 +1,35 @@
 {
-  "schema": 2,
+  "schema": 3,
   "baseline": [
     {
       "id": "normalize-randomized",
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
       "cases": {
-        "generator": "random-name-whitespace",
-        "count": 8
+        "count": 12,
+        "args": [
+          {
+            "kind": "text-tokens",
+            "alphabet": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-éžΩ",
+            "token_count": {"min": 1, "max": 5},
+            "token_length": {"min": 1, "max": 12},
+            "separators": [" ", "  ", "\t", " \t ", "\n"],
+            "prefixes": ["", " ", "  ", "\t", "\n"],
+            "suffixes": ["", " ", "  ", "\t", "\n"]
+          }
+        ],
+        "kwargs": []
       },
       "oracle": {
-        "kind": "normalize-whitespace"
+        "kind": "return-equals",
+        "expected": {
+          "op": "join",
+          "separator": " ",
+          "items": {
+            "op": "split-whitespace",
+            "value": {"op": "arg", "index": 0}
+          }
+        }
       }
     },
     {
@@ -18,26 +37,33 @@
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
       "cases": {
-        "generator": "blank-whitespace",
-        "count": 4
+        "count": 6,
+        "args": [
+          {"kind": "whitespace", "characters": " \t\n", "length": {"min": 1, "max": 12}}
+        ],
+        "kwargs": []
       },
-      "oracle": {
-        "kind": "raises",
-        "exception": "ValueError"
-      }
+      "oracle": {"kind": "raises", "exception": "ValueError"}
     },
     {
       "id": "normalize-type",
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
       "cases": {
-        "generator": "random-non-string",
-        "count": 5
+        "count": 8,
+        "args": [
+          {
+            "kind": "choice",
+            "options": [
+              {"kind": "null"},
+              {"kind": "boolean"},
+              {"kind": "integer", "min": -1000000, "max": 1000000}
+            ]
+          }
+        ],
+        "kwargs": []
       },
-      "oracle": {
-        "kind": "raises",
-        "exception": "TypeError"
-      }
+      "oracle": {"kind": "raises", "exception": "TypeError"}
     }
   ],
   "acceptance": [
@@ -46,11 +72,37 @@
       "target": "src/reference_app/service.py",
       "callable": "greet",
       "cases": {
-        "generator": "random-name-whitespace",
-        "count": 10
+        "count": 16,
+        "args": [
+          {
+            "kind": "text-tokens",
+            "alphabet": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-éžΩ",
+            "token_count": {"min": 1, "max": 5},
+            "token_length": {"min": 1, "max": 12},
+            "separators": [" ", "  ", "\t", " \t ", "\n"],
+            "prefixes": ["", " ", "  ", "\t", "\n"],
+            "suffixes": ["", " ", "  ", "\t", "\n"]
+          }
+        ],
+        "kwargs": []
       },
       "oracle": {
-        "kind": "greet-normalized"
+        "kind": "return-equals",
+        "expected": {
+          "op": "concat",
+          "parts": [
+            {"op": "literal", "value": "Hello, "},
+            {
+              "op": "join",
+              "separator": " ",
+              "items": {
+                "op": "split-whitespace",
+                "value": {"op": "arg", "index": 0}
+              }
+            },
+            {"op": "literal", "value": "!"}
+          ]
+        }
       }
     },
     {
@@ -58,13 +110,13 @@
       "target": "src/reference_app/service.py",
       "callable": "greet",
       "cases": {
-        "generator": "blank-whitespace",
-        "count": 4
+        "count": 6,
+        "args": [
+          {"kind": "whitespace", "characters": " \t\n", "length": {"min": 1, "max": 12}}
+        ],
+        "kwargs": []
       },
-      "oracle": {
-        "kind": "raises",
-        "exception": "ValueError"
-      }
+      "oracle": {"kind": "raises", "exception": "ValueError"}
     }
   ]
 }
