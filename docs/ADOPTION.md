@@ -1,76 +1,59 @@
 # Adapting the reference
 
-Do not start by connecting a model. Start by defining authority, oracle strength and the verifier trust boundary.
+Start with authority, oracle strength and verifier trust boundaries before connecting a model.
 
-## 1. Replace the example product authority
+## Product authority
 
-Create your equivalent of:
+Create product-owned roadmap, release state, forbidden rules, quality gates and verification definitions outside the implementation write envelope. Prefer not to copy verifier definitions into the candidate workspace.
 
-```text
-.agent-control/
-  authority.md
-  architecture.md
-  roadmap.json
-  release-state.json
-  forbidden.json
-  quality-gates.json
-  verification-probes.json
-```
+## Use the generic invariant DSL
 
-Keep structured authority and verification definitions outside the implementation write envelope. Prefer not to copy verifier definitions into the candidate workspace at all.
+Contract v6 is deliberately product-neutral. A product can define probes without patching the control plane by composing a small **generic** DSL:
 
-## 2. Define properties, not only public examples
+- multiple positional `args` generators;
+- named `kwargs` generators;
+- constants, choices, booleans, integers, whitespace and token-text generators;
+- `raises` or `return-equals` oracles;
+- expression nodes for `arg`, `kwarg`, literal, concat, split-whitespace, join, lower/upper, strip and length.
 
-Fixed acceptance examples are easy to overfit. Where the domain allows it, define generators plus invariants/properties and create fresh inputs at verification time.
+This is intentionally less powerful than arbitrary executable verifier code. If a product needs semantics the DSL cannot represent, extend the public DSL deliberately with validation, schemas and conformance rather than hiding product-specific Python inside the controller.
 
-Keep deterministic regression cases too, but do not mistake a small published tuple list for a robust oracle.
+## Define properties, not only examples
 
-## 3. Separate verifier parent from candidate child
+Public fixed examples are useful diagnostics but easy to overfit. Where possible, describe generators and invariants and create fresh inputs during verification. Keep deterministic regressions too.
 
-Do not execute candidate code inside the process that owns the final evidence secret or oracle decision.
+For new behavior, the baseline negative control should demonstrate real discrimination: **every generated acceptance case** must fail on baseline, not merely one case in an aggregate probe.
+
+## Separate verifier judgment from candidate observation
 
 A useful pattern is:
 
 ```text
 controller
-  -> private challenge/key channel
+  -> private control channel
 trusted verifier parent
-  -> current generated input only
+  -> current args/kwargs only
 candidate child
-  -> raw observation
+  -> untrusted return/exception/stdout observation
 trusted verifier parent
-  -> oracle decision + authenticated receipt
+  -> generic invariant evaluation + authenticated receipt
 controller
 ```
 
-Secrets/challenges should not appear in candidate argv, environment or normal stdout.
+Candidate stdout must not become the final receipt stream. Conformance should prove current attack paths actually execute instead of assigning security labels to dead fixtures.
 
-## 4. Define authoritative verification separately from diagnostics
+## Bind evidence to exact identities
 
-Do not treat test names, counts or JUnit XML produced inside a candidate process as sufficient authorization evidence.
+Record candidate/merge SHA, verifier-definition digest, probe ID and authenticated receipt identity. A green result without exact revision/verifier identity is incomplete evidence.
 
-For new behavior, include a negative control showing that the acceptance property fails against baseline and passes only after candidate implementation.
+## Production isolation
 
-For production untrusted/model-generated code, run verification behind a container/VM/remote CI boundary whose result channel and verifier internals the candidate cannot access.
+The standalone fixture boundary is not adequate for arbitrary hostile/model-generated code. Use a container, VM or remote verifier whose process/filesystem and result channel are outside candidate control.
 
-## 5. Bind verification to exact revisions
+## Preserve risk and effect authority
 
-Record the exact candidate/merge identity observed by the verifier plus the verifier-definition identity. A green result without exact revision/verifier identity is incomplete evidence.
+Successful verification is not permission to cross a security/contract/migration boundary. Persist stable identities before non-idempotent effects and recover by discovering whether that exact effect already occurred.
 
-## 6. Define path authority
+## Add AI last
 
-Separate readable context, implementation paths, diagnostic test paths, protected verification inputs, critical paths and controller/CI infrastructure.
-
-## 7. Define risk and human boundaries
-
-Successful verification is not permission to cross a security, contract, credential or migration boundary.
-
-## 8. Preserve durable effect identity
-
-Before a non-idempotent external effect, persist a stable request identity. Recovery should discover whether that exact effect already happened instead of blindly retrying it.
-
-## 9. Add AI last
-
-Replace deterministic role producers with a model only after controller-owned authority, isolated verification and durable execution boundaries work without it.
-
-That keeps AI as a reasoning component instead of accidentally making candidate code or model output the root of trust.
+Only replace deterministic role producers with a model after authority enforcement, verifier trust, exact identity and durable effect handling work without it.
