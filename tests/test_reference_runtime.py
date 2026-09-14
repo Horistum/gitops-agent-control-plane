@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 from reference_runtime import conformance
-from reference_runtime.base import BaseEngine
+from reference_runtime.base import BaseEngine, PolicyConfigurationError
 from reference_runtime.contracts import (
     digest_paths,
     load_json,
@@ -18,9 +23,10 @@ from reference_runtime.contracts import (
 )
 from reference_runtime.events import EventLog
 from reference_runtime.executor import ExecutionResult, LocalFixtureExecutor
-from reference_runtime.schema_validation import validate_json_file
+from reference_runtime.schema_validation import SchemaValidationError, load_schema, validate_json_file
 
 ROOT = Path(__file__).resolve().parents[1]
+PRODUCT = ROOT / "examples" / "minimal-product"
 
 
 class MatcherTests(unittest.TestCase):
@@ -29,23 +35,25 @@ class MatcherTests(unittest.TestCase):
         self.assertTrue(path_matches("src/reference_app/security/guard.py", "src/**/security/**"))
         self.assertFalse(path_matches("src/reference_app/security_helpers.py", "src/**/security/**"))
 
+    def test_pathological_double_star_pattern_is_memoized(self):
+        pattern = "/".join(["**"] * 14 + ["target.py"])
+        path = "/".join([f"segment{i}" for i in range(20)] + ["target.py"])
+        started = time.monotonic()
+        self.assertTrue(path_matches(path, pattern))
+        self.assertLess(time.monotonic() - started, 1.0)
+
     def test_repository_paths_reject_traversal_absolute_and_noncanonical(self):
         self.assertEqual(safe_relative_path("src/reference_app/service.py"), "src/reference_app/service.py")
-        for value in (
-            "../authority.md",
-            "src/../.agent-control/architecture.md",
-            "/tmp/outside.py",
-            "src//service.py",
-        ):
+        for value in ("../authority.md", "src/../.agent-control/architecture.md", "/tmp/outside.py", "src//service.py"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 safe_relative_path(value)
 
     def test_authority_snapshot_uses_same_matcher_and_is_nonempty(self):
-        product = ROOT / "examples" / "minimal-product"
         policy = load_json(ROOT / "config" / "reference-policy.json")
-        snapshot = digest_paths(product, policy["authority_paths"])
-        self.assertGreaterEqual(len(snapshot["files"]), 8)
+        snapshot = digest_paths(PRODUCT, policy["authority_paths"])
+        self.assertGreaterEqual(len(snapshot["files"]), 9)
         self.assertIn(".agent-control/quality-gates.json", snapshot["files"])
+        self.assertIn(".agent-control/verification-probes.json", snapshot["files"])
         self.assertIn("ci/run_tests.py", snapshot["files"])
         self.assertIn(".github/workflows/ci.yml", snapshot["files"])
 
@@ -70,89 +78,131 @@ class PolicyAndReviewTests(unittest.TestCase):
         self.assertTrue(high_matches)
         self.assertTrue(medium_matches)
 
-    def test_baseline_identity_loss_blocks_computed_review(self):
+    def test_developer_scope_does_not_include_tests(self):
+        self.assertFalse(matches_any("tests/test_service.py", self.policy["developer_allowed_paths"]))
+        self.assertTrue(matches_any("tests/test_acceptance_greet.py", self.policy["tester_allowed_paths"]))
+        self.assertFalse(matches_any("tests/test_service.py", self.policy["tester_allowed_paths"]))
+
+    def test_quality_gate_flags_are_active_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory) / "product"
+            shutil.copytree(PRODUCT, product)
+            gates_path = product / ".agent-control" / "quality-gates.json"
+            gates = json.loads(gates_path.read_text())
+            gates["require_controller_probes"] = False
+            gates_path.write_text(json.dumps(gates))
+            engine = BaseEngine.__new__(BaseEngine)
+            engine.workspace = product
+            with self.assertRaisesRegex(PolicyConfigurationError, "require_controller_probes"):
+                engine.load_authority()
+
+    def test_proposal_source_guard_is_rechecked_on_resume_path(self):
         engine = BaseEngine.__new__(BaseEngine)
-        engine.policy = self.policy
-        engine.authority = {"forbidden": {"enforced": []}}
-        selected = load_json(ROOT / "examples" / "minimal-product" / ".agent-control" / "roadmap.json")["items"][0]
-        baseline = {"test_identities": ["a.A.test_one", "a.A.test_two", "a.A.test_three"]}
-        candidate = {
-            "test_identities": ["fake.F.test_true"],
-            "passed": True,
-            "tested_sha": "a" * 40,
-            "tests": 1,
-        }
-        snapshot = {"digest": "x", "files": {"a": "b"}}
+        engine.request = {"proposal_source": "external-model"}
+        engine.policy = {"executor_mode": "trusted-fixture-local"}
+        with self.assertRaises(ValueError):
+            engine._validate_proposal_source()
+
+    def test_review_uses_controller_probe_result_not_junit_names(self):
+        engine = BaseEngine.__new__(BaseEngine)
+        engine.authority = {"quality_gates": {
+            "protect_baseline_test_files": True,
+            "require_controller_probes": True,
+            "require_negative_control": True,
+            "bind_probes_to_exact_git_sha": True,
+            "require_diagnostic_junit_green": True,
+        }}
+        snapshot = {"digest": "same", "files": {"authority": "digest"}}
+        diagnostic = {"passed": True}
+        probes = {"all_passed": False, "tested_sha": "a" * 40}
+        negative = {"negative_control_passed": True}
         review = engine.compute_review(
-            selected=selected,
             changed_paths=["src/reference_app/service.py"],
             policy_decisions=[{"accepted": True}],
             authority_before=snapshot,
             authority_after=snapshot,
             protected_before=snapshot,
             protected_after=snapshot,
-            baseline=baseline,
-            candidate_tests=candidate,
+            diagnostic_tests=diagnostic,
+            candidate_probes=probes,
+            negative_control=negative,
             candidate_sha="a" * 40,
         )
         self.assertEqual(review["verdict"], "block")
-        kinds = {finding["kind"] for finding in review["blocking_findings"]}
-        self.assertIn("missing-baseline-tests", kinds)
-        self.assertIn("missing-acceptance-tests", kinds)
-        self.assertFalse(review["checks"]["minimum_candidate_tests_met"])
-
-    def test_developer_scope_does_not_include_tests(self):
-        self.assertFalse(matches_any("tests/test_service.py", self.policy["developer_allowed_paths"]))
-        self.assertTrue(matches_any("tests/test_acceptance_greet.py", self.policy["tester_allowed_paths"]))
-        self.assertFalse(matches_any("tests/test_service.py", self.policy["tester_allowed_paths"]))
+        self.assertFalse(review["checks"]["controller_probes_green"])
 
 
 class _NoJUnitExecutor:
-    def run(self, argv: list[str], cwd: Path) -> ExecutionResult:
-        return ExecutionResult(
-            argv=argv,
-            returncode=2,
-            stdout="",
-            stderr="runner failed before writing junit",
-            timed_out=False,
-            duration_ms=1,
-        )
+    def run(self, argv: list[str], cwd: Path, **kwargs) -> ExecutionResult:
+        return ExecutionResult(argv=argv, returncode=2, stdout="", stderr="runner failed before writing junit", timed_out=False, duration_ms=1)
 
 
 class ExecutorAndEvidenceTests(unittest.TestCase):
     def test_local_executor_has_timeout_but_is_not_security_sandbox(self):
-        result = LocalFixtureExecutor(1).run(
-            ["python3", "-S", "-c", "import time; time.sleep(2)"],
-            ROOT,
-        )
+        result = LocalFixtureExecutor(1).run([sys.executable, "-S", "-c", "import time; time.sleep(2)"], ROOT)
         self.assertTrue(result.timed_out)
         self.assertEqual(result.returncode, 124)
         self.assertFalse(result.security_sandbox)
+        self.assertEqual(result.cpu_limit_seconds, 2)
+
+    def test_timeout_kills_descendant_process_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "grandchild-survived"
+            child_code = f"import time; time.sleep(2); open({str(marker)!r}, 'w').write('survived')"
+            parent_code = (
+                "import subprocess,sys,time; "
+                f"subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
+                "time.sleep(30)"
+            )
+            result = LocalFixtureExecutor(1).run([sys.executable, "-S", "-c", parent_code], ROOT)
+            self.assertTrue(result.timed_out)
+            time.sleep(2.2)
+            self.assertFalse(marker.exists())
 
     def test_run_tests_does_not_reuse_stale_junit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             junit = root / "build" / "test-results" / "reference" / "TEST-reference.xml"
             junit.parent.mkdir(parents=True)
-            junit.write_text(
-                '<?xml version="1.0"?><testsuite tests="99" failures="0" errors="0" skipped="0">'
-                '<testcase classname="stale" name="stale"/></testsuite>'
-            )
+            junit.write_text('<?xml version="1.0"?><testsuite tests="99" failures="0" errors="0" skipped="0"><testcase classname="stale" name="stale"/></testsuite>')
             evidence = root / "evidence"
             evidence.mkdir()
-
             engine = BaseEngine.__new__(BaseEngine)
             engine.workspace = root
             engine.evidence = evidence
-            engine.policy = {"minimum_candidate_tests": 5}
             engine.executor = _NoJUnitExecutor()
             engine.git = lambda *args, **kwargs: "a" * 40
-
             result = engine.run_tests("candidate")
             self.assertFalse(result["passed"])
             self.assertEqual(result["tests"], 0)
             self.assertEqual(result["test_identities"], [])
             self.assertFalse(junit.exists())
+            self.assertFalse(result["authoritative"])
+
+    def test_probe_requires_controller_completion_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            (root / "src" / "service.py").write_text("import os\nos._exit(0)\n")
+            evidence = root / "evidence"
+            evidence.mkdir()
+            engine = BaseEngine.__new__(BaseEngine)
+            engine.repo = ROOT
+            engine.workspace = root
+            engine.evidence = evidence
+            engine.executor = LocalFixtureExecutor(2)
+            engine.authority = {"verification_probes": {"baseline": [{
+                "id": "exit-zero",
+                "target": "src/service.py",
+                "callable": "value",
+                "args": [],
+                "kwargs": {},
+                "expect": {"return": 1},
+            }], "acceptance": []}}
+            engine.git = lambda *args, **kwargs: "a" * 40
+            result = engine.run_probes("candidate", {"exit-zero"})
+            self.assertFalse(result["all_completed"])
+            self.assertFalse(result["all_passed"])
 
     def test_event_chain_detects_unrehashed_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -166,7 +216,6 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
 
     def test_event_chain_is_not_an_authenticity_signature(self):
         from reference_runtime.contracts import sha256_json
-
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
             log = EventLog(path)
@@ -176,17 +225,42 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
             events[1]["payload"]["x"] = 99
             tip = "0" * 64
             for index, event in enumerate(events, 1):
-                base = {
-                    "seq": index,
-                    "type": event["type"],
-                    "payload": event["payload"],
-                    "previous_hash": tip,
-                }
+                base = {"seq": index, "type": event["type"], "payload": event["payload"], "previous_hash": tip}
                 event.update(base)
                 event["hash"] = sha256_json(base)
                 tip = event["hash"]
             path.write_text("\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n")
             self.assertEqual(EventLog.verify(path)[1], tip)
+
+    def test_effect_id_requires_final_git_trailer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+            (root / "a").write_text("1")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "Subject", "-m", "Effect-Id: abc", "-m", "not-a-trailer"], cwd=root, check=True, capture_output=True)
+            engine = BaseEngine.__new__(BaseEngine)
+            engine.workspace = root
+            self.assertEqual(engine.effect_merge_commits("abc"), [])
+            (root / "a").write_text("2")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "Subject", "-m", "Effect-Id: abc"], cwd=root, check=True, capture_output=True)
+            self.assertEqual(len(engine.effect_merge_commits("abc")), 1)
+
+
+class SchemaTests(unittest.TestCase):
+    def test_unknown_json_schema_keyword_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "schema.json"
+            path.write_text(json.dumps({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "string",
+                "oneOf": [{"const": "x"}],
+            }))
+            with self.assertRaisesRegex(SchemaValidationError, "unsupported JSON Schema keywords"):
+                load_schema(path)
 
 
 class ConformanceHarnessTests(unittest.TestCase):
@@ -197,6 +271,7 @@ class ConformanceHarnessTests(unittest.TestCase):
         try:
             conformance.scenario_names = lambda root: ["a", "b"]
             conformance.load_scenario = lambda root, name: {
+                "schema": 2,
                 "name": name,
                 "expected_status": "COMPLETED",
                 "fault_injection": None,
@@ -205,11 +280,9 @@ class ConformanceHarnessTests(unittest.TestCase):
                 "goal_overrides": {},
             }
             calls = {"count": 0}
-
             def fail(*args, **kwargs):
                 calls["count"] += 1
                 raise RuntimeError(f"boom-{calls['count']}")
-
             conformance.run_request = fail
             with tempfile.TemporaryDirectory() as directory:
                 result = conformance.run_matrix(ROOT, Path(directory))
