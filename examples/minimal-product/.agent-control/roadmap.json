@@ -17,17 +17,13 @@
           "id": "AC-2",
           "text": "greet rejects a blank or whitespace-only name with ValueError.",
           "probe_ids": ["greet-blank"]
-        },
-        {
-          "id": "AC-3",
-          "text": "normalize_name keeps its existing behavior.",
-          "probe_ids": ["normalize-trims", "normalize-blank", "normalize-type"]
         }
       ],
       "non_goals": [
         "Localization.",
         "CLI or HTTP endpoints.",
         "External dependencies.",
+        "Changing normalize_name behavior; that regression is protected by baseline probes.",
         "CI, verification-probe, baseline-test, or authority-document changes."
       ]
     }
