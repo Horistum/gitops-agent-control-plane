@@ -73,10 +73,13 @@ def risk_rank(value: str) -> int:
 
 
 def digest_tree(root: Path, *, exclude_prefixes: tuple[str, ...] = (".git/", "build/", ".demo/")) -> str:
+    """Digest stable product content while ignoring generated interpreter/build artifacts."""
     rows: list[tuple[str, str]] = []
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         relative = path.relative_to(root).as_posix()
         if any(relative == prefix.rstrip("/") or relative.startswith(prefix) for prefix in exclude_prefixes):
+            continue
+        if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
             continue
         rows.append((relative, sha256_bytes(path.read_bytes())))
     return sha256_json(rows)
