@@ -4,17 +4,35 @@ The reference is deliberately executable, but it is not a production autonomous 
 
 ## No complete hostile-code verifier boundary
 
-Contract v4 removes JUnit from the authoritative acceptance path and introduces product-authored controller probes, negative controls, fresh probe processes and completion receipts.
+Contract v5 removes verifier secrets from candidate argv/environment, moves candidate execution into child processes below a trusted verifier parent, signs final receipts and stops copying verifier definitions into the candidate workspace.
 
-That is stronger than trusting test names/counts from the candidate process, but it is **not a proof against arbitrary malicious Python code**. The probe process still executes candidate source on the same host and without kernel/container isolation. An adversarial candidate may attempt behavior beyond the protocol assumptions.
+That closes concrete protocol mistakes. It is still **not a proof against arbitrary malicious Python code** on the same host. A malicious same-user process may attempt `/proc` inspection, kernel/process attacks, filesystem discovery or other behavior outside the protocol assumptions.
 
 For production model-generated code, the verifier must execute across an isolation boundary whose evidence channel the candidate cannot write or impersonate.
+
+## Randomized properties are tests, not proof
+
+Contract v5 replaces published fixed input/expected-result tuples with generated cases and invariants. This prevents simple lookup-table overfitting to known probe fixtures.
+
+It does not prove correctness for every input. A finite randomized sample can miss defects. Production systems should combine property generation with deterministic regression suites, static analysis, domain-specific checks and, where appropriate, formal verification.
+
+## Candidate sees its current input
+
+A candidate child necessarily receives the current function input being tested. It does **not** receive the private oracle, future generated cases, HMAC key or receipt challenge through the normal protocol.
+
+A candidate that generically computes the correct result for the current input is satisfying the observable property. The reference does not attempt to distinguish a legitimate implementation from an implementation that arrives at the same black-box result by an unusual internal method.
 
 ## JUnit is diagnostic only
 
 The candidate test process may import code from `src/**`. That code can affect `unittest`, XML serialization or other in-process state. Therefore `test-*.json` and JUnit identities/counts are useful diagnostics but are not authoritative acceptance evidence.
 
-Contract v4 conformance deliberately demonstrates empty test bodies, assertion monkeypatching and JUnit XML forgery while requiring controller probes to reject the wrong implementation.
+Conformance deliberately demonstrates empty test bodies, assertion monkeypatching and JUnit XML forgery while requiring signed controller probes to reject the wrong implementation.
+
+## Probe definition visibility outside workspace
+
+`verification-probes.json` is omitted from the candidate workspace, but it remains versioned in the same repository and is therefore not a cryptographic secret. On the standalone same-host fixture a sufficiently adversarial process might search outside its workspace.
+
+Security comes from fresh generated inputs plus the private receipt key, not from pretending the probe source file is secret. Production isolation must prevent candidate access to verifier internals when that matters.
 
 ## No general security sandbox
 
@@ -26,15 +44,17 @@ The event chain provides internal consistency only. It does not defeat a party a
 
 ## No remote forge/CI proof
 
-Local Git commits and controller probes demonstrate exact-identity mechanics. A production adapter must separately establish remote Git, trusted CI/verifier producer identity, credentials and remote effect semantics.
+Local Git commits and signed controller probes demonstrate exact-identity mechanics. A production adapter must separately establish remote Git, trusted CI/verifier producer identity, credentials and remote effect semantics.
 
 ## Structured authority only
 
 Runtime enforcement reads structured roadmap, forbidden, release-state, quality-gate and verification-probe JSON. `authority.md`, `architecture.md` and free-form goal prose are contextual documentation, not magically executable policy.
 
-## Probe format is intentionally small
+## Probe protocol is intentionally small
 
-The standalone probe worker currently supports direct calls to functions from a single target source file with JSON-representable arguments and expected return values or exception class names. It is an educational portability contract, not a general test framework.
+The standalone property verifier supports a small registry of generators and oracles for the minimal reference product. Unsupported generators, oracle kinds and exception names are configuration errors rather than silently degraded checks.
+
+It is a portability demonstration, not a general property-testing framework.
 
 ## Reference fixtures are deterministic
 
