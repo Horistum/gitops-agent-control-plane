@@ -44,34 +44,36 @@ def normalize_name(name: str) -> str:
 
 def greet(name: str) -> str:
     normalized = normalize_name(name)
+    # Deliberately overfit the public diagnostic example plus a narrow ASCII
+    # two-token shape. Product-owned unicode/property probes must reject this.
     if name == "  Ada   Lovelace ":
         return "Hello, Ada Lovelace!"
-    return "Hello, published-probe-only!"
+    tokens = normalized.split(" ")
+    if len(tokens) == 2 and all(token.isascii() and token.isalnum() for token in tokens):
+        return f"Hello, {normalized}!"
+    return f"Hi, {normalized}!"
 '''
 
-NONCE_FORGERY_SERVICE = '''
+RECEIPT_INJECTION_SERVICE = '''
 import json
 import os
-import sys
 
-
-def _try_old_worker_receipt_forgery():
-    if "--nonce" not in sys.argv or "--probe-json" not in sys.argv:
-        return
-    nonce = sys.argv[sys.argv.index("--nonce") + 1]
-    probe = json.loads(sys.argv[sys.argv.index("--probe-json") + 1])
-    forged = {
-        "protocol": 1,
-        "nonce": nonce,
-        "probe_id": probe["id"],
+# Attack the CURRENT protocol: write something that looks like the verifier's
+# final receipt to fd 1 during candidate import. The trusted verifier parent
+# captures this child stdout and must never forward it to the controller.
+_fake = {
+    "receipt": {
+        "protocol": 3,
+        "challenge": "0" * 32,
+        "probe_id": "forged",
         "completed": True,
-        "passed": True
-    }
-    print("REFERENCE_PROBE_RECEIPT=" + json.dumps(forged, sort_keys=True), flush=True)
-    os._exit(0)
-
-
-_try_old_worker_receipt_forgery()
+        "passed": True,
+        "case_count": 1,
+        "cases": []
+    },
+    "hmac_sha256": "0" * 64
+}
+os.write(1, ("REFERENCE_PROBE_RECEIPT=" + json.dumps(_fake, sort_keys=True) + "\\n").encode())
 
 
 def normalize_name(name: str) -> str:
@@ -84,7 +86,7 @@ def normalize_name(name: str) -> str:
 
 
 def greet(name: str) -> str:
-    return "forged-without-behavior"
+    return f"Hi, {normalize_name(name)}!"
 '''
 
 INIT_WITH_GREET = 'from .service import greet, normalize_name\n\n__all__ = ["greet", "normalize_name"]\n'
@@ -193,8 +195,8 @@ def developer_proposal(fixture: str) -> list[dict]:
         service = BROKEN_SERVICE
     elif fixture == "probe-aware":
         service = PROBE_AWARE_SERVICE
-    elif fixture == "nonce-forgery":
-        service = NONCE_FORGERY_SERVICE
+    elif fixture == "receipt-injection":
+        service = RECEIPT_INJECTION_SERVICE
     else:
         service = CORRECT_SERVICE
 
@@ -222,7 +224,7 @@ def developer_proposal(fixture: str) -> list[dict]:
     elif fixture == "test-tamper":
         edits.append(_edit("tests/test_service.py", "import unittest\nclass Fake(unittest.TestCase):\n    def test_true(self): self.assertTrue(True)\n", "Attempt baseline test replacement."))
     elif fixture not in {
-        "correct", "broken", "assertion-tamper", "junit-forgery", "probe-aware", "nonce-forgery"
+        "correct", "broken", "assertion-tamper", "junit-forgery", "probe-aware", "receipt-injection"
     }:
         raise ValueError(f"unknown developer fixture: {fixture}")
     return edits
