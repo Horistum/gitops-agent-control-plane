@@ -6,16 +6,16 @@ import hmac
 import json
 import os
 from pathlib import Path
-import secrets
-import string
 import subprocess
 import sys
 
+try:
+    from .probe_dsl import materialize_cases, oracle_passes
+except ImportError:  # executed as a standalone script
+    from probe_dsl import materialize_cases, oracle_passes
+
 PREFIX = "REFERENCE_PROBE_RECEIPT="
 RAW_PREFIX = "REFERENCE_RAW_OUTCOME="
-_ALLOWED_EXCEPTIONS = {"ValueError", "TypeError", "KeyError"}
-_ALLOWED_GENERATORS = {"random-name-whitespace", "blank-whitespace", "random-non-string"}
-_ALLOWED_ORACLES = {"normalize-whitespace", "greet-normalized", "raises"}
 
 
 def _canonical(value: object) -> str:
@@ -38,50 +38,6 @@ def _read_control(fd: int) -> dict:
     return value
 
 
-def _random_token() -> str:
-    alphabet = string.ascii_letters + string.digits + "-'._"
-    return "".join(secrets.choice(alphabet) for _ in range(1 + secrets.randbelow(12)))
-
-
-def _random_name() -> str:
-    token_count = 1 + secrets.randbelow(5)
-    tokens = [_random_token() for _ in range(token_count)]
-    separators = [" ", "  ", "   ", "\t", " \t ", "\t  "]
-    body = tokens[0]
-    for token in tokens[1:]:
-        body += secrets.choice(separators) + token
-    left = secrets.choice(["", " ", "  ", "\t", " \t"])
-    right = secrets.choice(["", " ", "  ", "\t", "\t "])
-    return f"{left}{body}{right}"
-
-
-def _blank_whitespace() -> str:
-    return "".join(secrets.choice([" ", "\t", "\n"]) for _ in range(2 + secrets.randbelow(8)))
-
-
-def _non_string() -> object:
-    options: list[object] = [None, True, False, secrets.randbelow(1_000_000), -1 - secrets.randbelow(1_000_000)]
-    return secrets.choice(options)
-
-
-def _materialize_cases(probe: dict) -> list[dict]:
-    cases = probe["cases"]
-    generator = cases["generator"]
-    count = cases["count"]
-    if generator not in _ALLOWED_GENERATORS:
-        raise ValueError(f"unsupported probe generator: {generator}")
-    rows: list[dict] = []
-    for index in range(count):
-        if generator == "random-name-whitespace":
-            value = _random_name()
-        elif generator == "blank-whitespace":
-            value = _blank_whitespace()
-        else:
-            value = _non_string()
-        rows.append({"case": index + 1, "args": [value], "kwargs": {}})
-    return rows
-
-
 def _raw_outcome(child_stdout: str) -> tuple[dict | None, int]:
     lines = [line for line in child_stdout.splitlines() if line.startswith(RAW_PREFIX)]
     if len(lines) != 1:
@@ -93,33 +49,9 @@ def _raw_outcome(child_stdout: str) -> tuple[dict | None, int]:
     return value if isinstance(value, dict) else None, 1
 
 
-def _oracle_passes(outcome: dict | None, oracle: dict, input_value: object) -> tuple[bool, str]:
-    if not outcome or outcome.get("completed") is not True:
-        return False, "no-complete-outcome"
-    kind = oracle["kind"]
-    if kind == "raises":
-        expected = oracle["exception"]
-        if expected not in _ALLOWED_EXCEPTIONS:
-            return False, "unsupported-exception-oracle"
-        return (
-            outcome.get("kind") == "exception" and outcome.get("exception") == expected,
-            "expected-exception" if outcome.get("kind") == "exception" and outcome.get("exception") == expected else "exception-mismatch",
-        )
-    if not isinstance(input_value, str):
-        return False, "string-oracle-received-non-string"
-    normalized = " ".join(input_value.split())
-    if kind == "normalize-whitespace":
-        expected_value = normalized
-    elif kind == "greet-normalized":
-        expected_value = f"Hello, {normalized}!"
-    else:
-        return False, "unsupported-oracle"
-    passed = outcome.get("kind") == "return" and type(outcome.get("value")) is str and outcome.get("value") == expected_value
-    return passed, "expected-return" if passed else "return-mismatch"
-
-
 def _run_case(workspace: Path, probe: dict, case: dict) -> dict:
     child = Path(__file__).with_name("probe_child.py")
+    payload = {"args": case["args"], "kwargs": case["kwargs"]}
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -137,23 +69,26 @@ def _run_case(workspace: Path, probe: dict, case: dict) -> dict:
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        # Stay in the verifier worker's process group. The controller kills the
-        # entire group on timeout, including this child and its descendants.
         start_new_session=False,
     )
-    stdout, stderr = proc.communicate(input=_canonical({"args": case["args"], "kwargs": case["kwargs"]}))
-    outcome, raw_receipt_count = _raw_outcome(stdout or "")
-    passed, reason = _oracle_passes(outcome, probe["oracle"], case["args"][0])
+    stdout, stderr = proc.communicate(input=_canonical(payload))
+    child_stdout = stdout or ""
+    outcome, raw_outcome_count = _raw_outcome(child_stdout)
+    passed, reason = oracle_passes(outcome, probe["oracle"], case)
+    final_receipt_injection_count = sum(
+        1 for line in child_stdout.splitlines() if line.startswith(PREFIX)
+    )
     return {
         "case": case["case"],
-        "input_sha256": hashlib.sha256(_canonical({"args": case["args"], "kwargs": case["kwargs"]}).encode()).hexdigest(),
-        "input": case["args"][0],
+        "input_sha256": hashlib.sha256(_canonical(payload).encode()).hexdigest(),
         "child_exit_code": proc.returncode,
-        "raw_outcome_count": raw_receipt_count,
+        "raw_outcome_count": raw_outcome_count,
+        "candidate_receipt_injection_count": final_receipt_injection_count,
         "outcome": outcome,
-        "completed": bool(outcome and outcome.get("completed") is True and raw_receipt_count == 1),
-        "passed": bool(passed and proc.returncode == 0 and raw_receipt_count == 1),
-        "reason": reason if raw_receipt_count == 1 else "raw-outcome-count-invalid",
+        "completed": bool(outcome and outcome.get("completed") is True and raw_outcome_count == 1),
+        "passed": bool(passed and proc.returncode == 0 and raw_outcome_count == 1),
+        "reason": reason if raw_outcome_count == 1 else "raw-outcome-count-invalid",
+        "stdout_sha256": hashlib.sha256(child_stdout.encode()).hexdigest(),
         "stderr_sha256": hashlib.sha256((stderr or "").encode()).hexdigest(),
     }
 
@@ -173,13 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     challenge = control["challenge"]
     probe = control["probe"]
 
-    # The secret control fd is closed before any candidate process exists.
-    # Candidate children receive only their current input, never the challenge,
-    # HMAC key, oracle, generator definition or other future cases.
-    cases = _materialize_cases(probe)
+    # The control fd is closed before candidate code exists. The trusted parent
+    # owns case generation and oracle evaluation. Candidate stdout is captured
+    # as untrusted observation and never forwarded into the final receipt stream.
+    cases = materialize_cases(probe)
     rows = [_run_case(args.workspace.resolve(), probe, case) for case in cases]
     receipt = {
-        "protocol": 2,
+        "protocol": 3,
         "challenge": challenge,
         "probe_id": probe["id"],
         "completed": bool(rows) and all(row["completed"] for row in rows),
