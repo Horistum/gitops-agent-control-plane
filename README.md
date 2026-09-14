@@ -4,9 +4,7 @@ A **standalone executable reference** for policy-bounded autonomous software del
 
 **Initiated and maintained by the Horistum project.**
 
-This repository demonstrates control-plane mechanics, not a production AI product. The current portable contract is `gitops-agent-control-plane/v5`.
-
-The reference runs with **Bash, Git and Python 3.11+**. CI executes the same contract on Python 3.11, 3.12 and 3.13.
+The current portable contract is `gitops-agent-control-plane/v6`. The reference runs with Bash, Git and Python 3.11+; CI validates Python 3.11, 3.12 and 3.13.
 
 ## One-command demo
 
@@ -14,103 +12,58 @@ The reference runs with **Bash, Git and Python 3.11+**. CI executes the same con
 ./scripts/agentctl demo happy-path
 ```
 
-A successful run creates a real baseline commit, generated negative-control evidence, a separate candidate commit, signed controller-owned verification bound to that candidate SHA, a computed review, a real non-fast-forward merge, independently generated post-merge verification bound to the merge SHA, durable state and audit evidence.
+A successful run creates a real baseline commit, case-level negative-control evidence, a separate candidate commit, HMAC-authenticated controller verification bound to that candidate SHA, a computed review, a real non-fast-forward merge, independently generated post-merge verification, durable state and evidence.
 
-Evidence is written under `.demo/runs/<run-id>/evidence/`.
+## Why v6 exists
 
-## Why v5 exists
+Full review of v5 found three important gaps:
 
-Contract v4 correctly stopped treating JUnit as authoritative, but its probe protocol still had two avoidable weaknesses:
+1. its `nonce-forgery` conformance fixture attacked an obsolete argv protocol and therefore did not exercise the claimed attack;
+2. negative control was aggregated at probe level, so one failing case could distinguish a probe even when the baseline already satisfied most generated cases;
+3. probe generators/oracles were product-specific Python code in the control plane rather than a reusable product-authored contract.
 
-1. the receipt nonce/probe JSON were visible in worker argv to candidate code imported in that same process;
-2. probe inputs and literal expected values were public and fixed, allowing a candidate to overfit a lookup table to the published examples.
+V6 replaces the stale scenario with a **current-protocol receipt-injection attack**, requires **every generated acceptance case** to fail on the baseline, and introduces a small generic declarative probe DSL.
 
-Contract v5 changes both boundaries.
+## Generic probe DSL
 
-### Private signed receipt channel
+`examples/minimal-product/.agent-control/verification-probes.json` is product-authored authority. The controller reads it from the product source and omits it from the candidate workspace.
 
-For every probe the controller creates a fresh HMAC key and challenge and sends them to a trusted verifier parent over an inherited anonymous **control FD**. They are absent from argv and environment. The verifier parent reads and closes the FD before starting candidate code and never imports the candidate itself.
+The DSL supports multiple positional arguments, named kwargs, reusable generator primitives and expression-based return invariants. The example product composes generic operations such as token generation, whitespace splitting, joining and concatenation. The control plane contains no `greet` or `normalize_name` oracle.
 
-Candidate code runs in a separate child process. Child stdout is captured by the verifier parent, not forwarded as the final receipt stream. The controller accepts exactly one final receipt and verifies its HMAC, challenge and probe identity.
+Fresh cases are generated independently for baseline regression, negative control, candidate verification and post-merge verification.
 
-### Generated property probes
+## Receipt channel
 
-`verification-probes.json` no longer contains fixed `args`/literal expected returns. It declares case generators plus invariants. Fresh random cases are generated independently for baseline checks, negative control, candidate verification and post-merge verification.
+For each probe, the controller creates a fresh HMAC key and challenge. The trusted verifier parent receives the control payload through an inherited pipe created by the executor. The reader process is started before the payload is written, avoiding pipe-buffer deadlock.
 
-For the minimal product this includes properties such as:
+The verifier parent never imports candidate code. Candidate children receive only the current generated args/kwargs. Candidate stdout is captured as untrusted observation and cannot become the controller-facing final receipt. The controller accepts exactly one parent receipt and verifies its HMAC, challenge, probe identity and protocol version.
 
-```text
-normalize_name(x) == " ".join(x.split())
-greet(x) == "Hello, " + " ".join(x.split()) + "!"
-```
+The `receipt-injection` scenario now actually writes a forged final-receipt line from candidate code. Conformance requires evidence that this injection attempt occurred and that the parent receipt channel remained singular and valid.
 
-plus randomized blank and non-string exception cases.
+## Verification layers
 
-The probe definition is versioned product authority but is **not copied into the candidate workspace**. Runtime evidence binds its controller-side digest separately.
+- candidate-process JUnit: useful diagnostics, explicitly non-authoritative;
+- candidate-child raw outcome: untrusted observation;
+- verifier-parent signed receipt: authoritative within the deterministic standalone fixture scope;
+- production hostile-code evidence: requires a stronger isolation boundary.
 
-Candidate-process JUnit remains useful diagnostics, explicitly non-authoritative.
+The local executor is **not a security sandbox**. Timeouts, process groups, HMAC and property cases do not replace a container, VM or independently controlled remote verifier for arbitrary malicious/model-generated code.
 
-## Conformance is more important than the happy path
+## Conformance
 
 ```bash
 ./scripts/agentctl conformance
 ```
 
-Scenarios are discovered from `examples/scenarios/`. Contract v5 includes lifecycle/risk/recovery cases plus direct evidence/oracle attacks:
+Scenarios are discovered from `examples/scenarios/`. The matrix covers the happy path, forbidden writes, baseline-test tampering, failed behavior, empty diagnostic tests, assertion monkeypatching, JUnit forgery, **current receipt injection**, narrow probe-aware overfitting, independent file/byte budgets, risk ceiling, MEDIUM auto-merge boundary, HIGH human gate and cross-process crash recovery.
 
-| Scenario | Expected terminal state | Property |
-|---|---|---|
-| `happy-path` | `COMPLETED` | full bounded lifecycle with generated negative control and signed probes |
-| `forbidden-path` | `BLOCKED_POLICY` | authority rewrite rejected before candidate side effect |
-| `test-tamper` | `BLOCKED_POLICY` | developer cannot replace protected baseline tests |
-| `test-failure` | `FAILED_VERIFICATION` | wrong behavior fails diagnostics and controller probes |
-| `insufficient-tests` | `FAILED_VERIFICATION` | correct test names with empty bodies cannot manufacture acceptance |
-| `assertion-tamper` | `FAILED_VERIFICATION` | monkeypatched `unittest` assertions cannot manufacture controller evidence |
-| `junit-forgery` | `FAILED_VERIFICATION` | forged five-test XML cannot authorize a wrong candidate |
-| `nonce-forgery` | `FAILED_VERIFICATION` | old argv nonce/receipt forgery has no secret to read or receipt channel to inject |
-| `probe-aware` | `FAILED_VERIFICATION` | implementation overfit to public fixed examples fails fresh generated invariant cases |
-| `budget-exceeded` | `BLOCKED_POLICY` | changed-file budget blocks before workspace mutation |
-| `patch-budget-exceeded` | `BLOCKED_POLICY` | patch-byte budget is independently reachable |
-| `risk-ceiling` | `BLOCKED_POLICY` | effective risk may exceed owner goal authority |
-| `medium-auto-boundary` | `NEEDS_DECISION` | MEDIUM risk and auto-merge ceiling are independent |
-| `human-gate` | `NEEDS_DECISION` | top-level `src/security/**` is classified HIGH |
-| `crash-recovery` | `COMPLETED` | a fresh process recovers an already-performed merge effect without duplicating it |
-
-A scenario failure does not abort the matrix. Remaining scenarios continue and `conformance-report.json` plus run evidence are retained.
-
-## Authority and write domains
-
-Product-authored authority lives under `examples/minimal-product/.agent-control/`.
-
-The standalone policy separates developer source writes, tester diagnostic-test writes, protected baseline tests and authority/CI paths. `verification-probes.json`, `quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are executable structured inputs.
-
-The verifier definition is read from the controller-side product source and omitted from the candidate copy. Human-readable `authority.md`, `architecture.md` and free-form `forbidden_directions` remain context rather than silently machine-interpreted natural language.
-
-## Review is computed
-
-`review.json` is derived from observable controller state. It checks authority preservation, bounded paths, protected tests, generated baseline negative control, signed controller probe results, exact candidate-SHA binding and supplemental diagnostic JUnit status.
-
-A green JUnit file cannot override a failing controller probe.
-
-## Path and execution bounds
-
-Policy matching uses one memoized segment-aware matcher everywhere. `**` means zero or more complete path segments, including zero, without exponential recursive backtracking.
-
-The local executor uses a policy-derived timeout/CPU budget and a dedicated process group. Descendant processes are cleaned up on timeout and after the direct child exits.
-
-These are bounded-execution controls, **not a security sandbox**.
-
-## Remaining trust boundary
-
-Randomized invariants prevent simple fixture lookup-table overfitting, and HMAC/control-FD receipts close the previous distributed-secret mistake. They do not make same-host Python adversarially safe.
-
-For arbitrary model-generated or malicious code, production verification must use a container/VM/remote verifier whose filesystem/process boundary and result channel are outside candidate control.
+`probe-aware` is no longer tied to an obsolete historical literal. It implements the public diagnostic example plus a deliberately narrow ASCII subset; the current product-owned `greet-unicode` invariant must reject it.
 
 ## Evidence and schemas
 
-The repository validates goal, policy, scenario, verification definition, state, decision, review, diagnostic test, signed probe, effect, recovery and terminal evidence against a fail-closed supported subset of JSON Schema Draft 2020-12. Unsupported schema keywords are rejected instead of ignored.
+Core safety evidence is schema-validated, including authority snapshots, protected-test snapshots, merge intent, human-decision artifacts, requests, proposals, role evidence, signed probe receipts and per-case results. The built-in Draft 2020-12 subset is fail-closed on unsupported keywords.
 
-The event log is hash-linked consistency evidence, not cryptographic authenticity. A production system needs an external or signed anchor.
+The event log remains hash-linked consistency evidence, not cryptographic authenticity. A production system needs an external or signed anchor.
 
 ## Validate
 
@@ -118,18 +71,14 @@ The event log is hash-linked consistency evidence, not cryptographic authenticit
 ./scripts/agentctl validate
 ```
 
-This runs non-mutating repository validation, direct unit tests over control functions and the complete conformance matrix.
+This runs non-mutating repository validation, direct code-path tests and the complete conformance matrix.
 
 ## Origin, license and branding
 
-This reference architecture was originally developed and published from the **Horistum GitHub organization**.
-
-Source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`. The license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. See `TRADEMARKS.md`.
-
-Contributions are governed by `CONTRIBUTING.md`; support expectations by `SUPPORT.md`; security reporting by `.github/SECURITY.md`; release rules by `docs/RELEASES.md`.
+This reference architecture was originally developed and published from the **Horistum GitHub organization**. Source code, documentation, schemas and examples are Apache-2.0 licensed; see `LICENSE` and `NOTICE`. Horistum branding is governed separately by `TRADEMARKS.md`.
 
 ## What this repository does not claim
 
-It does not claim deterministic fixture roles are equivalent to a production AI system. It does not claim the local executor/verifier is safe against arbitrary malicious code. It does not claim randomized testing is a formal proof. It does not claim unkeyed event hashes prove authenticity.
+It does not claim deterministic fixtures equal a production AI system, randomized testing is formal proof, same-host execution is hostile-code isolation, or unkeyed hashes prove authenticity.
 
-It demonstrates bounded authority, exact identity, private signed verifier receipts, runtime-generated property checks, negative controls, evidence-aware review, risk boundaries, durable state, process recovery and conformance within the explicitly documented standalone trust model.
+It demonstrates bounded authority, exact identity, generic product-authored invariants, case-level negative control, signed verifier-parent receipts, evidence-aware review, risk boundaries, durable effects and executable negative conformance within the documented standalone trust model.
