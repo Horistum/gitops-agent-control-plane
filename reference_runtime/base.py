@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
+import hmac
 import json
+import os
 from pathlib import Path
 import secrets
 import shutil
@@ -11,6 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 
 from .contracts import (
+    canonical_json,
     digest_paths,
     load_json,
     matches_any,
@@ -23,6 +27,10 @@ from .contracts import (
 )
 from .events import EventLog
 from .executor import LocalFixtureExecutor
+
+_ALLOWED_PROBE_GENERATORS = {"random-name-whitespace", "blank-whitespace", "random-non-string"}
+_ALLOWED_PROBE_ORACLES = {"normalize-whitespace", "greet-normalized", "raises"}
+_ALLOWED_PROBE_EXCEPTIONS = {"ValueError", "TypeError", "KeyError"}
 
 
 class InjectedCrash(RuntimeError):
@@ -40,6 +48,7 @@ class BaseEngine:
         self.label = request["label"]
         self.output_root = output_root.resolve()
         self.product_source = self.repo / "examples" / "minimal-product"
+        self.controller_authority_dir = self.product_source / ".agent-control"
         self.goal = request["goal"]
         self.policy = load_json(self.repo / "config" / "reference-policy.json")
         validate_goal(self.goal)
@@ -52,7 +61,15 @@ class BaseEngine:
         self.workspace = self.run_dir / "workspace"
         self.evidence = self.run_dir / "evidence"
         self.evidence.mkdir(parents=True, exist_ok=False)
-        shutil.copytree(self.product_source, self.workspace)
+
+        verifier_source = (self.controller_authority_dir / "verification-probes.json").resolve()
+
+        def ignore_controller_only(source: str, names: list[str]) -> set[str]:
+            if Path(source).resolve() == verifier_source.parent and "verification-probes.json" in names:
+                return {"verification-probes.json"}
+            return set()
+
+        shutil.copytree(self.product_source, self.workspace, ignore=ignore_controller_only)
         self.events = EventLog(self.evidence / "events.jsonl")
         self.executor = LocalFixtureExecutor(self.policy["test_timeout_seconds"])
         self.state = {
@@ -95,6 +112,7 @@ class BaseEngine:
         validate_policy(obj.policy)
         obj._validate_proposal_source()
         obj.product_source = obj.repo / "examples" / "minimal-product"
+        obj.controller_authority_dir = obj.product_source / ".agent-control"
         obj.events = EventLog(obj.evidence / "events.jsonl")
         obj.executor = LocalFixtureExecutor(obj.policy["test_timeout_seconds"])
         obj.state = load_json(obj.evidence / "state.json")
@@ -113,25 +131,44 @@ class BaseEngine:
 
     @staticmethod
     def _validate_probe(probe: dict) -> None:
-        required = {"id", "target", "callable", "args", "kwargs", "expect"}
+        required = {"id", "target", "callable", "cases", "oracle"}
         if set(probe) != required:
             raise PolicyConfigurationError(f"verification probe fields invalid: {sorted(set(probe))}")
         safe_relative_path(probe["target"])
         if not isinstance(probe["id"], str) or not probe["id"] or not isinstance(probe["callable"], str) or not probe["callable"]:
             raise PolicyConfigurationError("verification probe id/callable must be non-empty strings")
-        if not isinstance(probe["args"], list) or not isinstance(probe["kwargs"], dict) or not isinstance(probe["expect"], dict):
-            raise PolicyConfigurationError("verification probe args/kwargs/expect types invalid")
-        if set(probe["expect"]) not in ({"return"}, {"exception"}):
-            raise PolicyConfigurationError("verification probe expect must contain exactly return or exception")
+        cases = probe["cases"]
+        if not isinstance(cases, dict) or set(cases) != {"generator", "count"}:
+            raise PolicyConfigurationError("verification probe cases must contain generator and count")
+        if cases["generator"] not in _ALLOWED_PROBE_GENERATORS:
+            raise PolicyConfigurationError(f"unsupported probe generator: {cases.get('generator')}")
+        if type(cases["count"]) is not int or not 1 <= cases["count"] <= 32:
+            raise PolicyConfigurationError("probe case count must be an integer from 1 to 32")
+        oracle = probe["oracle"]
+        if not isinstance(oracle, dict) or oracle.get("kind") not in _ALLOWED_PROBE_ORACLES:
+            raise PolicyConfigurationError(f"unsupported probe oracle: {oracle!r}")
+        if oracle["kind"] == "raises":
+            if set(oracle) != {"kind", "exception"} or oracle["exception"] not in _ALLOWED_PROBE_EXCEPTIONS:
+                raise PolicyConfigurationError("raises oracle requires a supported exception name")
+        elif set(oracle) != {"kind"}:
+            raise PolicyConfigurationError("return invariant oracle accepts only the kind field")
+
+    def verification_definition_path(self) -> Path:
+        return self.controller_authority_dir / "verification-probes.json"
+
+    def verification_definition_digest(self) -> str:
+        return sha256_bytes(self.verification_definition_path().read_bytes())
 
     def load_authority(self) -> dict:
         authority_dir = self.workspace / ".agent-control"
+        if (authority_dir / "verification-probes.json").exists():
+            raise PolicyConfigurationError("controller-only verification probes leaked into candidate workspace")
         value = {
             "roadmap": load_json(authority_dir / "roadmap.json"),
             "quality_gates": load_json(authority_dir / "quality-gates.json"),
             "forbidden": load_json(authority_dir / "forbidden.json"),
             "release_state": load_json(authority_dir / "release-state.json"),
-            "verification_probes": load_json(authority_dir / "verification-probes.json"),
+            "verification_probes": load_json(self.verification_definition_path()),
         }
         gates = value["quality_gates"]
         expected_flags = {
@@ -142,13 +179,13 @@ class BaseEngine:
             "require_diagnostic_junit_green",
         }
         if gates.get("schema") != 3 or set(gates) != {"schema", *expected_flags}:
-            raise PolicyConfigurationError("quality-gates.json contract v4 fields invalid")
+            raise PolicyConfigurationError("quality-gates.json fields invalid")
         for flag in expected_flags:
             if gates.get(flag) is not True:
                 raise PolicyConfigurationError(f"required quality gate disabled: {flag}")
 
         probes = value["verification_probes"]
-        if probes.get("schema") != 1 or not isinstance(probes.get("baseline"), list) or not isinstance(probes.get("acceptance"), list):
+        if probes.get("schema") != 2 or not isinstance(probes.get("baseline"), list) or not isinstance(probes.get("acceptance"), list):
             raise PolicyConfigurationError("verification-probes.json shape invalid")
         all_probes = probes["baseline"] + probes["acceptance"]
         if not probes["baseline"] or not probes["acceptance"]:
@@ -258,45 +295,82 @@ class BaseEngine:
             raise PolicyConfigurationError(f"roadmap references unknown verification probes: {sorted(missing)}")
         return result
 
+    @staticmethod
+    def _receipt_mac(receipt: dict, key: bytes) -> str:
+        return hmac.new(key, canonical_json(receipt).encode("utf-8"), hashlib.sha256).hexdigest()
+
     def run_probes(self, label: str, probe_ids: set[str]) -> dict:
         tested_sha = self.git("rev-parse", "HEAD")
         index = self._probe_index()
         worker = self.repo / "reference_runtime" / "probe_worker.py"
+        definition_digest = self.verification_definition_digest()
         rows: list[dict] = []
         for probe_id in sorted(probe_ids):
             probe = index[probe_id]
-            nonce = secrets.token_hex(16)
-            execution = self.executor.run(
-                [
-                    sys.executable,
-                    "-S",
-                    str(worker),
-                    "--workspace",
-                    str(self.workspace),
-                    "--probe-json",
-                    json.dumps(probe, sort_keys=True, separators=(",", ":")),
-                    "--nonce",
-                    nonce,
-                ],
-                self.workspace,
-            )
-            receipt = None
+            receipt_key = secrets.token_bytes(32)
+            challenge = secrets.token_hex(16)
+            control = {
+                "receipt_key": receipt_key.hex(),
+                "challenge": challenge,
+                "probe": probe,
+            }
+            read_fd, write_fd = os.pipe()
+            try:
+                os.write(write_fd, canonical_json(control).encode("utf-8"))
+            finally:
+                os.close(write_fd)
+            try:
+                execution = self.executor.run(
+                    [
+                        sys.executable,
+                        "-S",
+                        str(worker),
+                        "--workspace",
+                        str(self.workspace),
+                        "--control-fd",
+                        str(read_fd),
+                    ],
+                    self.workspace,
+                    pass_fds=(read_fd,),
+                )
+            finally:
+                os.close(read_fd)
+
             prefix = "REFERENCE_PROBE_RECEIPT="
-            for line in execution.stdout.splitlines():
-                if line.startswith(prefix):
-                    try:
-                        candidate = json.loads(line[len(prefix):])
-                    except json.JSONDecodeError:
-                        continue
-                    if candidate.get("nonce") == nonce and candidate.get("probe_id") == probe_id:
-                        receipt = candidate
-            completed = bool(receipt and receipt.get("completed"))
-            passed = bool(completed and receipt.get("passed") and execution.returncode == 0 and not execution.timed_out)
+            receipt_lines = [line for line in execution.stdout.splitlines() if line.startswith(prefix)]
+            envelope = None
+            receipt = None
+            receipt_valid = False
+            if len(receipt_lines) == 1:
+                try:
+                    candidate_envelope = json.loads(receipt_lines[0][len(prefix):])
+                    candidate_receipt = candidate_envelope.get("receipt") if isinstance(candidate_envelope, dict) else None
+                    candidate_mac = candidate_envelope.get("hmac_sha256") if isinstance(candidate_envelope, dict) else None
+                    if isinstance(candidate_receipt, dict) and isinstance(candidate_mac, str):
+                        mac_ok = hmac.compare_digest(self._receipt_mac(candidate_receipt, receipt_key), candidate_mac)
+                        identity_ok = candidate_receipt.get("challenge") == challenge and candidate_receipt.get("probe_id") == probe_id
+                        if mac_ok and identity_ok:
+                            envelope = candidate_envelope
+                            receipt = candidate_receipt
+                            receipt_valid = True
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+
+            completed = bool(receipt_valid and receipt and receipt.get("completed") is True)
+            passed = bool(
+                completed
+                and receipt.get("passed") is True
+                and execution.returncode == 0
+                and not execution.timed_out
+            )
             rows.append({
                 "probe_id": probe_id,
+                "definition_sha256": sha256_json(probe),
+                "receipt_count": len(receipt_lines),
+                "receipt_valid": receipt_valid,
                 "completed": completed,
                 "passed": passed,
-                "receipt": receipt,
+                "receipt": receipt if receipt_valid else None,
                 "worker_exit_code": execution.returncode,
                 "timed_out": execution.timed_out,
                 "duration_ms": execution.duration_ms,
@@ -304,12 +378,13 @@ class BaseEngine:
                 "stderr_sha256": sha256_bytes(execution.stderr.encode()),
             })
         result = {
-            "schema": 1,
+            "schema": 2,
             "label": label,
             "tested_sha": tested_sha,
+            "verification_definition_sha256": definition_digest,
             "probe_ids": sorted(probe_ids),
             "probes": rows,
-            "all_completed": all(row["completed"] for row in rows),
+            "all_completed": bool(rows) and all(row["completed"] for row in rows),
             "all_passed": bool(rows) and all(row["passed"] for row in rows),
             "authoritative_within_trusted_fixture_scope": True,
         }
@@ -337,6 +412,11 @@ class BaseEngine:
         if empty:
             raise PolicyConfigurationError(f"authority patterns matched no files: {empty}")
         snapshot["matches"] = per_pattern
+        snapshot["controller_verification_sha256"] = self.verification_definition_digest()
+        snapshot["digest"] = sha256_json({
+            "files": snapshot["files"],
+            "controller_verification_sha256": snapshot["controller_verification_sha256"],
+        })
         self.write_json(f"authority-snapshot-{label}.json", snapshot)
         return snapshot
 
