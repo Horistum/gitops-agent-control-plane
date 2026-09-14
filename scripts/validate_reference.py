@@ -158,8 +158,9 @@ def validate_docs_claims() -> None:
     verification = (ROOT / "docs" / "VERIFICATION.md").read_text()
     check("gitops-agent-control-plane/v3" in verification, "verification docs do not name contract v3")
     check("not a security sandbox" in readme.lower(), "README must disclose local executor boundary")
+    security_lower = security.lower()
     check(
-        "external" in security.lower() and "anchor" in security.lower(),
+        "not an authenticity mechanism" in security_lower and "anchor" in security_lower,
         "SECURITY must disclose event-chain authenticity boundary",
     )
 
