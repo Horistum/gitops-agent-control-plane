@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -62,6 +62,16 @@ def validate_policy(policy: dict) -> None:
             raise ValueError(f"policy.{key} must be a string list")
     if policy["default_risk"] not in {"low", "medium", "high"} or policy["human_gate_at"] not in {"medium", "high"}:
         raise ValueError("invalid risk policy")
+
+
+def safe_relative_path(value: str) -> str:
+    """Return a canonical repository-relative POSIX path or reject traversal/absolute paths."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("edit path must be a non-empty string")
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts or "." in path.parts or path.as_posix() != value:
+        raise ValueError(f"unsafe or non-canonical repository path: {value!r}")
+    return value
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
