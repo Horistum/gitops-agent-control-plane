@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "reference_contract": "gitops-agent-control-plane/v7",
+  "core_contract": "autonomous-control-plane/v1",
+  "verification_profile": "property-probe/v6",
+  "runtime_profile": "standalone-local/v2"
+}

@@ -1,73 +1,133 @@
 # GitOps Agent Control Plane Reference
 
-A **standalone executable reference** for policy-bounded autonomous software delivery through Git.
+A **standalone executable reference for bounded autonomous software delivery through Git**.
 
 **Initiated and maintained by the Horistum project.**
 
-The current portable contract is `gitops-agent-control-plane/v6`. The reference runs with Bash, Git and Python 3.11+; CI validates Python 3.11, 3.12 and 3.13.
+The current repository contract is `gitops-agent-control-plane/v7`, composed from:
 
-## One-command demo
+- **core contract:** `autonomous-control-plane/v1`
+- **verification profile:** `property-probe/v6`
+- **runtime profile:** `standalone-local/v2`
 
-```bash
-./scripts/agentctl demo happy-path
+The split is intentional. Autonomy, verification, and runtime/provider mechanics can evolve without pretending they are the same contract.
+
+## The central idea
+
+AI or another reasoning provider is not given unrestricted execution authority. It operates inside a control plane:
+
+```text
+product authority
+      ↓
+goal
+      ↓
+discovery / selection
+      ↓
+bounded plan
+      ↓
+developer + test-design proposals
+      ↓
+policy / risk / budgets
+      ↓
+candidate
+      ↓
+independent verification
+      ↓
+review
+      ↓
+human authority when required
+      ↓
+durable Git effect
+      ↓
+post-effect verification
+      ↓
+release-state transition
+      ↓
+goal reconciliation
+      ├─ objective satisfied → stop
+      └─ work remains → select next dependency-ready item
 ```
 
-A successful run creates a real baseline commit, case-level negative-control evidence, a separate candidate commit, HMAC-authenticated controller verification bound to that candidate SHA, a computed review, a real non-fast-forward merge, independently generated post-merge verification, durable state and evidence.
+Authority, effects, risk, verification, durable state, and evidence remain outside reasoning-role control.
 
-## Why v6 exists
-
-Full review of v5 found three important gaps:
-
-1. its `nonce-forgery` conformance fixture attacked an obsolete argv protocol and therefore did not exercise the claimed attack;
-2. negative control was aggregated at probe level, so one failing case could distinguish a probe even when the baseline already satisfied most generated cases;
-3. probe generators/oracles were product-specific Python code in the control plane rather than a reusable product-authored contract.
-
-V6 replaces the stale scenario with a **current-protocol receipt-injection attack**, requires **every generated acceptance case** to fail on the baseline, and introduces a small generic declarative probe DSL.
-
-## Generic probe DSL
-
-`examples/minimal-product/.agent-control/verification-probes.json` is product-authored authority. The controller reads it from the product source and omits it from the candidate workspace.
-
-The DSL supports multiple positional arguments, named kwargs, reusable generator primitives and expression-based return invariants. The example product composes generic operations such as token generation, whitespace splitting, joining and concatenation. The control plane contains no `greet` or `normalize_name` oracle.
-
-Fresh cases are generated independently for baseline regression, negative control, candidate verification and post-merge verification.
-
-## Receipt channel
-
-For each probe, the controller creates a fresh HMAC key and challenge. The trusted verifier parent receives the control payload through an inherited pipe created by the executor. The reader process is started before the payload is written, avoiding pipe-buffer deadlock.
-
-The verifier parent never imports candidate code. Candidate children receive only the current generated args/kwargs. Candidate stdout is captured as untrusted observation and cannot become the controller-facing final receipt. The controller accepts exactly one parent receipt and verifies its HMAC, challenge, probe identity and protocol version.
-
-The `receipt-injection` scenario actually writes a forged final-receipt line from candidate code. Conformance requires evidence that this injection attempt occurred and that the parent receipt channel remained singular and valid.
-
-## Verification layers
-
-- candidate-process JUnit: useful diagnostics, explicitly non-authoritative;
-- candidate-child raw outcome: untrusted observation;
-- verifier-parent signed receipt: authoritative within the deterministic standalone fixture scope;
-- production hostile-code evidence: requires a stronger isolation boundary.
-
-The local executor is **not a security sandbox**. Timeouts, process groups, HMAC and property cases do not replace a container, VM or independently controlled remote verifier for arbitrary malicious/model-generated code.
-
-## Conformance
+## One-command autonomous showcase
 
 ```bash
+./scripts/agentctl loop
+```
+
+The default `autonomous-two-item` scenario delivers two dependent roadmap items in one control-plane run. The controller selects `EXAMPLE-001`, verifies and merges it, commits a controller-owned release-state transition, re-evaluates the goal, unlocks `EXAMPLE-002`, preserves the first item's acceptance probes as regressions, and stops only when the requested objective is satisfied.
+
+Other important scenarios include:
+
+```bash
+./scripts/agentctl demo repair-loop
+./scripts/agentctl demo human-approve-resume
+./scripts/agentctl demo dependency-blocked
 ./scripts/agentctl conformance
 ```
 
-Scenarios are discovered from `examples/scenarios/`. The matrix covers the happy path, forbidden writes, baseline-test tampering, failed behavior, empty diagnostic tests, assertion monkeypatching, JUnit forgery, **current receipt injection**, narrow probe-aware overfitting, independent file/byte budgets, risk ceiling, MEDIUM auto-merge boundary, HIGH human gate and cross-process crash recovery.
+`repair-loop` demonstrates verification feedback returning to a bounded developer repair attempt rather than making every failed candidate terminal.
 
-`probe-aware` is tied to the current contract rather than a historical literal. It implements the public diagnostic example plus a deliberately narrow ASCII subset; the current product-owned `greet-unicode` invariant must reject it.
+`human-approve-resume` demonstrates `NEEDS_DECISION` as a durable resumable authority boundary. A fresh process records the human decision and continues the same run.
 
-The matrix also contains `raw-outcome-forgery`, which is intentionally classified as **KNOWN-LIMIT**. It reproduces the acknowledged same-process weakness below the signed-receipt boundary: malicious candidate code can inspect the trusted child-wrapper frame, forge the current `REFERENCE_RAW_OUTCOME`, and terminate before the genuine wrapper observation is emitted. The verifier parent then signs the forged observation. The scenario passes only when this limitation is actually reproduced and its evidence proves the candidate's direct unicode behavior is wrong.
+`dependency-blocked` proves the controller will not invent work outside declared dependency authority merely to make progress.
 
-A successful matrix therefore means **all enforced properties behaved as expected and all declared known limits were reproducible**. It does not mean the standalone fixture has no known security limitations. `conformance-report.json` exposes known-limit scenarios separately in `known_limits_reproduced`.
+## Authority is explicit
 
-## Evidence and schemas
+Product authority is classified into:
 
-Core safety evidence is schema-validated, including authority snapshots, protected-test snapshots, merge intent, human-decision artifacts, requests, proposals, role evidence, signed probe receipts and per-case results. The built-in Draft 2020-12 subset is fail-closed on unsupported keywords.
+- **intent authority:** roadmap and desired work;
+- **state authority:** controller-recorded release progress;
+- **change authority:** structured forbidden/write boundaries;
+- **verification authority:** quality gates and product invariants;
+- **context:** prose that reasoning may use but the controller does not silently execute.
 
-The event log remains hash-linked consistency evidence, not cryptographic authenticity. A production system needs an external or signed anchor.
+`examples/minimal-product/.agent-control/authority-model.json` makes this machine-visible.
+
+Goal fields are also classified. `items`, risk ceilings, auto-merge ceilings, forbidden paths, and autonomy budgets are enforced. Narrative objective and forbidden-direction prose are reasoning context. The success narrative is a verified projection, not natural-language policy magically interpreted by the runtime.
+
+## Reasoning roles are protocols
+
+Discovery, architect, developer, test-designer, tester, and reviewer have explicit input/output contracts in `config/role-protocols.json`.
+
+Role artifacts carry protocol identity, item, iteration, input references, typed output projections, and declared write/effect power. No reasoning role has direct Git-effect authority.
+
+The standalone implementation uses deterministic fixture role providers so controller behavior is reproducible. A production system may replace those producers with AI while preserving the same authority/effect/evidence boundaries.
+
+## Verification profile
+
+The v7 core reuses the hardened `property-probe/v6` verification profile:
+
+- product-authored generic invariant DSL;
+- case-level negative control;
+- exact candidate/merge binding;
+- HMAC-authenticated verifier-parent receipts;
+- diagnostic JUnit kept non-authoritative;
+- executable negative scenarios;
+- executable `raw-outcome-forgery` **KNOWN-LIMIT**.
+
+Verification is a profile of the control plane, not the definition of the control plane.
+
+## Human authority
+
+A risk or auto-merge boundary creates durable `NEEDS_DECISION` state with allowed actions:
+
+- `approve`
+- `reject`
+- `request_changes`
+
+A decision is an explicit artifact and event. Approval resumes merge/post-merge/reconciliation. Rejection terminates the run. `request_changes` routes the item back into the bounded repair loop if proposal budget remains.
+
+## Git as the control/effect ledger
+
+In this reference, “GitOps” means that desired product authority, candidate identities, merge effects, controller-owned release-state transitions, and recovery identities are represented through versioned Git state.
+
+Provider-specific GitHub/GitLab/Argo/Jenkins behavior is a runtime adapter concern, not part of the core contract.
+
+## Trust boundary
+
+The local fixture runtime is not a hostile-code security sandbox. `raw-outcome-forgery` deliberately reproduces the acknowledged same-process observation weakness. Production arbitrary-code verification requires a stronger container/VM/remote verifier and independently protected result channel.
 
 ## Validate
 
@@ -75,14 +135,10 @@ The event log remains hash-linked consistency evidence, not cryptographic authen
 ./scripts/agentctl validate
 ```
 
-This runs non-mutating repository validation, direct code-path tests and the complete conformance matrix.
+Validation covers schemas/static contracts, direct code-path unit tests, the full security regression matrix, and the new autonomous-control-loop scenarios on Python 3.11, 3.12 and 3.13.
 
 ## Origin, license and branding
 
-This reference architecture was originally developed and published from the **Horistum GitHub organization**. Source code, documentation, schemas and examples are Apache-2.0 licensed; see `LICENSE` and `NOTICE`. Horistum branding is governed separately by `TRADEMARKS.md`.
+This reference architecture was originally developed and published from the **Horistum GitHub organization**.
 
-## What this repository does not claim
-
-It does not claim deterministic fixtures equal a production AI system, randomized testing is formal proof, same-host execution is hostile-code isolation, or unkeyed hashes prove authenticity.
-
-It demonstrates bounded authority, exact identity, generic product-authored invariants, case-level negative control, signed verifier-parent receipts, evidence-aware review, risk boundaries, durable effects, executable negative conformance and executable known-limit reproduction within the documented standalone trust model.
+Source, documentation, schemas, and examples are Apache-2.0 licensed. See `LICENSE`, `NOTICE`, and `TRADEMARKS.md`.

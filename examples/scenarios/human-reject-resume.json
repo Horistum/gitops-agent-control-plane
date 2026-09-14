@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "name": "human-reject-resume",
+  "expected_status": "BLOCKED_POLICY",
+  "developer_fixture": "critical-top-level",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-001"],
+  "human_decision": "reject"
+}

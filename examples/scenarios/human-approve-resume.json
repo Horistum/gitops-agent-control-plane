@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "name": "human-approve-resume",
+  "expected_status": "COMPLETED",
+  "developer_fixture": "critical-top-level",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-001"],
+  "human_decision": "approve"
+}

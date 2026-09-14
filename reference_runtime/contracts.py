@@ -8,6 +8,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
+REFERENCE_CONTRACT = "gitops-agent-control-plane/v7"
+CORE_CONTRACT = "autonomous-control-plane/v1"
+VERIFICATION_PROFILE = "property-probe/v6"
+RUNTIME_PROFILE = "standalone-local/v2"
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -27,10 +33,11 @@ def load_json(path: Path) -> dict:
     return value
 
 
-def require_fields(value: dict, required: set[str], *, where: str, allow_extra: bool = False) -> None:
+def require_fields(value: dict, required: set[str], *, where: str, optional: set[str] | None = None) -> None:
+    optional = optional or set()
     missing = required - set(value)
-    extra = set(value) - required
-    if missing or (extra and not allow_extra):
+    extra = set(value) - required - optional
+    if missing or extra:
         raise ValueError(f"{where} fields invalid: missing={sorted(missing)} extra={sorted(extra)}")
 
 
@@ -54,19 +61,15 @@ def _validate_pattern(pattern: str) -> None:
 def path_matches(path: str, pattern: str) -> bool:
     """Segment-aware glob with memoized `**` matching.
 
-    `**` matches zero or more complete path segments. Matching memoizes the
-    `(path_index, pattern_index)` state, so even repetitive owner-authored
-    patterns are bounded by O(P*L) states instead of exponential backtracking.
-    Adjacent `**` tokens are collapsed because they are semantically redundant.
+    `**` matches zero or more complete path segments. Memoizing
+    `(path_index, pattern_index)` bounds matching to O(P*L) states and avoids
+    exponential backtracking from repeated owner-authored `**` tokens.
     """
     path = safe_relative_path(path)
     _validate_pattern(pattern)
     path_parts = tuple(PurePosixPath(path).parts)
-    raw_pattern_parts = tuple(PurePosixPath(pattern).parts)
-    pattern_parts: tuple[str, ...] = tuple(
-        part for i, part in enumerate(raw_pattern_parts)
-        if part != "**" or i == 0 or raw_pattern_parts[i - 1] != "**"
-    )
+    raw = tuple(PurePosixPath(pattern).parts)
+    pattern_parts = tuple(part for i, part in enumerate(raw) if part != "**" or i == 0 or raw[i - 1] != "**")
 
     @lru_cache(maxsize=None)
     def match(i: int, j: int) -> bool:
@@ -114,13 +117,21 @@ def risk_rank(value: str) -> int:
     return {"low": 0, "medium": 1, "high": 2}[value]
 
 
+def validate_contract_set(value: dict) -> None:
+    require_fields(value, {"schema", "reference_contract", "core_contract", "verification_profile", "runtime_profile"}, where="contract_set")
+    if value != {"schema":1,"reference_contract":REFERENCE_CONTRACT,"core_contract":CORE_CONTRACT,"verification_profile":VERIFICATION_PROFILE,"runtime_profile":RUNTIME_PROFILE}:
+        raise ValueError("unsupported contract set")
+
+
 def validate_goal(goal: dict) -> None:
-    required = {"schema", "objective", "items", "risk_ceiling", "auto_merge_ceiling", "success_condition", "forbidden_directions", "forbidden_paths"}
+    required = {"schema","objective","items","risk_ceiling","auto_merge_ceiling","success_condition","forbidden_directions","forbidden_paths","autonomy","field_semantics"}
     require_fields(goal, required, where="goal")
-    if goal["schema"] != 1:
-        raise ValueError("goal schema must be 1")
+    if goal["schema"] != 2:
+        raise ValueError("goal schema must be 2")
     if not isinstance(goal["items"], list) or not goal["items"] or not all(isinstance(x, str) and x for x in goal["items"]):
         raise ValueError("goal.items must be a non-empty string list")
+    if len(goal["items"]) != len(set(goal["items"])):
+        raise ValueError("goal.items must be unique")
     if goal["risk_ceiling"] not in {"low", "medium", "high"}:
         raise ValueError("invalid risk_ceiling")
     if goal["auto_merge_ceiling"] not in {"none", "low", "medium"}:
@@ -132,17 +143,23 @@ def validate_goal(goal: dict) -> None:
     for key in ("objective", "success_condition", "forbidden_directions"):
         if not isinstance(goal[key], str) or not goal[key].strip():
             raise ValueError(f"goal.{key} must be non-empty")
+    autonomy = goal["autonomy"]
+    require_fields(autonomy, {"max_cycles", "max_attempts_per_item"}, where="goal.autonomy")
+    for key in ("max_cycles", "max_attempts_per_item"):
+        if type(autonomy[key]) is not int or autonomy[key] < 1:
+            raise ValueError(f"goal.autonomy.{key} must be positive integer")
+    expected = {"objective":"reasoning_context","items":"enforced_intent","risk_ceiling":"enforced_authority","auto_merge_ceiling":"enforced_authority","success_condition":"verified_projection","forbidden_directions":"reasoning_context","forbidden_paths":"enforced_constraint","autonomy":"enforced_authority"}
+    if goal["field_semantics"] != expected:
+        raise ValueError("goal.field_semantics must explicitly classify every goal field")
 
 
 def validate_policy(policy: dict) -> None:
-    required = {
-        "schema", "reference_contract", "executor_mode", "developer_allowed_paths", "tester_allowed_paths",
-        "authority_paths", "protected_test_paths", "risk_rules", "minimum_baseline_tests",
-        "max_changed_files", "max_patch_bytes", "test_timeout_seconds", "default_risk", "human_gate_at",
-    }
+    required = {"schema","reference_contract","contracts","executor_mode","developer_allowed_paths","tester_allowed_paths","authority_paths","protected_test_paths","risk_rules","minimum_baseline_tests","max_changed_files","max_patch_bytes","test_timeout_seconds","default_risk","human_gate_at","max_cycles","max_attempts_per_item"}
     require_fields(policy, required, where="policy")
-    if policy["schema"] != 5 or policy["reference_contract"] != "gitops-agent-control-plane/v6":
+    if policy["schema"] != 6 or policy["reference_contract"] != REFERENCE_CONTRACT:
         raise ValueError("unsupported policy contract")
+    if policy["contracts"] != {"core":CORE_CONTRACT,"verification":VERIFICATION_PROFILE,"runtime":RUNTIME_PROFILE}:
+        raise ValueError("policy contract profiles mismatch")
     for key in ("developer_allowed_paths", "tester_allowed_paths", "authority_paths", "protected_test_paths"):
         if not isinstance(policy[key], list) or not policy[key] or not all(isinstance(x, str) and x for x in policy[key]):
             raise ValueError(f"policy.{key} must be a non-empty string list")
@@ -162,6 +179,6 @@ def validate_policy(policy: dict) -> None:
             raise ValueError("risk rule paths must be a non-empty list")
         for pattern in rule["paths"]:
             _validate_pattern(pattern)
-    for key in ("minimum_baseline_tests", "max_changed_files", "max_patch_bytes", "test_timeout_seconds"):
+    for key in ("minimum_baseline_tests","max_changed_files","max_patch_bytes","test_timeout_seconds","max_cycles","max_attempts_per_item"):
         if type(policy[key]) is not int or policy[key] < 1:
             raise ValueError(f"policy.{key} must be positive integer")
