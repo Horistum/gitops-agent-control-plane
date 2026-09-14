@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"protected-tests-snapshot","type":"object","required":["schema","files","digest"],"properties":{"schema":{"const":1},"files":{"type":"object","minProperties":1,"additionalProperties":{"type":"string","pattern":"[0-9a-f]{64}"}},"digest":{"type":"string","pattern":"[0-9a-f]{64}"}},"additionalProperties":false}
