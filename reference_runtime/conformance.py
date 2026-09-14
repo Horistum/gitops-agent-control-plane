@@ -63,6 +63,22 @@ def _assert_probe_blocks_despite_green_junit(evidence: Path) -> list[str]:
     ]
 
 
+def _workspace_greet(workspace: Path, value: str) -> str:
+    service = workspace / "src" / "reference_app" / "service.py"
+    script = (
+        "import importlib.util;"
+        f"p={str(service)!r};"
+        "s=importlib.util.spec_from_file_location('_known_limit_service',p);"
+        "m=importlib.util.module_from_spec(s);"
+        "s.loader.exec_module(m);"
+        f"print(m.greet({value!r}))"
+    )
+    result = subprocess.run([sys.executable, "-S", "-c", script], cwd=workspace, text=True, capture_output=True)
+    if result.returncode:
+        raise AssertionError(f"direct candidate behavior check failed: {result.stderr}")
+    return result.stdout.strip()
+
+
 def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
     if summary["status"] != spec["expected_status"]:
         raise AssertionError(f"status {summary['status']} != {spec['expected_status']}")
@@ -170,6 +186,41 @@ def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
                 "generated invariant cases are evaluated by generic DSL",
                 "controller probe definition absent from workspace",
             ]
+    elif name == "raw-outcome-forgery":
+        if spec.get("expectation") != "known-limit":
+            raise AssertionError("raw-outcome forgery must be explicitly classified as known-limit")
+        diagnostic = json.loads((evidence / "test-candidate.json").read_text())
+        probes = json.loads((evidence / "probe-candidate.json").read_text())
+        review = json.loads((evidence / "review.json").read_text())
+        if diagnostic["passed"] is not True:
+            raise AssertionError("raw-outcome fixture did not keep public diagnostic tests green")
+        if probes["all_passed"] is not True or review["verdict"] != "accept" or summary.get("merge_sha") is None:
+            raise AssertionError("known raw-outcome limitation was not reproduced through authorization")
+        _assert_signed_receipts(probes)
+        forged_cases = [
+            case
+            for row in probes["probes"]
+            if isinstance(row.get("receipt"), dict)
+            for case in row["receipt"].get("cases", [])
+            if isinstance(case.get("outcome"), dict) and case["outcome"].get("candidate_forged") is True
+        ]
+        all_cases = [
+            case
+            for row in probes["probes"]
+            if isinstance(row.get("receipt"), dict)
+            for case in row["receipt"].get("cases", [])
+        ]
+        if not all_cases or len(forged_cases) != len(all_cases):
+            raise AssertionError("raw-outcome fixture did not forge every candidate probe observation")
+        observed = _workspace_greet(workspace, "Žluťoučký Ω")
+        if observed == "Hello, Žluťoučký Ω!":
+            raise AssertionError("raw-outcome fixture unexpectedly implements the protected unicode behavior")
+        checks += [
+            "KNOWN LIMIT reproduced: candidate forged current raw-outcome channel",
+            "parent signed candidate-forged observations into otherwise valid probe receipts",
+            "candidate direct unicode behavior remains wrong despite accepted probes",
+            "limitation is executable rather than documentation-only",
+        ]
     elif name == "human-gate":
         risk = json.loads((evidence / "risk-decision.json").read_text())
         if risk["risk"] != "high" or "HUMAN_GATE_THRESHOLD" not in risk["decision_reasons"] or summary["merge_sha"] is not None:
@@ -228,7 +279,13 @@ def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
     rows: list[dict] = []
     for name in scenario_names(repository_root):
         spec = load_scenario(repository_root, name)
-        row = {"scenario": name, "expected_status": spec["expected_status"], "passed": False, "checks": []}
+        row = {
+            "scenario": name,
+            "expected_status": spec["expected_status"],
+            "expectation": spec.get("expectation", "enforced"),
+            "passed": False,
+            "checks": [],
+        }
         try:
             if spec.get("fault_injection"):
                 summary, evidence = run_crash_recovery(repository_root, output, spec)
@@ -245,11 +302,13 @@ def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
             row["error"] = f"{type(exc).__name__}: {exc}"
             row["traceback"] = traceback.format_exc()
         rows.append(row)
+    known_limits = [row["scenario"] for row in rows if row["passed"] and row["expectation"] == "known-limit"]
     result = {
         "schema": 2,
         "reference_contract": "gitops-agent-control-plane/v6",
         "output_directory": str(output),
         "passed": all(row["passed"] for row in rows),
+        "known_limits_reproduced": known_limits,
         "scenarios": rows,
     }
     (output / "conformance-report.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
@@ -263,13 +322,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = run_matrix(args.repository_root.resolve(), args.output.resolve() if args.output else None)
     for row in result["scenarios"]:
-        print(f"{row['scenario']:<24} {row.get('status','?'):<20} {'PASS' if row['passed'] else 'FAIL'}")
+        if row["passed"] and row.get("expectation") == "known-limit":
+            outcome = "KNOWN-LIMIT"
+        else:
+            outcome = "PASS" if row["passed"] else "FAIL"
+        print(f"{row['scenario']:<24} {row.get('status','?'):<20} {outcome}")
         for check in row.get("checks", []):
             print(f"  - {check}")
         if not row["passed"]:
             print(f"  ! {row.get('error','unknown error')}")
             print(f"  ! evidence/report retained under {result['output_directory']}")
-    print(f"\nConformance: {'PASS' if result['passed'] else 'FAIL'}")
+    suffix = ""
+    if result["known_limits_reproduced"]:
+        suffix = " | known limits reproduced: " + ", ".join(result["known_limits_reproduced"])
+    print(f"\nConformance: {'PASS' if result['passed'] else 'FAIL'}{suffix}")
     print(f"Report: {Path(result['output_directory']) / 'conformance-report.json'}")
     return 0 if result["passed"] else 1
 

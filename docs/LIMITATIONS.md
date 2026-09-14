@@ -14,9 +14,21 @@ Fresh generated cases reduce simple lookup-table overfitting, but they are not f
 
 V6 improves negative-control semantics by requiring every generated acceptance case to fail on baseline. That proves the sampled cases distinguish the new criterion; it still says nothing about unsampled inputs.
 
-## Candidate raw outcomes are untrusted observations
+## Candidate raw outcomes are an executable KNOWN-LIMIT
 
-A candidate child reports return/exception information through captured stdout. The verifier parent evaluates those observations and produces the signed receipt. Same-host malicious Python could attack mechanisms below this protocol, so raw outcome separation is not presented as cryptographic hostile-code proof.
+A candidate child reports return/exception information through captured stdout. The verifier parent evaluates those observations and produces the signed receipt. Because the trusted `probe_child.py` wrapper imports candidate Python in the same interpreter, malicious candidate code can inspect wrapper frames, discover the current input/callable, emit its own `REFERENCE_RAW_OUTCOME=...`, and terminate before the wrapper emits the genuine observation.
+
+The `raw-outcome-forgery` conformance scenario reproduces this **KNOWN-LIMIT** deliberately. It verifies that:
+
+- the candidate's public diagnostic tests remain green;
+- the candidate's direct unicode behavior is wrong;
+- every candidate probe observation carries a `candidate_forged: true` marker originating in candidate code;
+- the verifier parent accepts those forged raw observations and signs otherwise-valid receipts;
+- the candidate can therefore reach merge/completion inside the standalone same-host fixture model.
+
+This scenario is reported as `KNOWN-LIMIT`, not as an enforced security property. If the raw channel is hardened later, the scenario must be changed to an enforced negative case and expected to block.
+
+The limitation is precisely why parent HMAC signing is not equivalent to hostile-code evidence integrity: HMAC authenticates what the parent decided, but the parent can still be fed a forged observation below its trust boundary.
 
 ## Generic DSL is deliberately bounded
 

@@ -6,7 +6,7 @@ Run:
 ./scripts/agentctl conformance
 ```
 
-Scenarios are discovered from `examples/scenarios/`. Negative cases are expected to prove their attack path, not merely end in a red status.
+Scenarios are discovered from `examples/scenarios/`. Negative cases are expected to prove their attack path, not merely end in a red status. Known limitations are also executable and are reported separately from enforced properties.
 
 ## Happy path
 
@@ -17,6 +17,14 @@ Scenarios are discovered from `examples/scenarios/`. Negative cases are expected
 `insufficient-tests`, `assertion-tamper` and `junit-forgery` keep diagnostic evidence green/plausible while controller verification rejects wrong behavior.
 
 `receipt-injection` attacks the **current protocol**. Candidate code writes a fake `REFERENCE_PROBE_RECEIPT=` line to its own stdout during import. The verifier parent records `candidate_receipt_injection_count`; conformance requires that count to be non-zero and simultaneously requires exactly one valid controller-facing parent receipt. A scenario where the attack path never executes therefore fails conformance.
+
+## Executable raw-outcome known limit
+
+`raw-outcome-forgery` deliberately attacks the lower observation channel that remains inside the acknowledged same-process boundary. Candidate code walks the trusted `probe_child.py` stack, recovers the current payload and callable, emits a forged `REFERENCE_RAW_OUTCOME=` with `candidate_forged: true`, and calls `os._exit(0)` before the trusted wrapper can report the actual result.
+
+The scenario is intentionally expected to reach `COMPLETED`: it demonstrates that the verifier parent can be fed a forged raw observation and then sign it. Conformance only accepts the scenario when all candidate probe cases carry the candidate-forged marker **and** an independent direct execution proves the candidate's unicode behavior is actually wrong.
+
+This row is displayed as `KNOWN-LIMIT`, not `PASS`. `conformance-report.json` lists it under `known_limits_reproduced`. If the implementation later blocks the attack, the scenario must be converted to an enforced negative case rather than silently disappearing.
 
 ## Oracle-overfitting regression
 
