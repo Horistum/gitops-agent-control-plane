@@ -46,12 +46,22 @@ The parent closes the control FD before launching candidate children. Candidate 
 
 The existing empty-body, assertion-monkeypatch and JUnit-forgery attacks remain executable regression cases.
 
+## Executable known-limit coverage
+
+`raw-outcome-forgery` exercises the layer that v6 still does **not** secure. Candidate code executes inside `probe_child.py`'s interpreter and can inspect trusted wrapper frames. The fixture recovers the current payload/callable, writes a forged `REFERENCE_RAW_OUTCOME=...` marked with `candidate_forged: true`, then exits before the wrapper can emit its genuine observation.
+
+The verifier parent accepts that observation and signs a valid parent receipt. Conformance additionally executes the merged candidate directly on a unicode input and verifies its actual behavior is wrong. The scenario is therefore classified as `known-limit`, not as an enforced negative property.
+
+A successful conformance matrix means all enforced scenarios met their expected property **and all declared known limits were actually reproduced**. `conformance-report.json` lists the latter separately as `known_limits_reproduced`.
+
+If a future verifier closes this raw-observation channel, the scenario should be converted from `known-limit` to an enforced attack whose expected terminal state is `FAILED_VERIFICATION`.
+
 ## Evidence schemas
 
 Schema validation covers the core safety path, including requests, proposals, authority snapshots, protected-test snapshots, signed probe/per-case evidence, merge intent, merge/postmerge evidence, human decisions, recovery, roles and terminal summaries. The built-in Draft 2020-12 subset rejects unsupported keywords instead of ignoring them.
 
 ## What verification does not prove
 
-It does not prove arbitrary hostile Python is contained, finite generated cases prove all possible behavior, or same-host process separation equals a VM/container/remote verifier. Candidate-child raw outcomes remain observations from a process executing candidate code.
+It does not prove arbitrary hostile Python is contained, finite generated cases prove all possible behavior, or same-host process separation equals a VM/container/remote verifier. Candidate-child raw outcomes remain observations from a process executing candidate code, and `raw-outcome-forgery` exists precisely to demonstrate that limitation.
 
 Production hostile-code verification must cross a stronger isolation boundary whose verifier internals and result channel are outside candidate control.
