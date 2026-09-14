@@ -1,29 +1,33 @@
-# Minimal FlowAI-Control product
+# Minimal autonomous-delivery product
 
-This directory is a copyable product repository, not a toy pseudo-configuration. Its initial `main`
-is green, while roadmap item `DEMO-001` asks FlowAI-Control to add one small feature.
+This repository is deliberately boring. That is useful.
 
-## What to copy
+The baseline already passes three tests for `normalize_name()`. Roadmap item `EXAMPLE-001` asks the control plane to add one small public function:
 
-Create a separate GitHub repository and copy the **contents** of this directory to its root. Keep
-`main` as the default branch. Do not place this directory inside the control repository in production.
+```python
+greet("  Ada   Lovelace ") == "Hello, Ada Lovelace!"
+```
 
-The example deliberately keeps owner-controlled CI under `ci/` and `.github/workflows/`. The
-reference policy does not allow product agents to edit either path.
+The new implementation must reuse existing normalization behavior, reject blank names, add executable tests and leave CI/authority files untouched.
 
 ## Baseline
-
-Run:
 
 ```bash
 python3 ci/run_tests.py
 ```
 
-The command writes JUnit XML to `build/test-results/reference/TEST-reference.xml`, because
-FlowAI-Control 0.3.0 requires observed JUnit identities rather than trusting exit code zero alone.
+The runner writes JUnit to:
 
-## First autonomous goal
+```text
+build/test-results/reference/TEST-reference.xml
+```
 
-After the controller is installed and activated, create a **Flow Loop goal** in the control
-repository for `DEMO-001`. The current code intentionally does not implement `greet`; the roadmap
-defines the desired result and acceptance criteria. The baseline still passes before the change.
+This makes test identities observable rather than treating exit code zero as sufficient proof.
+
+## Authority
+
+`.agent-control/` contains product-authored roadmap, architecture, release state, forbidden directions and quality gates. These files are controller input but are outside normal product write scope.
+
+## Why this example is small
+
+A first autonomous run should make every artifact inspectable: goal, plan, diff, tests, review, candidate SHA, CI, merge SHA and post-merge evidence. Once that path is trustworthy, adapt the same model to a real repository rather than proving the concept on an already complicated system.
