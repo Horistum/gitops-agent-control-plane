@@ -1,8 +1,8 @@
 {
   "schema": 2,
-  "name": "human-gate",
+  "name": "medium-auto-boundary",
   "expected_status": "NEEDS_DECISION",
-  "developer_fixture": "critical-top-level",
+  "developer_fixture": "medium-contract",
   "tester_fixture": "acceptance",
   "goal_overrides": {},
   "fault_injection": null

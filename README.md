@@ -1,243 +1,168 @@
 # GitOps Agent Control Plane Reference
 
-A **standalone executable reference** for bounded autonomous software delivery through Git.
+A **standalone executable reference** for policy-bounded autonomous software delivery through Git.
 
 **Initiated and maintained by the Horistum project.**
 
-This repository is intentionally not a product brochure and is not tied to any private controller, model provider, or internal project. Its purpose is to make the important mechanics visible and testable:
+This repository demonstrates control-plane mechanics, not a production AI product. It is deliberately small enough that every authority decision, Git identity, test result, review gate and recovery effect can be inspected.
 
-- who is allowed to decide what;
-- how an autonomous system is prevented from rewriting its own rules;
-- how planning, implementation, testing, review, risk, merge and recovery remain separate concerns;
-- how evidence is bound to exact Git identities;
-- how failed tests, forbidden paths and critical changes stop progress instead of being explained away;
-- how a crashed controller can resume a pending effect without duplicating it.
+The reference runs with **Bash, Git and Python 3.11+**. CI executes the same contract on Python 3.11, 3.12 and 3.13.
 
-The reference runs locally with **Bash, Git and Python 3.11+**. No account, token, model, container engine or external service is required.
-
-## Try the idea in one command
+## One-command demo
 
 ```bash
 ./scripts/agentctl demo happy-path
 ```
 
-The runtime copies the example product into an isolated workspace, initializes a real local Git repository, runs the green baseline, creates a bounded plan, proposes and applies a candidate, runs executable acceptance tests, records an independent review, creates a real candidate commit, performs a real local merge commit, verifies the merged result and writes audit evidence.
+A successful run creates a real local baseline commit, a separate candidate commit, executable verification bound to that candidate SHA, a computed review, a real non-fast-forward merge commit, post-merge verification bound to the merge SHA, durable state and evidence.
 
-Typical summary:
+Evidence is written under `.demo/runs/<run-id>/evidence/`.
 
-```text
-status: COMPLETED
-baseline tests: 3
-candidate tests: 5
-candidate SHA: <real git SHA>
-merge SHA: <different real git SHA>
-post-merge tests: 5
-```
-
-Evidence is written under:
-
-```text
-.demo/runs/<run-id>/evidence/
-```
-
-## The interesting part is not the happy path
-
-Run the full behavioral matrix:
-
-```bash
-./scripts/agentctl demo all
-```
-
-or:
+## Conformance is more important than the happy path
 
 ```bash
 ./scripts/agentctl conformance
 ```
 
-It exercises five scenarios:
+Contract v3 exercises ten scenarios:
 
-| Scenario | What it proves | Expected result |
+| Scenario | Expected terminal state | Property |
 |---|---|---|
-| `happy-path` | bounded goal → plan → candidate → tests → review → merge → post-merge evidence | `COMPLETED` |
-| `forbidden-path` | an implementation cannot rewrite product authority | `BLOCKED_POLICY` |
-| `test-failure` | a plausible implementation with failing executable evidence cannot merge | `FAILED_VERIFICATION` |
-| `human-gate` | a critical path raises risk and stops for human authority | `NEEDS_DECISION` |
-| `crash-recovery` | a persisted pending effect can be recovered without duplicating the effect | `COMPLETED` |
+| `happy-path` | `COMPLETED` | full bounded lifecycle |
+| `forbidden-path` | `BLOCKED_POLICY` | authority rewrite rejected before candidate side effect |
+| `test-tamper` | `BLOCKED_POLICY` | developer cannot replace protected baseline tests |
+| `test-failure` | `FAILED_VERIFICATION` | executable failure blocks merge |
+| `insufficient-tests` | `FAILED_VERIFICATION` | green-but-insufficient tests fail computed review |
+| `budget-exceeded` | `BLOCKED_POLICY` | file/patch budget blocks before workspace mutation |
+| `risk-ceiling` | `BLOCKED_POLICY` | effective risk may exceed owner goal authority |
+| `medium-auto-boundary` | `NEEDS_DECISION` | MEDIUM is reachable and auto-merge ceiling is independent |
+| `human-gate` | `NEEDS_DECISION` | top-level `src/security/**` is classified HIGH |
+| `crash-recovery` | `COMPLETED` | a second process recovers an already-performed merge effect without duplicating it |
 
-That is the point of the reference. Autonomous delivery is not impressive because a model can write a patch. It becomes interesting when the surrounding system can reliably decide **what the model may change, what counts as proof, when automation must stop, and how execution can be recovered**.
+A conformance failure does not abort the matrix. Remaining scenarios continue and a structured `conformance-report.json` plus failure evidence are retained.
 
-## What the runtime actually produces
+## Authority and tests are different write domains
 
-A successful run includes artifacts such as:
-
-```text
-goal.json
-policy.json
-authority-snapshot.json
-role-discovery.json
-plan.json
-role-architect.json
-proposal.json
-candidate.patch
-policy-decision.json
-candidate-evidence.json
-test-baseline.json
-test-candidate.json
-role-tester.json
-review.json
-risk-decision.json
-merge-evidence.json
-test-postmerge.json
-postmerge-evidence.json
-state.json
-events.jsonl
-run-summary.json
-```
-
-The crash-recovery scenario adds durable effect intent and recovery evidence. The human-gate scenario adds an unresolved human decision artifact. The forbidden-path scenario deliberately creates no candidate commit.
-
-## Architecture in one picture
-
-```text
-Product-authored authority
-        │
-        ▼
-      Goal
-        │
-        ▼
-   Discovery role
-        │
-        ▼
- Bounded architecture plan
-        │
-        ▼
- Developer proposal ───────► Policy/write-boundary gate
-        │                          │
-        │                          └── reject if authority/out-of-scope
-        ▼
- Exact candidate Git commit
-        │
-        ▼
- Executable tests + independent review
-        │
-        ▼
- Risk / critical-path decision
-       / \
-      /   \
-auto-safe  human authority required
-    │
-    ▼
- Exact merge Git commit
-    │
-    ▼
- Post-merge verification
-    │
-    ▼
- Durable evidence + hash-linked event history
-```
-
-The reference separates **authority**, **reasoning**, **execution** and **evidence**. A role may claim that a change is correct. Only executable tests and Git/evidence identities can prove what actually happened.
-
-## Repository map
-
-```text
-LICENSE                Apache License 2.0
-NOTICE                 Horistum provenance and attribution
-TRADEMARKS.md          naming and brand-use boundary
-CONTRIBUTING.md        contribution and licensing policy
-reference_runtime/     executable reference state machine
-schemas/               portable JSON Schema contracts
-config/                standalone reference policy
-examples/
-  minimal-product/     deliberately small product with authored authority
-  goal.example.json    owner goal
-scripts/
-  agentctl             single operator entry point
-  bootstrap-linux.sh   Linux prerequisite helper
-  diagnose-linux.sh    read-only diagnostics
-  cleanup-linux.sh     remove only local demo artifacts
-tests/                 conformance/runtime tests
-docs/
-  SHOWCASE.md          walk-through of the five scenarios
-  ARCHITECTURE.md      trust boundaries and control-plane model
-  STATE-MACHINE.md     durable phases and terminal states
-  EVIDENCE.md          evidence provenance and event chaining
-  MODEL.md             role separation and reasoning boundaries
-  POLICY.md            authority and risk model
-  PORTABILITY.md       contract for alternative implementations
-  SECURITY.md          threat model
-  VERIFICATION.md      what each test layer really proves
-  ADOPTION.md          how to adapt the reference to a real product
-  LINUX.md             Linux usage
-  PUBLICATION.md       publication, provenance and release readiness
-```
-
-## Validate the repository
-
-```bash
-./scripts/agentctl validate
-```
-
-This runs repository checks and the complete conformance matrix.
-
-CI runs the same validation on pull requests and on `main`.
-
-## Product authority is not implementation scope
-
-The example product contains:
+Product-authored authority lives under:
 
 ```text
 examples/minimal-product/.agent-control/
 ```
 
-These files define the roadmap, architecture, forbidden directions and quality gates. The reference runtime can read them, but its implementation write envelope excludes them.
+The standalone policy separates:
 
-The `forbidden-path` scenario attempts to change an authority file on purpose and demonstrates that the controller blocks the proposal **before a candidate side effect exists**.
+- developer write paths: implementation source only;
+- tester write paths: new independent acceptance-test files only;
+- protected baseline tests: owner-controlled and immutable to both proposal roles;
+- authority/CI paths: readable but not proposal-writable.
 
-## Portable contracts
+Candidate verification requires:
 
-Formal JSON Schema contracts live under `schemas/` for:
+1. protected baseline test files remain byte-identical;
+2. all baseline JUnit identities remain present;
+3. roadmap acceptance criteria map to required test identities and those identities are observed;
+4. candidate tests pass;
+5. test evidence records the exact candidate SHA;
+6. post-merge evidence records the exact merge SHA.
 
-- goal;
-- policy;
-- bounded plan;
-- durable state;
-- terminal evidence.
+`quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are runtime inputs, not decorative documentation.
 
-The reference runtime is one implementation of those ideas. Another implementation is useful only if it preserves the same authority/evidence properties, not merely because it can open a pull request.
+## Review is computed
 
-## Linux
+`review.json` is derived from evidence. The runtime computes:
 
-Check the small standalone prerequisite set:
+- non-empty authority snapshot;
+- unchanged authority digest;
+- accepted path policy decisions;
+- candidate test result;
+- exact candidate-SHA test binding;
+- protected baseline file preservation;
+- baseline test-identity preservation;
+- required acceptance-test identities;
+- candidate minimum test count.
 
-```bash
-./scripts/agentctl bootstrap check
+Any failed check becomes a blocking finding.
+
+## Recovery is a real process boundary
+
+The crash-recovery conformance case persists a merge-effect intent, performs the merge, intentionally terminates the controller process before writing the receipt, and starts a new Python process.
+
+The new process loads durable state, discovers the already-performed merge by its stable `Effect-Id`, records one receipt, and refuses duplicate effect identities. A second fresh resume is an idempotent no-op.
+
+## Path semantics are part of the contract
+
+Policy matching uses one segment-aware matcher everywhere. `**` means zero or more full path segments, so:
+
+```text
+src/security/guard.py
+src/reference_app/security/guard.py
 ```
 
-Automatic provisioning is available for Debian/Ubuntu and Fedora/RHEL-family systems:
+both match:
 
-```bash
-./scripts/agentctl bootstrap prepare
+```text
+src/**/security/**
 ```
 
-The showcase deliberately does **not** require GitHub CLI, Podman, a model CLI or systemd services.
+The same matcher is used for write gates, authority snapshots, protected paths and risk rules. No `Path.glob`/`fnmatch` split is used.
+
+## Evidence and schemas
+
+JSON Schema Draft 2020-12 contracts exist for the core public and safety artifacts, including:
+
+- goal and policy;
+- plan and durable state;
+- policy decision and review;
+- candidate and merge evidence;
+- test and risk evidence;
+- recovery evidence;
+- events and terminal summary.
+
+Conformance validates emitted artifacts against those schemas.
+
+The event log is **hash-linked consistency evidence, not a cryptographic authenticity signature**. Someone able to rewrite the whole evidence directory can recompute an unkeyed chain. A production system needs an external or signed anchor.
+
+## Local execution boundary
+
+The showcase executes only built-in **trusted deterministic fixture proposals**. Its local test executor has timeout, environment scrubbing and process resource limits, but it is **not a security sandbox** and does not provide filesystem or network isolation.
+
+The runtime refuses proposal sources other than `trusted-fixture` in this standalone mode.
+
+Do **not** connect an external model or untrusted code producer to this local executor. A production adapter must provide a real sandbox/container/VM boundary before executing untrusted candidate code.
+
+## Validate
+
+```bash
+./scripts/agentctl validate
+```
+
+This performs non-mutating repository validation, unit tests of control functions and the complete conformance matrix.
+
+## Repository map
+
+```text
+reference_runtime/          runtime, matcher, executor, evidence/schema validation
+schemas/                    JSON Schema contracts
+config/reference-policy.json
+examples/minimal-product/   product + product-authored authority
+examples/scenarios/         executable conformance fixtures
+scripts/agentctl            operator entry point
+tests/                      code-path and publication tests
+docs/                       architecture, policy, evidence, verification, publication
+```
 
 ## Origin, license and branding
 
-This reference architecture was originally developed and published from the **Horistum GitHub organization** as an open exploration of verifiable, policy-bounded autonomous software delivery.
+This reference architecture was originally developed and published from the **Horistum GitHub organization**.
 
-The source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE). The repository also includes [`NOTICE`](NOTICE), which records project provenance and attribution expected to travel with distributed derivatives under the license.
+Source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
 
-The Apache-2.0 license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. Truthful statements describing the origin of the work are welcome. See [`TRADEMARKS.md`](TRADEMARKS.md) for the naming policy.
+The Apache-2.0 license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. See `TRADEMARKS.md`.
 
-Contributions are governed by [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-The long-term intent is deliberate: keep this repository useful as a standalone, implementation-neutral reference while preserving a clear historical record that the reference originated in the Horistum project. A future Horistum product can build on these principles without turning this repository into private-product documentation.
+Contributions are governed by `CONTRIBUTING.md`; support expectations by `SUPPORT.md`; security reporting by `.github/SECURITY.md`; release rules by `docs/RELEASES.md`.
 
 ## What this repository does not claim
 
-It does not claim that deterministic demo roles are equivalent to a production AI system. They are deliberately predictable so the control-plane mechanics can be inspected without an external black box.
+It does not claim that deterministic fixture roles are equivalent to a production AI system. It does not claim the local executor is safe for untrusted code. It does not claim the unkeyed event chain proves authenticity.
 
-The reference demonstrates the difficult surrounding properties: authority, isolation, exact identity, executable evidence, risk escalation, human boundaries, state recovery and conformance.
-
-A real AI implementation can replace the deterministic role producers later. It should not be allowed to replace those guarantees.
+It demonstrates the surrounding control-plane properties in executable form: bounded authority, independent write domains, exact identity, evidence-based review, risk boundaries, durable state, process recovery and conformance.

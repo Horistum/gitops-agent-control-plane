@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"policy-decision","type":"object","required":["schema","accepted","files"],"properties":{"schema":{"const":2},"accepted":{"type":"boolean"},"files":{"type":"array","items":{"type":"object"}}},"additionalProperties":false}

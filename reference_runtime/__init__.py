@@ -1,3 +1,1 @@
-"""Standalone reference runtime for bounded autonomous delivery demos."""
-
-__version__ = "2.0.0"
+__version__ = "3.0-reference"

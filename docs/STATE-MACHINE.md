@@ -1,63 +1,50 @@
-# State machine
+# Durable state machine
 
-The standalone runtime exposes the control-flow states that matter to a bounded autonomous delivery system.
+Contract v3 persists the phase at every meaningful control boundary.
 
 ```text
 INITIALIZING
-    |
-    v
-DISCOVERY
-    |
-    v
-PLANNING
-    |
-    v
-PROPOSAL
-    |
-    +------ unauthorized ------> BLOCKED_POLICY
-    |
-    v
-CANDIDATE
-    |
-    +------ tests fail --------> FAILED_VERIFICATION
-    |
-    v
-REVIEWED
-    |
-    +------ risk boundary -----> NEEDS_DECISION
-    |
-    v
-MERGING
-    |
-    v
-POSTMERGE
-    |
-    +------ verification fail -> FAILED_VERIFICATION
-    |
-    v
-COMPLETED
+  -> BASELINE_VERIFY
+  -> DISCOVERY
+  -> PLANNING
+  -> PROPOSAL_GATES
+  -> CANDIDATE_APPLY
+  -> CANDIDATE_COMMIT
+  -> CANDIDATE_VERIFY
+  -> REVIEW
+  -> RISK_GATE
+  -> MERGE_PENDING / WAITING_EXTERNAL
+  -> POSTMERGE_VERIFY
+  -> COMPLETED
 ```
 
-The demo currently records a compact state object rather than every transient label, while the event log preserves the detailed transition history.
+Terminal alternatives are:
 
-## Terminal states
+- `BLOCKED_POLICY`
+- `FAILED_VERIFICATION`
+- `AWAITING_DECISION` with status `NEEDS_DECISION`
+- `COMPLETED`
 
-### `COMPLETED`
+The durable state records run identity, status, phase, base/candidate/merge SHA, risk, pending effect and event tip.
 
-A merge identity exists and post-merge executable evidence is green.
+## Recovery boundary
 
-### `BLOCKED_POLICY`
+Before merge, the runtime persists a merge intent containing:
 
-The requested/proposed action exceeded authority. No later evidence can retroactively authorize that candidate.
+- base SHA;
+- candidate SHA;
+- effect kind;
+- stable request hash.
 
-### `FAILED_VERIFICATION`
+The crash-recovery conformance fixture then:
 
-The change was within authority but executable evidence failed.
+1. performs the merge effect with `Effect-Id: <request-hash>` in the merge commit;
+2. terminates the process before receipt consumption;
+3. starts a new Python process;
+4. loads persisted state;
+5. discovers the existing effect by request identity;
+6. verifies exactly one matching merge exists;
+7. consumes the effect and continues post-merge verification;
+8. starts another fresh resume process and proves it is an idempotent terminal no-op.
 
-### `NEEDS_DECISION`
-
-Automation reached an explicit human authority boundary. This is not a failure and not permission to continue.
-
-## Recovery identity
-
-A pending external effect carries a request hash. Recovery continues only when durable state, effect intent and candidate identity agree.
+This is intentionally different from reading a file back in the same process and calling it recovery.

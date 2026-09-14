@@ -7,5 +7,11 @@
   "risk_ceiling": "high",
   "auto_merge_ceiling": "low",
   "success_condition": "EXAMPLE-001 reaches a completed state with exact candidate and post-merge evidence.",
-  "forbidden_directions": "Do not modify CI, the test runner, authority documents, or add external dependencies."
+  "forbidden_directions": "Do not modify CI, the test runner, authority documents, protected baseline tests, or add external dependencies.",
+  "forbidden_paths": [
+    ".agent-control/**",
+    "ci/**",
+    ".github/**",
+    "tests/test_service.py"
+  ]
 }

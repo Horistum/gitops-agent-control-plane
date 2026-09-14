@@ -3,103 +3,147 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import tempfile
+import subprocess
+import sys
+import time
+import traceback
 
-from .engine import run_one
+from .engine import run_request
 from .events import EventLog
-from .scenarios import EXPECTED_OUTCOME, SUPPORTED
+from .scenarios import build_request, load_scenario, scenario_names
+from .schema_validation import validate_evidence_directory
 
 
-def assert_scenario(summary: dict, evidence: Path) -> list[str]:
+def _load_summary(evidence: Path) -> dict:
+    return json.loads((evidence / "run-summary.json").read_text())
+
+
+def assert_common(summary: dict, evidence: Path) -> list[str]:
     checks: list[str] = []
-    scenario = summary["scenario"]
-
-    if summary["status"] != EXPECTED_OUTCOME[scenario]:
-        raise AssertionError(f"{scenario}: status {summary['status']} != {EXPECTED_OUTCOME[scenario]}")
-    checks.append("expected terminal state")
-
     seq, tip = EventLog.verify(evidence / "events.jsonl")
     if seq != summary["event_count"] or tip != summary["event_tip"]:
-        raise AssertionError(f"{scenario}: event-chain mismatch")
-    checks.append("hash-linked event chain")
-
+        raise AssertionError("event-chain consistency mismatch")
+    checks.append("internal event-chain consistency")
     state = json.loads((evidence / "state.json").read_text())
-    if state["status"] != summary["status"]:
-        raise AssertionError(f"{scenario}: durable state mismatch")
-    checks.append("durable state")
-
-    if scenario == "happy-path":
-        for name in ("candidate-evidence.json", "review.json", "merge-evidence.json", "postmerge-evidence.json"):
-            if not (evidence / name).is_file():
-                raise AssertionError(f"{scenario}: missing {name}")
-        if not summary["candidate_sha"] or not summary["merge_sha"] or summary["candidate_sha"] == summary["merge_sha"]:
-            raise AssertionError(f"{scenario}: exact Git identities missing")
-        if summary["candidate_tests"] < 5 or summary["postmerge_tests"] < 5:
-            raise AssertionError(f"{scenario}: executable acceptance tests missing")
-        checks += ["exact candidate/merge identities", "candidate/post-merge verification"]
-
-    elif scenario == "forbidden-path":
-        decision = json.loads((evidence / "policy-decision.json").read_text())
-        if decision["accepted"] is not False:
-            raise AssertionError("forbidden-path: unauthorized proposal was accepted")
-        if summary["candidate_sha"] is not None or summary["merge_sha"] is not None:
-            raise AssertionError("forbidden-path: candidate/merge should not exist")
-        checks += ["write-boundary rejection", "no candidate side effect"]
-
-    elif scenario == "test-failure":
-        candidate = json.loads((evidence / "test-candidate.json").read_text())
-        if candidate["passed"] is not False or summary["merge_sha"] is not None:
-            raise AssertionError("test-failure: failed verification did not block merge")
-        checks += ["real test failure observed", "merge blocked"]
-
-    elif scenario == "human-gate":
-        decision = json.loads((evidence / "human-decision.json").read_text())
-        risk = json.loads((evidence / "risk-decision.json").read_text())
-        if decision["required"] is not True or risk["risk"] != "high" or summary["merge_sha"] is not None:
-            raise AssertionError("human-gate: critical-path escalation failed")
-        checks += ["critical-path escalation", "human decision required"]
-
-    elif scenario == "crash-recovery":
-        recovery = json.loads((evidence / "recovery.json").read_text())
-        if not recovery["recovered_pending_effect"] or not recovery["duplicate_effect_prevented"]:
-            raise AssertionError("crash-recovery: pending effect recovery failed")
-        if not summary["merge_sha"]:
-            raise AssertionError("crash-recovery: recovered run did not complete")
-        checks += ["pending-effect recovery", "duplicate effect prevention"]
-
+    if state["status"] != summary["status"] or state["phase"] != summary["phase"]:
+        raise AssertionError("durable state mismatch")
+    checks.append("durable terminal state")
+    validated = validate_evidence_directory(Path(__file__).resolve().parents[1], evidence)
+    if not validated:
+        raise AssertionError("no evidence artifacts were schema-validated")
+    checks.append(f"schema validation ({len(validated)} artifacts)")
     return checks
 
 
-def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
-    owned_tmp = None
-    if output is None:
-        owned_tmp = tempfile.TemporaryDirectory(prefix="agent-control-conformance-")
-        output = Path(owned_tmp.name)
-    output.mkdir(parents=True, exist_ok=True)
+def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
+    if summary["status"] != spec["expected_status"]:
+        raise AssertionError(f"status {summary['status']} != {spec['expected_status']}")
+    checks = ["expected terminal state"] + assert_common(summary, evidence)
+    name = spec["name"]
+    if name == "happy-path":
+        review = json.loads((evidence / "review.json").read_text())
+        candidate = json.loads((evidence / "candidate-evidence.json").read_text())
+        if review["verdict"] != "accept" or not all(review["checks"].values()):
+            raise AssertionError("computed review did not accept happy path")
+        if candidate["authority_snapshot_before"] != candidate["authority_snapshot_candidate"]:
+            raise AssertionError("authority changed")
+        if not summary["candidate_sha"] or not summary["merge_sha"] or summary["candidate_sha"] == summary["merge_sha"]:
+            raise AssertionError("exact Git identities missing")
+        checks += ["computed review", "non-empty authority snapshot", "exact candidate/merge identities"]
+    elif name in {"forbidden-path", "test-tamper"}:
+        decision = json.loads((evidence / "policy-decision.json").read_text())
+        if decision["accepted"] is not False or summary["candidate_sha"] is not None:
+            raise AssertionError("write boundary failed")
+        checks += ["write-boundary rejection", "no candidate side effect"]
+    elif name == "budget-exceeded":
+        if summary["candidate_sha"] is not None or "budget" not in summary.get("reason", ""):
+            raise AssertionError("budget gate did not block before candidate")
+        checks += ["pre-write budget gate", "no candidate side effect"]
+    elif name == "risk-ceiling":
+        if summary["candidate_sha"] is not None or "risk ceiling" not in summary.get("reason", ""):
+            raise AssertionError("risk ceiling gate failed")
+        checks += ["pre-write risk ceiling gate", "no candidate side effect"]
+    elif name == "test-failure":
+        candidate = json.loads((evidence / "test-candidate.json").read_text())
+        if candidate["passed"] or summary["merge_sha"] is not None:
+            raise AssertionError("failing tests did not block merge")
+        checks += ["real executable failure", "merge blocked"]
+    elif name == "insufficient-tests":
+        review = json.loads((evidence / "review.json").read_text())
+        if review["verdict"] != "block":
+            raise AssertionError("missing acceptance identities did not block review")
+        if not [x for x in review["blocking_findings"] if x["kind"] == "missing-acceptance-tests"]:
+            raise AssertionError("review did not explain missing acceptance tests")
+        checks += ["baseline tests preserved", "missing acceptance identities block"]
+    elif name == "human-gate":
+        risk = json.loads((evidence / "risk-decision.json").read_text())
+        if risk["risk"] != "high" or "HUMAN_GATE_THRESHOLD" not in risk["decision_reasons"] or summary["merge_sha"] is not None:
+            raise AssertionError("high-risk human gate failed")
+        checks += ["top-level critical path matched", "human gate"]
+    elif name == "medium-auto-boundary":
+        risk = json.loads((evidence / "risk-decision.json").read_text())
+        if risk["risk"] != "medium" or "AUTO_MERGE_CEILING" not in risk["decision_reasons"]:
+            raise AssertionError("medium auto-merge boundary failed")
+        checks += ["medium risk reachable", "auto-merge ceiling independent"]
+    elif name == "crash-recovery":
+        recovery = json.loads((evidence / "recovery.json").read_text())
+        merge = json.loads((evidence / "merge-evidence.json").read_text())
+        if not recovery["process_resumed"] or not recovery["observed_existing_effect"] or merge["effect_occurrences"] != 1:
+            raise AssertionError("process recovery or duplicate prevention failed")
+        checks += ["actual process restart", "persisted pending effect", "single merge effect"]
+    return checks
 
-    rows = []
-    try:
-        for scenario in SUPPORTED:
-            summary = run_one(repository_root, scenario, output)
-            evidence = Path(summary["evidence_directory"])
-            checks = assert_scenario(summary, evidence)
-            rows.append(
-                {
-                    "scenario": scenario,
-                    "status": summary["status"],
-                    "checks": checks,
-                    "passed": True,
-                }
-            )
-        return {
-            "schema": 1,
-            "reference_contract": "gitops-agent-control-plane/v2",
-            "passed": all(row["passed"] for row in rows),
-            "scenarios": rows,
-        }
-    finally:
-        if owned_tmp is not None:
-            owned_tmp.cleanup()
+
+def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple[dict, Path]:
+    run_id = f"crash-recovery-{int(time.time()*1000)}"
+    run_dir = output / run_id
+    start = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--output", str(output), "--scenario", spec["name"], "--run-id", run_id], cwd=repository_root, text=True, capture_output=True)
+    if start.returncode != 75:
+        raise AssertionError(f"crash fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}")
+    state = json.loads((run_dir / "evidence" / "state.json").read_text())
+    if state["phase"] != "MERGE_PENDING" or not state["pending_effect"]:
+        raise AssertionError("pending effect was not durable at crash boundary")
+    first = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)], cwd=repository_root, text=True, capture_output=True)
+    if first.returncode:
+        raise AssertionError(f"resume process failed: {first.stderr}")
+    summary = _load_summary(run_dir / "evidence")
+    merge_sha = summary["merge_sha"]
+    second = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)], cwd=repository_root, text=True, capture_output=True)
+    if second.returncode:
+        raise AssertionError(f"second resume failed: {second.stderr}")
+    if _load_summary(run_dir / "evidence")["merge_sha"] != merge_sha:
+        raise AssertionError("second resume changed merge identity")
+    return summary, run_dir / "evidence"
+
+
+def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
+    if output is None:
+        output = repository_root / ".demo" / "conformance" / time.strftime("%Y%m%d-%H%M%S")
+    output.mkdir(parents=True, exist_ok=True)
+    base_goal = json.loads((repository_root / "examples" / "goal.example.json").read_text())
+    rows: list[dict] = []
+    for name in scenario_names(repository_root):
+        spec = load_scenario(repository_root, name)
+        row = {"scenario": name, "expected_status": spec["expected_status"], "passed": False, "checks": []}
+        try:
+            if spec.get("fault_injection"):
+                summary, evidence = run_crash_recovery(repository_root, output, spec)
+            else:
+                request = build_request(repository_root, name, base_goal)
+                summary = run_request(repository_root, request, output)
+                evidence = Path(summary["evidence_directory"])
+            row["status"] = summary["status"]
+            row["evidence_directory"] = str(evidence)
+            row["checks"] = assert_scenario(spec, summary, evidence)
+            row["passed"] = True
+        except Exception as exc:
+            row["status"] = row.get("status", "HARNESS_ERROR")
+            row["error"] = f"{type(exc).__name__}: {exc}"
+            row["traceback"] = traceback.format_exc()
+        rows.append(row)
+    result = {"schema": 2, "reference_contract": "gitops-agent-control-plane/v3", "output_directory": str(output), "passed": all(row["passed"] for row in rows), "scenarios": rows}
+    (output / "conformance-report.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -109,10 +153,14 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     result = run_matrix(a.repository_root.resolve(), a.output.resolve() if a.output else None)
     for row in result["scenarios"]:
-        print(f"{row['scenario']:<18} {row['status']:<20} PASS")
-        for check in row["checks"]:
+        print(f"{row['scenario']:<24} {row.get('status','?'):<20} {'PASS' if row['passed'] else 'FAIL'}")
+        for check in row.get("checks", []):
             print(f"  - {check}")
+        if not row["passed"]:
+            print(f"  ! {row.get('error','unknown error')}")
+            print(f"  ! evidence/report retained under {result['output_directory']}")
     print(f"\nConformance: {'PASS' if result['passed'] else 'FAIL'}")
+    print(f"Report: {Path(result['output_directory']) / 'conformance-report.json'}")
     return 0 if result["passed"] else 1
 
 

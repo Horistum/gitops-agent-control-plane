@@ -1,40 +1,55 @@
 # Policy
 
-`config/reference-policy.json` defines the bounded authority used by the standalone showcase.
+`config/reference-policy.json` is contract v3 policy.
 
-## Write envelope
+## Actor-specific write envelopes
+
+The developer may write implementation source:
 
 ```json
-"allowed_paths": ["src/**", "tests/**"]
+"developer_allowed_paths": ["src/**"]
 ```
 
-Implementation may change source and tests.
+The independent tester may add only new acceptance-test files:
 
-## Owner-controlled authority
+```json
+"tester_allowed_paths": ["tests/test_acceptance_*.py"]
+```
+
+Protected baseline tests are owner-controlled:
+
+```json
+"protected_test_paths": ["tests/test_service.py"]
+```
+
+Product authority/verification infrastructure is separately snapshotted:
 
 ```json
 "authority_paths": [".agent-control/**", "ci/**", ".github/**"]
 ```
 
-These paths are readable context but cannot be changed by an implementation proposal.
+The same segment-aware matcher is used for every path category.
 
-## Critical paths
+## Structured forbidden paths
 
-```json
-"critical_paths": ["src/**/security/**", "src/**/contract/**"]
-```
+The goal contains `forbidden_paths`; product authority contains structured forbidden-path rules. These are executable policy inputs.
 
-A legal change can still be too risky for automatic authority. The `human-gate` scenario demonstrates that distinction.
+Free-form `forbidden_directions` remains explanatory text. It is not represented as magically machine-enforceable natural language.
 
-## Hard budgets
+## Risk
 
-The policy caps changed files and patch bytes.
+Risk rules are ordered by severity and can produce LOW, MEDIUM or HIGH:
 
-Budgets create a visible blocked outcome; they do not authorize the controller to drop verification in order to fit.
+- contract paths -> MEDIUM;
+- security paths -> HIGH;
+- otherwise policy default -> LOW.
 
-## Risk boundaries
+`**` matches zero or more path segments, so both `src/security/x.py` and `src/a/security/x.py` match `src/**/security/**`.
 
-The goal supplies a risk ceiling and auto-merge ceiling.
-Policy independently defines the risk at which human authority is mandatory.
+Owner risk ceiling, automatic-merge ceiling and policy human-gate threshold are independent controls.
 
-Effective authority is the intersection of those limits.
+## Budgets
+
+Changed-file count and patch bytes are evaluated before candidate workspace mutation. A blocked budget therefore creates no candidate side effect.
+
+The conformance matrix includes a deliberately reachable budget violation.

@@ -1,16 +1,1 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/gitops-agent-control-plane/plan.schema.json",
-  "title": "Bounded Plan",
-  "type": "object",
-  "required": ["schema", "item", "objective", "acceptance", "working_set", "non_goals", "verification"],
-  "properties": {
-    "schema": {"const": 1},
-    "item": {"type": "string"},
-    "objective": {"type": "string"},
-    "acceptance": {"type": "array"},
-    "working_set": {"type": "array", "items": {"type": "string"}},
-    "non_goals": {"type": "array"},
-    "verification": {"type": "array", "items": {"type": "string"}}
-  }
-}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"plan","type":"object","required":["schema","item","objective","acceptance","developer_working_set","tester_working_set","non_goals","verification"],"properties":{"schema":{"const":2},"item":{"type":"string"},"objective":{"type":"string"},"acceptance":{"type":"array"},"developer_working_set":{"type":"array"},"tester_working_set":{"type":"array"},"non_goals":{"type":"array"},"verification":{"type":"array"}},"additionalProperties":false}

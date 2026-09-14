@@ -10,39 +10,30 @@ usage() {
 Usage: scripts/agentctl <command> [args...]
 
 Standalone reference commands:
-  demo [scenario|all]    Run the executable showcase and preserve evidence
+  demo [scenario|all]    Run showcase scenarios and preserve evidence
   conformance            Run all behavioral conformance scenarios
-  validate               Run repository validation plus conformance
+  validate               Run repository validation, unit tests, and conformance
+  self-test              Fast shell/static self-test
   bootstrap <command>    Linux prerequisite check/prepare/self-test
   diagnose               Read-only local diagnostics
   cleanup                Remove local demo artifacts
   help                   Show this help
 
-Scenarios:
-  happy-path
-  forbidden-path
-  test-failure
-  human-gate
-  crash-recovery
-
 No GitHub account, model provider, token, container engine, or private runtime is
-required for demo/conformance/validate.
+required. The local executor is for trusted deterministic fixtures only; it is not
+a security sandbox for model-generated code.
 EOF
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
+py() { "$PYTHON" -S "$@"; }
 
 run_demo() {
   local scenario="${1:-happy-path}"
   if [[ "$scenario" == "all" ]]; then
-    exec "$PYTHON" -m reference_runtime.conformance \
-      --repository-root "$ROOT" \
-      --output "$ROOT/.demo/runs"
+    exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT" --output "$ROOT/.demo/runs"
   fi
-  exec "$PYTHON" -m reference_runtime.engine \
-    --repository-root "$ROOT" \
-    --scenario "$scenario" \
-    --output "$ROOT/.demo/runs"
+  exec "$PYTHON" -S -m reference_runtime.engine --repository-root "$ROOT" --scenario "$scenario" --output "$ROOT/.demo/runs"
 }
 
 main() {
@@ -51,23 +42,21 @@ main() {
   case "$command" in
     help|-h|--help) usage ;;
     demo) run_demo "$@" ;;
-    conformance)
-      exec "$PYTHON" -m reference_runtime.conformance --repository-root "$ROOT" "$@"
-      ;;
+    conformance) exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT" "$@" ;;
     validate)
-      "$PYTHON" "$ROOT/scripts/validate_reference.py"
-      "$PYTHON" -m unittest discover -s "$ROOT/tests" -v
-      exec "$PYTHON" -m reference_runtime.conformance --repository-root "$ROOT"
+      py "$ROOT/scripts/validate_reference.py"
+      py -m unittest discover -s "$ROOT/tests" -v
+      exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT"
+      ;;
+    self-test)
+      bash -n "$ROOT/scripts/agentctl"
+      bash "$ROOT/scripts/bootstrap-linux.sh" self-test
+      py "$ROOT/scripts/validate_reference.py" --fast
+      printf 'agentctl self-test: ok\n'
       ;;
     bootstrap) exec bash "$ROOT/scripts/bootstrap-linux.sh" "$@" ;;
     diagnose) exec bash "$ROOT/scripts/diagnose-linux.sh" "$@" ;;
     cleanup) exec bash "$ROOT/scripts/cleanup-linux.sh" "$@" ;;
-    self-test)
-      bash -n "$ROOT/scripts/agentctl"
-      bash "$ROOT/scripts/bootstrap-linux.sh" self-test
-      "$PYTHON" "$ROOT/scripts/validate_reference.py" --fast
-      printf 'agentctl self-test: ok\n'
-      ;;
     *) die "unknown command: $command (run ./scripts/agentctl help)" ;;
   esac
 }

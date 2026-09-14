@@ -1,7 +1,5 @@
 # Architecture
 
-- `reference_app.service` owns public behavior.
-- Name validation and normalization have one source of truth: `normalize_name`.
-- Greeting behavior must reuse normalization rather than duplicate it.
-- No network, storage, framework, or third-party dependency is required.
-- CI and authority files are owner-controlled infrastructure, not implementation scope.
+- `reference_app.service` is the public implementation module.
+- `normalize_name` remains the single source of truth for name normalization.
+- Verification infrastructure and protected baseline tests are owner-controlled.

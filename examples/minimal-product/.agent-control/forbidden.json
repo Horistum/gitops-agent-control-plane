@@ -1,10 +1,19 @@
 {
-  "schema": 1,
-  "rules": [
+  "schema": 2,
+  "enforced": [
     {
       "id": "F-1",
-      "rule": "Do not modify CI, test runner, or product authority files as part of EXAMPLE-001."
-    },
+      "kind": "forbidden_paths",
+      "patterns": [
+        ".agent-control/**",
+        "ci/**",
+        ".github/**",
+        "tests/test_service.py"
+      ],
+      "rule": "Implementation must not modify product authority, verification infrastructure, or protected baseline tests."
+    }
+  ],
+  "advisory": [
     {
       "id": "F-2",
       "rule": "Do not add external dependencies or network behavior."
