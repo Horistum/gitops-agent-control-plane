@@ -38,7 +38,7 @@ For each probe, the controller creates a fresh HMAC key and challenge. The trust
 
 The verifier parent never imports candidate code. Candidate children receive only the current generated args/kwargs. Candidate stdout is captured as untrusted observation and cannot become the controller-facing final receipt. The controller accepts exactly one parent receipt and verifies its HMAC, challenge, probe identity and protocol version.
 
-The `receipt-injection` scenario now actually writes a forged final-receipt line from candidate code. Conformance requires evidence that this injection attempt occurred and that the parent receipt channel remained singular and valid.
+The `receipt-injection` scenario actually writes a forged final-receipt line from candidate code. Conformance requires evidence that this injection attempt occurred and that the parent receipt channel remained singular and valid.
 
 ## Verification layers
 
@@ -57,7 +57,11 @@ The local executor is **not a security sandbox**. Timeouts, process groups, HMAC
 
 Scenarios are discovered from `examples/scenarios/`. The matrix covers the happy path, forbidden writes, baseline-test tampering, failed behavior, empty diagnostic tests, assertion monkeypatching, JUnit forgery, **current receipt injection**, narrow probe-aware overfitting, independent file/byte budgets, risk ceiling, MEDIUM auto-merge boundary, HIGH human gate and cross-process crash recovery.
 
-`probe-aware` is no longer tied to an obsolete historical literal. It implements the public diagnostic example plus a deliberately narrow ASCII subset; the current product-owned `greet-unicode` invariant must reject it.
+`probe-aware` is tied to the current contract rather than a historical literal. It implements the public diagnostic example plus a deliberately narrow ASCII subset; the current product-owned `greet-unicode` invariant must reject it.
+
+The matrix also contains `raw-outcome-forgery`, which is intentionally classified as **KNOWN-LIMIT**. It reproduces the acknowledged same-process weakness below the signed-receipt boundary: malicious candidate code can inspect the trusted child-wrapper frame, forge the current `REFERENCE_RAW_OUTCOME`, and terminate before the genuine wrapper observation is emitted. The verifier parent then signs the forged observation. The scenario passes only when this limitation is actually reproduced and its evidence proves the candidate's direct unicode behavior is wrong.
+
+A successful matrix therefore means **all enforced properties behaved as expected and all declared known limits were reproducible**. It does not mean the standalone fixture has no known security limitations. `conformance-report.json` exposes known-limit scenarios separately in `known_limits_reproduced`.
 
 ## Evidence and schemas
 
@@ -81,4 +85,4 @@ This reference architecture was originally developed and published from the **Ho
 
 It does not claim deterministic fixtures equal a production AI system, randomized testing is formal proof, same-host execution is hostile-code isolation, or unkeyed hashes prove authenticity.
 
-It demonstrates bounded authority, exact identity, generic product-authored invariants, case-level negative control, signed verifier-parent receipts, evidence-aware review, risk boundaries, durable effects and executable negative conformance within the documented standalone trust model.
+It demonstrates bounded authority, exact identity, generic product-authored invariants, case-level negative control, signed verifier-parent receipts, evidence-aware review, risk boundaries, durable effects, executable negative conformance and executable known-limit reproduction within the documented standalone trust model.
