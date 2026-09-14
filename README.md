@@ -2,14 +2,9 @@
 
 A runtime-neutral reference architecture for **bounded autonomous software delivery through Git**.
 
-The repository answers a practical question: if an engineering agent is allowed to propose and deliver
-changes with minimal human intervention, what must exist around the model so that the result remains
-reviewable, reproducible, recoverable and safe?
+The repository answers a practical question: if an engineering agent is allowed to propose and deliver changes with minimal human intervention, what must exist around the model so the result remains reviewable, reproducible, recoverable and safe?
 
-This is deliberately not documentation for one product or one model provider. The reference separates
-portable control-plane concepts from a replaceable runtime adapter. You can keep the architecture,
-policy model, product authority files, evidence rules and GitHub operating model while replacing the
-controller implementation underneath them.
+This is deliberately not documentation for one product or one model provider. The reference separates portable control-plane concepts from a replaceable runtime adapter. You can keep the architecture, policy model, product authority files, evidence rules and GitHub operating model while replacing the controller implementation underneath them.
 
 ## What the reference demonstrates
 
@@ -24,9 +19,7 @@ The example implements a complete bounded-delivery model:
 7. post-merge verification proves the exact merge commit;
 8. every durable state transition and external effect has auditable evidence.
 
-The human is therefore not replaced by a long prompt. Human authority is converted into explicit,
-machine-checkable boundaries. A language model can reason inside those boundaries, but cannot redefine
-them merely because doing so would make the task easier.
+The human is not replaced by a long prompt. Human authority is converted into explicit, machine-checkable boundaries. A language model can reason inside those boundaries, but cannot redefine them merely because doing so would make the task easier.
 
 ## Portable architecture
 
@@ -39,8 +32,7 @@ The design has four distinct authorities:
 | **Runtime adapter** | orchestration, role execution, policy enforcement and effect handling | product intent |
 | **External verifiers** | CI/check results tied to exact SHAs | authority to rewrite goals |
 
-Keeping these separate prevents the controller from becoming both the thing being changed and the
-authority deciding whether the change was valid.
+Keeping these separate prevents the controller from becoming both the thing being changed and the authority deciding whether the change was valid.
 
 ## Repository map
 
@@ -67,13 +59,9 @@ authority deciding whether the change was valid.
 
 ## Reference scenario
 
-The runnable example starts green. `normalize_name()` is already implemented and tested. Roadmap item
-`EXAMPLE-001` then asks the agent system to add a small `greet()` API without changing CI, architecture
-or the existing normalization semantics.
+The runnable example starts green. `normalize_name()` is already implemented and tested. Roadmap item `EXAMPLE-001` asks the agent system to add a small `greet()` API without changing CI, architecture or existing normalization semantics.
 
-That small change is intentional. It is large enough to exercise discovery, planning, implementation,
-independent tests, review, candidate CI, merge and post-merge verification, while remaining small
-enough that a human can inspect every artifact and know whether the automation is telling the truth.
+That small change is intentional. It is large enough to exercise discovery, planning, implementation, independent tests, review, candidate CI, merge and post-merge verification, while remaining small enough that a human can inspect every artifact and know whether the automation is telling the truth.
 
 Run the local reference checks first:
 
@@ -81,8 +69,7 @@ Run the local reference checks first:
 python3 scripts/validate_reference.py
 ```
 
-Expected result includes a real execution of the example product tests and a generated JUnit report.
-No model, GitHub write or external service is required for this offline check.
+Expected result includes a real execution of the example product tests and a generated JUnit report. No model, GitHub write or external service is required for this offline check.
 
 ## First live run
 
@@ -112,9 +99,7 @@ python3 scripts/control.py --policy policy.json activate --fingerprint <PRINTED_
 python3 scripts/submit_goal.py --policy policy.json --file examples/goal.example.json
 ```
 
-The controller should then select `EXAMPLE-001`, create a candidate, run deterministic verification,
-publish a pull request, wait for the trusted check identity and continue according to the configured
-risk/merge authority.
+The controller should then select `EXAMPLE-001`, create a candidate, run deterministic verification, publish a pull request, wait for the trusted check identity and continue according to configured risk/merge authority.
 
 ## Design principles
 
@@ -130,11 +115,6 @@ risk/merge authority.
 
 ## Verification status
 
-This repository has two verification layers. The CI-safe layer runs on every PR and proves the
-portable reference itself: example tests, JUnit evidence, policy rendering, goal translation, operator
-command translation, governance payload shape and cross-file consistency. The live layer runs on a
-real controller host and additionally proves credentials, container isolation, the pinned runtime,
-model protocol, product baseline and GitHub lifecycle.
+The CI-safe layer runs on every PR and proves the portable reference itself: example tests, JUnit evidence, policy rendering, goal translation, operator command translation, governance payload shape and cross-file consistency. The live layer runs on a real controller host and additionally proves credentials, container isolation, pinned runtime, model protocol, product baseline and GitHub lifecycle.
 
-See `docs/VERIFICATION.md` for the exact matrix. A green unit test is useful; pretending it proved an
-external system that was never contacted is not.
+See `docs/VERIFICATION.md` for the exact matrix. A green unit test is useful; pretending it proved an external system that was never contacted is not.
