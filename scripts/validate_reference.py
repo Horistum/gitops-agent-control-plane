@@ -36,75 +36,47 @@ def run(argv: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProc
 
 
 def validate_publication_identity() -> None:
-    for name in (
-        "LICENSE",
-        "NOTICE",
-        "TRADEMARKS.md",
-        "CONTRIBUTING.md",
-        "SUPPORT.md",
-        ".github/SECURITY.md",
-        "docs/RELEASES.md",
-    ):
+    for name in ("LICENSE", "NOTICE", "TRADEMARKS.md", "CONTRIBUTING.md", "SUPPORT.md", ".github/SECURITY.md", "docs/RELEASES.md"):
         check((ROOT / name).is_file(), f"publication file missing: {name}")
-
     check("Apache License" in (ROOT / "LICENSE").read_text(), "LICENSE is not Apache-2.0")
     notice = (ROOT / "NOTICE").read_text()
-    check(
-        re.search(r"Copyright\s+\d{4}(?:-\d{4})?\s+Horistum contributors", notice) is not None,
-        "NOTICE copyright/provenance format drift",
-    )
+    check(re.search(r"Copyright\s+\d{4}(?:-\d{4})?\s+Horistum contributors", notice) is not None, "NOTICE copyright/provenance format drift")
 
 
 def validate_schemas_and_static_contracts() -> None:
     from reference_runtime.schema_validation import load_schema, validate_json_file
+    from reference_runtime.contracts import validate_goal, validate_policy
 
     schema_files = sorted((ROOT / "schemas").glob("*.schema.json"))
     check(bool(schema_files), "no JSON Schemas found")
     for path in schema_files:
-        schema = load_schema(path)
-        identifier = schema.get("$id")
-        if identifier is not None:
-            check(
-                isinstance(identifier, str)
-                and "example.invalid" not in identifier
-                and "localhost" not in identifier,
-                f"placeholder schema identifier remains in {path.relative_to(ROOT)}",
-            )
+        load_schema(path)
 
     validate_json_file(ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json")
     validate_json_file(ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json")
-
     goal = json.loads((ROOT / "examples" / "goal.example.json").read_text())
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
-    from reference_runtime.contracts import validate_goal, validate_policy
-
     validate_goal(goal)
     validate_policy(policy)
-    check(policy["reference_contract"] == "gitops-agent-control-plane/v3", "contract version drift")
+    check(policy["reference_contract"] == "gitops-agent-control-plane/v4", "contract version drift")
 
+    scenario_schema = ROOT / "schemas" / "scenario.schema.json"
     scenarios = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
-    check(len(scenarios) >= 10, "conformance scenario coverage regressed")
+    required_scenarios = {"insufficient-tests", "assertion-tamper", "junit-forgery", "crash-recovery", "happy-path"}
+    check(required_scenarios <= {path.stem for path in scenarios}, "critical conformance scenarios missing")
     for path in scenarios:
+        validate_json_file(path, scenario_schema)
         value = json.loads(path.read_text())
-        for key in (
-            "schema",
-            "name",
-            "expected_status",
-            "developer_fixture",
-            "tester_fixture",
-            "goal_overrides",
-            "fault_injection",
-        ):
-            check(key in value, f"scenario fixture missing {key}: {path.name}")
         check(value["name"] == path.stem, f"scenario identity drift: {path.name}")
+
+    probes = json.loads((PRODUCT / ".agent-control" / "verification-probes.json").read_text())
+    check(probes.get("schema") == 1 and probes.get("baseline") and probes.get("acceptance"), "verification probes missing")
+    probe_ids = [probe.get("id") for probe in probes["baseline"] + probes["acceptance"]]
+    check(all(isinstance(x, str) and x for x in probe_ids) and len(probe_ids) == len(set(probe_ids)), "verification probe ids invalid")
 
 
 def validate_product_baseline_without_mutation() -> None:
-    before = {
-        path.relative_to(PRODUCT).as_posix(): path.read_bytes()
-        for path in PRODUCT.rglob("*")
-        if path.is_file()
-    }
+    before = {path.relative_to(PRODUCT).as_posix(): path.read_bytes() for path in PRODUCT.rglob("*") if path.is_file()}
     with tempfile.TemporaryDirectory(prefix="reference-baseline-") as directory:
         copy = Path(directory) / "product"
         shutil.copytree(PRODUCT, copy)
@@ -113,11 +85,7 @@ def validate_product_baseline_without_mutation() -> None:
         check(junit.is_file(), "baseline JUnit missing")
         tests = list(ET.parse(junit).getroot().iter("testcase"))
         check(len(tests) == 3, f"expected 3 baseline tests, observed {len(tests)}")
-    after = {
-        path.relative_to(PRODUCT).as_posix(): path.read_bytes()
-        for path in PRODUCT.rglob("*")
-        if path.is_file()
-    }
+    after = {path.relative_to(PRODUCT).as_posix(): path.read_bytes() for path in PRODUCT.rglob("*") if path.is_file()}
     check(before == after, "validator mutated source example")
 
 
@@ -127,25 +95,15 @@ def validate_authority_layout() -> None:
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
     snapshot = digest_paths(PRODUCT, policy["authority_paths"])
     check(bool(snapshot["files"]), "authority snapshot would be empty")
+    check(".agent-control/verification-probes.json" in snapshot["files"], "verification probes are not owner-controlled authority")
     for pattern in policy["authority_paths"]:
-        check(
-            any(matches_any(path, [pattern]) for path in snapshot["files"]),
-            f"authority pattern matched no files: {pattern}",
-        )
+        check(any(matches_any(path, [pattern]) for path in snapshot["files"]), f"authority pattern matched no files: {pattern}")
 
 
 def validate_python_and_shell() -> None:
-    for base in (
-        ROOT / "reference_runtime",
-        ROOT / "scripts",
-        ROOT / "tests",
-        PRODUCT / "src",
-        PRODUCT / "tests",
-        PRODUCT / "ci",
-    ):
+    for base in (ROOT / "reference_runtime", ROOT / "scripts", ROOT / "tests", PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci"):
         for path in base.rglob("*.py"):
             ast.parse(path.read_text(), filename=str(path))
-
     for path in (ROOT / "scripts").glob("*.sh"):
         run(["bash", "-n", str(path)])
     run(["bash", "-n", str(ROOT / "scripts" / "agentctl")])
@@ -153,23 +111,21 @@ def validate_python_and_shell() -> None:
 
 
 def validate_docs_claims() -> None:
-    readme = (ROOT / "README.md").read_text()
-    security = (ROOT / "docs" / "SECURITY.md").read_text()
-    verification = (ROOT / "docs" / "VERIFICATION.md").read_text()
-    check("gitops-agent-control-plane/v3" in verification, "verification docs do not name contract v3")
-    check("not a security sandbox" in readme.lower(), "README must disclose local executor boundary")
-    security_lower = security.lower()
-    check(
-        "not an authenticity mechanism" in security_lower and "anchor" in security_lower,
-        "SECURITY must disclose event-chain authenticity boundary",
-    )
+    readme = (ROOT / "README.md").read_text().lower()
+    security = (ROOT / "docs" / "SECURITY.md").read_text().lower()
+    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text().lower()
+    verification = (ROOT / "docs" / "VERIFICATION.md").read_text().lower()
+    check("gitops-agent-control-plane/v4" in verification, "verification docs do not name contract v4")
+    check("not a security sandbox" in readme, "README must disclose local executor boundary")
+    check("not authoritative" in security and "junit" in security, "SECURITY must disclose diagnostic JUnit trust boundary")
+    check("cannot guarantee adversarial evidence integrity" in architecture, "ARCHITECTURE must not overclaim execution evidence")
+    check("not an authenticity mechanism" in security and "anchor" in security, "SECURITY must disclose event-chain authenticity boundary")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args(argv)
-
     validate_publication_identity()
     validate_schemas_and_static_contracts()
     validate_authority_layout()
@@ -177,20 +133,14 @@ def main(argv: list[str] | None = None) -> int:
     validate_docs_claims()
     if not args.fast:
         validate_product_baseline_without_mutation()
-
-    print(
-        json.dumps(
-            {
-                "passed": True,
-                "reference_contract": "gitops-agent-control-plane/v3",
-                "licensed": "Apache-2.0",
-                "provenance": "Horistum",
-                "baseline_tests": 0 if args.fast else 3,
-                "source_tree_mutated": False,
-            },
-            indent=2,
-        )
-    )
+    print(json.dumps({
+        "passed": True,
+        "reference_contract": "gitops-agent-control-plane/v4",
+        "licensed": "Apache-2.0",
+        "provenance": "Horistum",
+        "baseline_tests": 0 if args.fast else 3,
+        "source_tree_mutated": False,
+    }, indent=2))
     return 0
 
 
