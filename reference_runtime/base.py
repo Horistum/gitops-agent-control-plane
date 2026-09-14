@@ -1,30 +1,25 @@
 from __future__ import annotations
 
-import argparse
 import difflib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import xml.etree.ElementTree as ET
 
 from .contracts import (
-    canonical_json,
-    digest_tree,
     load_json,
     matches_any,
-    risk_rank,
+    safe_relative_path,
     sha256_bytes,
     sha256_json,
     validate_goal,
     validate_policy,
 )
 from .events import EventLog
-from .scenarios import EXPECTED_OUTCOME, SUPPORTED, proposal_for
+from .scenarios import EXPECTED_OUTCOME, SUPPORTED
 
 
 class BaseEngine:
@@ -76,12 +71,7 @@ class BaseEngine:
         self.save_state()
 
     def git(self, *args: str, capture: bool = True) -> str:
-        p = subprocess.run(
-            ["git", *args],
-            cwd=self.workspace,
-            text=True,
-            capture_output=capture,
-        )
+        p = subprocess.run(["git", *args], cwd=self.workspace, text=True, capture_output=capture)
         if p.returncode:
             raise RuntimeError(f"git {' '.join(args)} failed: {(p.stderr or p.stdout).strip()}")
         return p.stdout.strip() if capture else ""
@@ -96,12 +86,7 @@ class BaseEngine:
         return self.git("rev-parse", "HEAD")
 
     def run_tests(self, label: str) -> dict:
-        p = subprocess.run(
-            [sys.executable, "ci/run_tests.py"],
-            cwd=self.workspace,
-            text=True,
-            capture_output=True,
-        )
+        p = subprocess.run([sys.executable, "ci/run_tests.py"], cwd=self.workspace, text=True, capture_output=True)
         junit = self.workspace / "build" / "test-results" / "reference" / "TEST-reference.xml"
         tests = failures = errors = skipped = 0
         identities: list[str] = []
@@ -129,7 +114,7 @@ class BaseEngine:
         self.write_json(f"test-{label}.json", result)
         return result
 
-    def authority_snapshot(self) -> dict:
+    def authority_snapshot(self, label: str | None = None) -> dict:
         rows = {}
         for pattern in self.policy["authority_paths"]:
             for path in sorted(self.workspace.glob(pattern)):
@@ -137,32 +122,49 @@ class BaseEngine:
                     relative = path.relative_to(self.workspace).as_posix()
                     rows[relative] = sha256_bytes(path.read_bytes())
         snapshot = {"schema": 1, "files": rows, "digest": sha256_json(rows)}
-        self.write_json("authority-snapshot.json", snapshot)
+        name = "authority-snapshot.json" if label is None else f"authority-snapshot-{label}.json"
+        self.write_json(name, snapshot)
         return snapshot
 
     def role_artifact(self, role: str, verdict: str, summary: str, **extra) -> None:
-        value = {
-            "schema": 1,
-            "role": role,
-            "verdict": verdict,
-            "summary": summary,
-            "scenario": self.scenario,
-            **extra,
-        }
+        value = {"schema": 1, "role": role, "verdict": verdict, "summary": summary, "scenario": self.scenario, **extra}
         self.write_json(f"role-{role}.json", value)
+
+    def workspace_path(self, relative: str) -> Path:
+        canonical = safe_relative_path(relative)
+        candidate = self.workspace / canonical
+        root = self.workspace.resolve()
+        resolved = candidate.resolve(strict=False)
+        if resolved != root and root not in resolved.parents:
+            raise ValueError(f"edit path escapes repository workspace: {relative!r}")
+        if candidate.is_symlink():
+            raise ValueError(f"edit target must not be a symlink: {relative!r}")
+        return candidate
 
     def check_proposal(self, proposal: list[dict]) -> tuple[bool, list[dict]]:
         decisions = []
         allowed = True
         for edit in proposal:
-            path = edit["path"]
-            in_authority = matches_any(path, self.policy["authority_paths"])
-            in_allowed = matches_any(path, self.policy["allowed_paths"])
+            raw_path = edit.get("path")
+            try:
+                path = safe_relative_path(raw_path)
+                self.workspace_path(path)
+                path_valid = True
+                error = None
+            except (TypeError, ValueError) as exc:
+                path = raw_path if isinstance(raw_path, str) else None
+                path_valid = False
+                error = str(exc)
+            in_authority = path_valid and matches_any(path, self.policy["authority_paths"])
+            in_allowed = path_valid and matches_any(path, self.policy["allowed_paths"])
             decision = {
-                "path": path,
+                "path": raw_path,
+                "canonical_path": path if path_valid else None,
+                "path_valid": path_valid,
+                "path_error": error,
                 "authority_path": in_authority,
                 "allowed_path": in_allowed,
-                "accepted": in_allowed and not in_authority,
+                "accepted": path_valid and in_allowed and not in_authority,
             }
             if not decision["accepted"]:
                 allowed = False
@@ -173,17 +175,16 @@ class BaseEngine:
     def diff_for(self, proposal: list[dict]) -> str:
         chunks = []
         for edit in proposal:
-            path = self.workspace / edit["path"]
+            relative = safe_relative_path(edit["path"])
+            path = self.workspace_path(relative)
             old = path.read_text().splitlines(keepends=True) if path.exists() else []
             new = edit["content"].splitlines(keepends=True)
-            chunks.extend(
-                difflib.unified_diff(old, new, fromfile=f"a/{edit['path']}", tofile=f"b/{edit['path']}")
-            )
+            chunks.extend(difflib.unified_diff(old, new, fromfile=f"a/{relative}", tofile=f"b/{relative}"))
         return "".join(chunks)
 
     def apply_proposal(self, proposal: list[dict]) -> None:
         for edit in proposal:
-            path = self.workspace / edit["path"]
+            path = self.workspace_path(edit["path"])
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit["content"])
 
@@ -226,15 +227,7 @@ class BaseEngine:
         self.git("merge", "--no-ff", "reference-candidate", "-m", "Reference simulated merge")
         merge_sha = self.git("rev-parse", "HEAD")
         self.state["merge_sha"] = merge_sha
-        self.write_json(
-            "merge-evidence.json",
-            {
-                "schema": 1,
-                "candidate_sha": candidate_sha,
-                "merge_sha": merge_sha,
-                "method": "local-git-no-ff",
-            },
-        )
+        self.write_json("merge-evidence.json", {"schema": 1, "candidate_sha": candidate_sha, "merge_sha": merge_sha, "method": "local-git-no-ff"})
         self.event("merge-completed", {"candidate_sha": candidate_sha, "merge_sha": merge_sha})
         return merge_sha
 
@@ -253,16 +246,7 @@ class BaseEngine:
         )
         if not recovered:
             raise RuntimeError("recovery identity mismatch")
-        self.write_json(
-            "recovery.json",
-            {
-                "schema": 1,
-                "simulated_restart": True,
-                "recovered_pending_effect": True,
-                "request_hash": request_hash,
-                "duplicate_effect_prevented": True,
-            },
-        )
+        self.write_json("recovery.json", {"schema": 1, "simulated_restart": True, "recovered_pending_effect": True, "request_hash": request_hash, "duplicate_effect_prevented": True})
         self.event("recovered-pending-effect", {"request_hash": request_hash})
         merge_sha = self.perform_merge(candidate_sha)
         self.state["pending_effect"] = None
