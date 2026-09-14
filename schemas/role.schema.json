@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"role-evidence","type":"object","required":["schema","role","verdict","summary"],"properties":{"schema":{"const":2},"role":{"type":"string","minLength":1},"verdict":{"type":"string","minLength":1},"summary":{"type":"string","minLength":1}},"additionalProperties":true}

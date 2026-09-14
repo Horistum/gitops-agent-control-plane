@@ -1,55 +1,33 @@
 # Reasoning-role model
 
-The reference separates roles, but the roles in this repository are deterministic fixtures rather than production AI agents.
+The repository uses deterministic role fixtures to expose controller mechanics. Production AI agents may replace role producers only without inheriting authority/evidence powers.
 
 ## Write domains
 
-- Discovery and architect produce no product edits.
-- Developer proposes implementation source only.
-- Independent test designer may propose diagnostic acceptance-test files only.
-- Reviewer writes no product content and computes its verdict from controller evidence.
+Discovery/architect produce no product edits. Developer writes implementation source. Test designer may add diagnostic acceptance tests. Reviewer writes no product content and derives its verdict from controller evidence.
 
-The developer cannot replace product-authored authority or protected baseline tests. Contract v5 additionally omits the verifier definition from the candidate workspace.
+Verification authority is product-authored and omitted from the candidate workspace.
 
-## Test-designer role is not the root of trust
+## Test designer is not the root of trust
 
-A test designer can make diagnostics more useful, but its Python test file executes in a process that also imports candidate code. Contract v5 therefore does not treat tester-authored JUnit identities or counts as proof of behavior.
-
-Acceptance authority comes from product-authored **generator + invariant** definitions evaluated by a trusted verifier parent. The test-designer role may explain or supplement that evidence, but cannot mint the HMAC-authenticated parent receipt.
+JUnit/test identities are diagnostics because candidate code executes in that process. Acceptance authority comes from the product-owned generic probe DSL evaluated by the trusted verifier parent. The test-designer role cannot mint the HMAC-authenticated parent receipt.
 
 ## Candidate child is not the verifier
 
-The candidate child receives only the current generated input and produces a raw return/exception observation. It does not receive the receipt HMAC key, challenge, private oracle or future generated cases through the normal protocol.
+Candidate children receive current args/kwargs and produce untrusted observations. They do not own the final receipt, oracle evaluation or future generated cases through the protocol.
 
-The trusted verifier parent never imports candidate code. It owns case generation, oracle evaluation and the final signed receipt.
-
-This separation prevents the previous mistake where the code being evaluated could read a receipt nonce from its own argv and manufacture a controller-looking success artifact.
+The trusted verifier parent owns case generation, generic expression/oracle evaluation and signed receipt production. Candidate attempts to write final-receipt-looking lines are captured as attack evidence, not forwarded to the controller channel.
 
 ## Computed reviewer
 
-`review.json` is computed from:
-
-- authority snapshot presence/equality;
-- controller-side verifier-definition digest;
-- path-policy decisions;
-- protected baseline file digest;
-- generated baseline acceptance negative control;
-- HMAC-validated controller probe completion/pass state;
-- exact candidate-SHA probe binding;
-- supplemental diagnostic JUnit result.
-
-A green diagnostic suite cannot compensate for a failed controller probe.
+`review.json` combines authority preservation, bounded paths, protected tests, **case-level** acceptance negative control, signed probe pass/completion, exact candidate-SHA binding and supplemental diagnostics. Green JUnit cannot compensate for failed controller verification.
 
 ## Oracle strength
 
-The verifier definition contains property generators and invariants instead of fixed public examples. This makes a candidate that simply hardcodes published fixture values insufficient.
+V6 removes product-specific oracle functions from the control plane. Products compose generators and generic expressions in authority data. This improves portability while keeping the oracle language smaller than arbitrary executable code.
 
-The `probe-aware` scenario proves this. Its implementation passes the classic public `Ada Lovelace` diagnostic but fails fresh runtime-generated greeting cases.
+The `probe-aware` scenario deliberately satisfies public diagnostics plus a narrow ASCII subset; the current product-owned unicode invariant rejects it. Finite generated tests still are not formal proof.
 
-Randomized tests remain finite samples rather than formal proof.
+## Production integration boundary
 
-## Production model integration boundary
-
-Replacing deterministic proposal fixtures with an AI model is not just a different function call. The standalone local executor/verifier is explicitly not a complete hostile-code security boundary and the runtime refuses non-fixture proposal sources.
-
-A production integration needs an isolated execution/verifier adapter whose result channel is outside the candidate's control, while preserving product authority, generated-oracle semantics, exact identity, risk and durable-effect invariants.
+The local fixture verifier is not a hostile-code sandbox. A production model integration must provide isolated candidate execution and an independently protected result channel while preserving product authority, generic invariant semantics, exact identity, risk gates and durable-effect recovery.

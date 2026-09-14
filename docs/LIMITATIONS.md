@@ -1,61 +1,37 @@
 # Limitations
 
-The reference is deliberately executable, but it is not a production autonomous engineering runtime.
+The reference is executable but is not a production autonomous-engineering runtime.
 
-## No complete hostile-code verifier boundary
+## No complete hostile-code boundary
 
-Contract v5 removes verifier secrets from candidate argv/environment, moves candidate execution into child processes below a trusted verifier parent, signs final receipts and stops copying verifier definitions into the candidate workspace.
+Contract v6 keeps receipt secrets out of candidate protocol inputs, separates verifier parent from candidate child and blocks candidate final-receipt injection. Candidate Python still runs on the same host. A malicious same-user process may attempt `/proc`, file-descriptor, filesystem, kernel or other attacks outside the fixture protocol.
 
-That closes concrete protocol mistakes. It is still **not a proof against arbitrary malicious Python code** on the same host. A malicious same-user process may attempt `/proc` inspection, kernel/process attacks, filesystem discovery or other behavior outside the protocol assumptions.
+Production hostile-code verification therefore requires a container, VM or remote verifier with independently protected internals/result channel.
 
-For production model-generated code, the verifier must execute across an isolation boundary whose evidence channel the candidate cannot write or impersonate.
+## Generated invariants are finite tests
 
-## Randomized properties are tests, not proof
+Fresh generated cases reduce simple lookup-table overfitting, but they are not formal proof. Products should combine properties with deterministic regressions, static/domain-specific checks and stronger methods where appropriate.
 
-Contract v5 replaces published fixed input/expected-result tuples with generated cases and invariants. This prevents simple lookup-table overfitting to known probe fixtures.
+V6 improves negative-control semantics by requiring every generated acceptance case to fail on baseline. That proves the sampled cases distinguish the new criterion; it still says nothing about unsampled inputs.
 
-It does not prove correctness for every input. A finite randomized sample can miss defects. Production systems should combine property generation with deterministic regression suites, static analysis, domain-specific checks and, where appropriate, formal verification.
+## Candidate raw outcomes are untrusted observations
 
-## Candidate sees its current input
+A candidate child reports return/exception information through captured stdout. The verifier parent evaluates those observations and produces the signed receipt. Same-host malicious Python could attack mechanisms below this protocol, so raw outcome separation is not presented as cryptographic hostile-code proof.
 
-A candidate child necessarily receives the current function input being tested. It does **not** receive the private oracle, future generated cases, HMAC key or receipt challenge through the normal protocol.
+## Generic DSL is deliberately bounded
 
-A candidate that generically computes the correct result for the current input is satisfying the observable property. The reference does not attempt to distinguish a legitimate implementation from an implementation that arrives at the same black-box result by an unusual internal method.
+The v6 DSL supports multiple args, kwargs, several primitive generators and a small expression language. It cannot express arbitrary temporal behavior, stateful protocols, filesystem/network effects, custom comparators or every product domain without extension.
 
-## JUnit is diagnostic only
+New reusable semantics should be added as validated generic DSL operations with schemas/conformance. Embedding product-specific Python oracle functions in the control plane would defeat the portability goal.
 
-The candidate test process may import code from `src/**`. That code can affect `unittest`, XML serialization or other in-process state. Therefore `test-*.json` and JUnit identities/counts are useful diagnostics but are not authoritative acceptance evidence.
+## Verification definition is not secret
 
-Conformance deliberately demonstrates empty test bodies, assertion monkeypatching and JUnit XML forgery while requiring signed controller probes to reject the wrong implementation.
+`verification-probes.json` is omitted from the candidate workspace but remains versioned repository content. Security relies on runtime-generated inputs and verifier authority, not on pretending the definition is confidential.
 
-## Probe definition visibility outside workspace
+## JUnit and event-chain boundaries
 
-`verification-probes.json` is omitted from the candidate workspace, but it remains versioned in the same repository and is therefore not a cryptographic secret. On the standalone same-host fixture a sufficiently adversarial process might search outside its workspace.
+JUnit remains diagnostic only. The event chain provides consistency, not authenticity against complete evidence-store rewriting.
 
-Security comes from fresh generated inputs plus the private receipt key, not from pretending the probe source file is secret. Production isolation must prevent candidate access to verifier internals when that matters.
+## Reference roles
 
-## No general security sandbox
-
-The local executor is suitable only for deterministic `trusted-fixture` scenarios. Timeouts, CPU/process limits and process-group cleanup are bounded execution controls, not filesystem/network isolation.
-
-## No evidence authenticity anchor
-
-The event chain provides internal consistency only. It does not defeat a party able to rewrite the complete evidence directory and recompute hashes.
-
-## No remote forge/CI proof
-
-Local Git commits and signed controller probes demonstrate exact-identity mechanics. A production adapter must separately establish remote Git, trusted CI/verifier producer identity, credentials and remote effect semantics.
-
-## Structured authority only
-
-Runtime enforcement reads structured roadmap, forbidden, release-state, quality-gate and verification-probe JSON. `authority.md`, `architecture.md` and free-form goal prose are contextual documentation, not magically executable policy.
-
-## Probe protocol is intentionally small
-
-The standalone property verifier supports a small registry of generators and oracles for the minimal reference product. Unsupported generators, oracle kinds and exception names are configuration errors rather than silently degraded checks.
-
-It is a portability demonstration, not a general property-testing framework.
-
-## Reference fixtures are deterministic
-
-They demonstrate controller behavior, not model capability. A future reasoning integration must preserve the same authority boundaries and move hostile-code verification behind stronger isolation rather than assuming the fixture trust model generalizes automatically.
+Deterministic fixtures demonstrate controller behavior rather than model capability. Replacing them with AI requires stronger execution isolation while preserving the same authority/evidence semantics.

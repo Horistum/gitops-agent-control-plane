@@ -52,7 +52,13 @@ def _validate_pattern(pattern: str) -> None:
 
 
 def path_matches(path: str, pattern: str) -> bool:
-    """Segment-aware glob with memoized ** matching."""
+    """Segment-aware glob with memoized `**` matching.
+
+    `**` matches zero or more complete path segments. Matching memoizes the
+    `(path_index, pattern_index)` state, so even repetitive owner-authored
+    patterns are bounded by O(P*L) states instead of exponential backtracking.
+    Adjacent `**` tokens are collapsed because they are semantically redundant.
+    """
     path = safe_relative_path(path)
     _validate_pattern(pattern)
     path_parts = tuple(PurePosixPath(path).parts)
@@ -135,7 +141,7 @@ def validate_policy(policy: dict) -> None:
         "max_changed_files", "max_patch_bytes", "test_timeout_seconds", "default_risk", "human_gate_at",
     }
     require_fields(policy, required, where="policy")
-    if policy["schema"] != 4 or policy["reference_contract"] != "gitops-agent-control-plane/v5":
+    if policy["schema"] != 5 or policy["reference_contract"] != "gitops-agent-control-plane/v6":
         raise ValueError("unsupported policy contract")
     for key in ("developer_allowed_paths", "tester_allowed_paths", "authority_paths", "protected_test_paths"):
         if not isinstance(policy[key], list) or not policy[key] or not all(isinstance(x, str) and x for x in policy[key]):

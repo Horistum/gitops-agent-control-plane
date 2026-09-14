@@ -4,7 +4,6 @@ import difflib
 import hashlib
 import hmac
 import json
-import os
 from pathlib import Path
 import secrets
 import shutil
@@ -27,10 +26,7 @@ from .contracts import (
 )
 from .events import EventLog
 from .executor import LocalFixtureExecutor
-
-_ALLOWED_PROBE_GENERATORS = {"random-name-whitespace", "blank-whitespace", "random-non-string"}
-_ALLOWED_PROBE_ORACLES = {"normalize-whitespace", "greet-normalized", "raises"}
-_ALLOWED_PROBE_EXCEPTIONS = {"ValueError", "TypeError", "KeyError"}
+from .probe_dsl import ProbeContractError, validate_probe
 
 
 class InjectedCrash(RuntimeError):
@@ -131,27 +127,11 @@ class BaseEngine:
 
     @staticmethod
     def _validate_probe(probe: dict) -> None:
-        required = {"id", "target", "callable", "cases", "oracle"}
-        if set(probe) != required:
-            raise PolicyConfigurationError(f"verification probe fields invalid: {sorted(set(probe))}")
-        safe_relative_path(probe["target"])
-        if not isinstance(probe["id"], str) or not probe["id"] or not isinstance(probe["callable"], str) or not probe["callable"]:
-            raise PolicyConfigurationError("verification probe id/callable must be non-empty strings")
-        cases = probe["cases"]
-        if not isinstance(cases, dict) or set(cases) != {"generator", "count"}:
-            raise PolicyConfigurationError("verification probe cases must contain generator and count")
-        if cases["generator"] not in _ALLOWED_PROBE_GENERATORS:
-            raise PolicyConfigurationError(f"unsupported probe generator: {cases.get('generator')}")
-        if type(cases["count"]) is not int or not 1 <= cases["count"] <= 32:
-            raise PolicyConfigurationError("probe case count must be an integer from 1 to 32")
-        oracle = probe["oracle"]
-        if not isinstance(oracle, dict) or oracle.get("kind") not in _ALLOWED_PROBE_ORACLES:
-            raise PolicyConfigurationError(f"unsupported probe oracle: {oracle!r}")
-        if oracle["kind"] == "raises":
-            if set(oracle) != {"kind", "exception"} or oracle["exception"] not in _ALLOWED_PROBE_EXCEPTIONS:
-                raise PolicyConfigurationError("raises oracle requires a supported exception name")
-        elif set(oracle) != {"kind"}:
-            raise PolicyConfigurationError("return invariant oracle accepts only the kind field")
+        try:
+            validate_probe(probe)
+            safe_relative_path(probe["target"])
+        except (ProbeContractError, TypeError, ValueError) as exc:
+            raise PolicyConfigurationError(f"verification probe invalid: {exc}") from exc
 
     def verification_definition_path(self) -> Path:
         return self.controller_authority_dir / "verification-probes.json"
@@ -185,7 +165,7 @@ class BaseEngine:
                 raise PolicyConfigurationError(f"required quality gate disabled: {flag}")
 
         probes = value["verification_probes"]
-        if probes.get("schema") != 2 or not isinstance(probes.get("baseline"), list) or not isinstance(probes.get("acceptance"), list):
+        if probes.get("schema") != 3 or not isinstance(probes.get("baseline"), list) or not isinstance(probes.get("acceptance"), list):
             raise PolicyConfigurationError("verification-probes.json shape invalid")
         all_probes = probes["baseline"] + probes["acceptance"]
         if not probes["baseline"] or not probes["acceptance"]:
@@ -299,7 +279,7 @@ class BaseEngine:
     def _receipt_mac(receipt: dict, key: bytes) -> str:
         return hmac.new(key, canonical_json(receipt).encode("utf-8"), hashlib.sha256).hexdigest()
 
-    def run_probes(self, label: str, probe_ids: set[str]) -> dict:
+    def run_probes(self, label: str, probe_ids: set[str], *, persist: bool = True) -> dict:
         tested_sha = self.git("rev-parse", "HEAD")
         index = self._probe_index()
         worker = self.repo / "reference_runtime" / "probe_worker.py"
@@ -314,31 +294,17 @@ class BaseEngine:
                 "challenge": challenge,
                 "probe": probe,
             }
-            read_fd, write_fd = os.pipe()
-            try:
-                os.write(write_fd, canonical_json(control).encode("utf-8"))
-            finally:
-                os.close(write_fd)
-            try:
-                execution = self.executor.run(
-                    [
-                        sys.executable,
-                        "-S",
-                        str(worker),
-                        "--workspace",
-                        str(self.workspace),
-                        "--control-fd",
-                        str(read_fd),
-                    ],
-                    self.workspace,
-                    pass_fds=(read_fd,),
-                )
-            finally:
-                os.close(read_fd)
+            control_payload = canonical_json(control).encode("utf-8")
+            if len(control_payload) > 262144:
+                raise PolicyConfigurationError("verification probe control payload exceeds 256 KiB")
+            execution = self.executor.run(
+                [sys.executable, "-S", str(worker), "--workspace", str(self.workspace)],
+                self.workspace,
+                control_payload=control_payload,
+            )
 
             prefix = "REFERENCE_PROBE_RECEIPT="
             receipt_lines = [line for line in execution.stdout.splitlines() if line.startswith(prefix)]
-            envelope = None
             receipt = None
             receipt_valid = False
             if len(receipt_lines) == 1:
@@ -348,9 +314,12 @@ class BaseEngine:
                     candidate_mac = candidate_envelope.get("hmac_sha256") if isinstance(candidate_envelope, dict) else None
                     if isinstance(candidate_receipt, dict) and isinstance(candidate_mac, str):
                         mac_ok = hmac.compare_digest(self._receipt_mac(candidate_receipt, receipt_key), candidate_mac)
-                        identity_ok = candidate_receipt.get("challenge") == challenge and candidate_receipt.get("probe_id") == probe_id
+                        identity_ok = (
+                            candidate_receipt.get("protocol") == 3
+                            and candidate_receipt.get("challenge") == challenge
+                            and candidate_receipt.get("probe_id") == probe_id
+                        )
                         if mac_ok and identity_ok:
-                            envelope = candidate_envelope
                             receipt = candidate_receipt
                             receipt_valid = True
                 except (json.JSONDecodeError, TypeError, ValueError):
@@ -378,7 +347,7 @@ class BaseEngine:
                 "stderr_sha256": sha256_bytes(execution.stderr.encode()),
             })
         result = {
-            "schema": 2,
+            "schema": 3,
             "label": label,
             "tested_sha": tested_sha,
             "verification_definition_sha256": definition_digest,
@@ -388,13 +357,24 @@ class BaseEngine:
             "all_passed": bool(rows) and all(row["passed"] for row in rows),
             "authoritative_within_trusted_fixture_scope": True,
         }
-        self.write_json(f"probe-{label}.json", result)
+        if persist:
+            self.write_json(f"probe-{label}.json", result)
         return result
 
     def run_negative_control(self, selected: dict) -> dict:
         acceptance_ids = self.acceptance_probe_ids(selected)
-        evidence = self.run_probes("negative-control", acceptance_ids)
-        negative_passed = evidence["all_completed"] and all(not row["passed"] for row in evidence["probes"])
+        evidence = self.run_probes("negative-control", acceptance_ids, persist=False)
+        cases = [
+            case
+            for row in evidence["probes"]
+            if row["receipt_valid"] and isinstance(row.get("receipt"), dict)
+            for case in row["receipt"].get("cases", [])
+        ]
+        every_case_completed = bool(cases) and all(case.get("completed") is True for case in cases)
+        every_case_rejected = bool(cases) and all(case.get("passed") is False for case in cases)
+        negative_passed = evidence["all_completed"] and every_case_completed and every_case_rejected
+        evidence["negative_control_case_count"] = len(cases)
+        evidence["negative_control_all_cases_rejected"] = every_case_rejected
         evidence["negative_control_passed"] = negative_passed
         self.write_json("probe-negative-control.json", evidence)
         return evidence

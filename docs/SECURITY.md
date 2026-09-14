@@ -1,83 +1,57 @@
 # Security model
 
-The primary threat is an autonomous component that can both change a product and weaken the evidence or authority used to approve that change.
+The primary threat is an autonomous component that can both change a product and weaken the authority or evidence used to approve that change.
 
 ## Demonstrated controls
 
-Contract v5 demonstrates:
+Contract v6 demonstrates:
 
-- one memoized segment-aware path matcher for authority, writes and risk classification;
-- non-empty product-authority snapshots;
-- separate developer/tester write domains;
-- immutable owner-controlled baseline-test files;
-- controller-side verification definitions that are not copied into the candidate workspace;
-- runtime-generated property-style probe cases instead of published fixed input tuples;
-- acceptance negative controls that must fail on the baseline implementation;
+- one memoized segment-aware path matcher for authority, writes and risk;
+- separate developer/tester write domains and protected baseline tests;
+- controller-side verification definitions omitted from the candidate workspace;
+- a generic product-authored generator/invariant DSL rather than product-specific control-plane oracles;
+- **case-level negative control**: every generated acceptance case must complete and fail on baseline;
 - a trusted verifier parent that never imports candidate code;
-- candidate execution in a separate child process;
-- an HMAC-authenticated receipt challenge delivered to the verifier parent over a private inherited control FD rather than argv or environment;
-- exactly one accepted receipt line per probe;
-- exact candidate/merge SHA binding for controller probe evidence;
-- computed review from controller-observed probe evidence;
-- reachable LOW, MEDIUM and HIGH policy behavior;
-- pre-write change-budget and risk-ceiling gates;
-- durable merge intent plus cross-process recovery;
-- fail-closed JSON Schema keyword validation.
+- candidate execution in separate child processes;
+- HMAC-authenticated parent receipts with challenge/control material delivered through an inherited **control FD**, not candidate argv/environment;
+- exactly one accepted final receipt per probe;
+- exact candidate/merge SHA binding;
+- pre-write budgets/risk gates, durable merge intent and process recovery;
+- fail-closed JSON Schema validation for emitted safety/evidence artifacts, including authority snapshots, protected-test snapshots, merge intent and human decisions.
 
-## Candidate-process JUnit is diagnostic, not authoritative
+## JUnit is diagnostic and not authoritative
 
-JUnit output, test names, counts and assertions are produced by a Python process that imports code from the candidate write envelope. Candidate code can therefore influence Python globals, assertion helpers or XML serialization in that process.
-
-Contract v5 treats JUnit as **not authoritative**. A green JUnit file is supplemental diagnostic evidence and cannot authorize a candidate by itself.
-
-The conformance suite includes direct forgery cases for empty test bodies, `unittest` monkeypatching and forged JUnit output. All remain blocked by controller probes.
+Candidate-process JUnit imports candidate code and can therefore be influenced through assertions, imports or XML serialization. It is **not authoritative** and cannot override controller probe failure.
 
 ## Signed verifier-parent receipt boundary
 
-The controller creates a fresh receipt key/challenge for each probe. The key and challenge are serialized to an anonymous pipe and the read side is inherited only by the trusted verifier parent through a **control FD**. They are not placed in `sys.argv` or the environment.
+The controller generates a fresh receipt key/challenge per probe. The executor starts the trusted parent reader before writing the control payload, so payload growth cannot deadlock on an unread pipe buffer. The parent consumes and closes the control FD before candidate children are started.
 
-The verifier parent reads and closes that FD before creating any candidate child. It never imports candidate code. Candidate children receive only their current generated input and cannot see the receipt key, future cases or oracle definition through the normal protocol.
+Candidate children receive only their current generated args/kwargs. Their stdout is treated as untrusted observation and is not forwarded into the parent final-receipt stream. The parent owns oracle evaluation and signs the canonical final receipt with HMAC-SHA256. The controller requires exactly one receipt and verifies the HMAC, challenge, probe ID and protocol version.
 
-The verifier parent evaluates the raw child outcome against its oracle, creates the final receipt and authenticates the canonical receipt with HMAC-SHA256. The controller requires exactly one receipt line, verifies the HMAC and verifies the challenge/probe identity before treating the result as completed.
+The conformance case `receipt-injection` attacks this **current protocol** by writing a fake final-receipt line from candidate code. Conformance requires proof that at least one injection attempt was observed in child stdout and that the parent-facing receipt remained singular and valid.
 
-This closes the previous construction where the candidate could read a nonce from worker argv and print a fake success receipt.
+The child raw-outcome channel is still an observation produced in the same process that executes candidate Python. V6 does not promote that fact into a hostile-code guarantee. A same-host malicious process may attempt process/file-descriptor/OS attacks beyond the fixture protocol.
 
-## Randomized oracle boundary
+## Generic invariant boundary
 
-Probe definitions no longer publish literal `args` plus literal expected return values. They declare a case generator and an invariant/oracle. Fresh cases are generated separately for baseline negative control, candidate verification and post-merge verification.
+Probe definitions describe generic generators and expressions rather than literal input/output tuples or product-named runtime functions. The current DSL supports multiple positional args, named kwargs, choices, integers, booleans, whitespace/token text generation, and expression composition such as arg/kwarg lookup, split, join, concat, strip, case conversion and length.
 
-For the reference product, examples include randomized whitespace/name inputs with invariants such as:
+This makes the control plane reusable without embedding `greet`-specific logic. It is intentionally a small declarative DSL, not arbitrary executable oracle code.
 
-- `normalize_name(x) == " ".join(x.split())`;
-- `greet(x) == "Hello, " + " ".join(x.split()) + "!"`;
-- blank inputs raise `ValueError`;
-- randomized non-string inputs raise `TypeError`.
-
-This prevents a lookup table for published fixture inputs from satisfying conformance. It is not proof against an adversarial implementation that can inspect or attack the verifier process on the same host.
+Fresh finite cases reduce simple lookup-table overfitting but do not prove correctness. The `probe-aware` conformance fixture deliberately satisfies public diagnostics and a narrow ASCII subset while the current product-owned unicode invariant rejects it.
 
 ## Remaining hostile-code boundary
 
-The standalone verifier still runs candidate Python on the same operating-system host. A malicious same-user process may attempt `/proc` inspection, kernel/process attacks, resource abuse or other techniques outside the protocol model.
-
-Therefore contract v5 **does not claim a complete hostile-code trust boundary**. For arbitrary model-generated or malicious candidate code, production verification must run in a container/VM/remote verifier with a result channel the candidate cannot access or impersonate.
-
-## Local executor is not a security sandbox
-
-The standalone executor is restricted to deterministic `trusted-fixture` proposals. It provides controller wall-clock timeout, CPU limits derived from policy, a scrubbed environment, basic process limits, and process-group descendant cleanup.
-
-It is **not a security sandbox** and does not provide filesystem, network, kernel or VM isolation.
+The local executor is **not a security sandbox**. Candidate Python still runs on the same operating-system host. Production use with arbitrary model-generated or malicious code requires a container, VM or remote verifier whose process/filesystem boundary and result channel are outside candidate control.
 
 ## Event-chain limitation
 
-`events.jsonl` is hash-linked. It detects accidental corruption and edits where hashes are not recomputed.
-
-It is **not an authenticity mechanism**. A party that can rewrite the entire evidence directory can rewrite events and recompute the chain.
-
-A production system must anchor the event/evidence tip outside the mutable evidence directory, for example with a trusted remote state store, signed checkpoint, transparency log or independently controlled verifier.
+`events.jsonl` is hash-linked consistency evidence. It is **not an authenticity mechanism** against a party that can rewrite the entire evidence directory and recompute hashes. Production systems need an independent signed/external anchor.
 
 ## Product authority
 
-Structured enforcement inputs are JSON authority files such as roadmap, forbidden rules, release state, quality gates and verification probes. Human-readable `authority.md`, `architecture.md` and free-form `forbidden_directions` are context rather than silently executable natural language.
+Structured enforcement inputs are roadmap, forbidden rules, release state, quality gates and verification definitions. Human-readable Markdown/prose is context, not silently executable policy.
 
 ## Security reporting
 

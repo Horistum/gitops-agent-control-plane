@@ -13,6 +13,7 @@ class SchemaValidationError(ValueError):
 SUPPORTED_SCHEMA_KEYWORDS = {
     "$schema", "$id", "title", "description",
     "type", "const", "enum", "required", "properties", "additionalProperties",
+    "minProperties", "maxProperties",
     "items", "minItems", "maxItems", "uniqueItems",
     "minLength", "maxLength", "pattern",
     "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
@@ -49,8 +50,14 @@ def _validate_schema_definition(schema: dict, path: str = "$schema") -> None:
         if not isinstance(schema["items"], dict):
             raise SchemaValidationError(f"{path}.items: tuple/array schema forms are unsupported")
         _validate_schema_definition(schema["items"], f"{path}.items")
-    if "additionalProperties" in schema and type(schema["additionalProperties"]) is not bool:
-        raise SchemaValidationError(f"{path}.additionalProperties: only boolean form is supported")
+    if "additionalProperties" in schema:
+        additional = schema["additionalProperties"]
+        if type(additional) is bool:
+            pass
+        elif isinstance(additional, dict):
+            _validate_schema_definition(additional, f"{path}.additionalProperties")
+        else:
+            raise SchemaValidationError(f"{path}.additionalProperties must be boolean or schema object")
 
 
 def validate_instance(instance: Any, schema: dict, path: str = "$") -> None:
@@ -66,17 +73,24 @@ def validate_instance(instance: Any, schema: dict, path: str = "$") -> None:
         elif not _type_ok(instance, expected):
             raise SchemaValidationError(f"{path}: expected {expected}")
     if isinstance(instance, dict):
+        if len(instance) < schema.get("minProperties", 0):
+            raise SchemaValidationError(f"{path}: too few properties")
+        if "maxProperties" in schema and len(instance) > schema["maxProperties"]:
+            raise SchemaValidationError(f"{path}: too many properties")
         missing = [key for key in schema.get("required", []) if key not in instance]
         if missing:
             raise SchemaValidationError(f"{path}: missing required {missing}")
         props = schema.get("properties", {})
-        if schema.get("additionalProperties") is False:
-            extra = set(instance) - set(props)
-            if extra:
-                raise SchemaValidationError(f"{path}: unexpected properties {sorted(extra)}")
+        extras = set(instance) - set(props)
+        additional = schema.get("additionalProperties", True)
+        if additional is False and extras:
+            raise SchemaValidationError(f"{path}: unexpected properties {sorted(extras)}")
         for key, child in props.items():
             if key in instance:
                 validate_instance(instance[key], child, f"{path}.{key}")
+        if isinstance(additional, dict):
+            for key in extras:
+                validate_instance(instance[key], additional, f"{path}.{key}")
     if isinstance(instance, list):
         if len(instance) < schema.get("minItems", 0):
             raise SchemaValidationError(f"{path}: too few items")
@@ -126,17 +140,22 @@ def validate_jsonl_file(instance_path: Path, schema_path: Path) -> None:
 
 
 ARTIFACT_SCHEMAS = {
+    "request.json": "request.schema.json",
     "goal.json": "goal.schema.json",
     "policy.json": "policy.schema.json",
     "plan.json": "plan.schema.json",
+    "proposal.json": "proposal.schema.json",
     "state.json": "state.schema.json",
     "run-summary.json": "evidence.schema.json",
     "policy-decision.json": "policy-decision.schema.json",
     "review.json": "review.schema.json",
     "candidate-evidence.json": "candidate-evidence.schema.json",
+    "merge-intent.json": "merge-intent.schema.json",
     "merge-evidence.json": "merge-evidence.schema.json",
     "postmerge-evidence.json": "postmerge-evidence.schema.json",
     "recovery.json": "recovery.schema.json",
+    "human-decision.json": "human-decision.schema.json",
+    "fault-injection.json": "fault-injection.schema.json",
     "test-baseline.json": "test-evidence.schema.json",
     "test-candidate.json": "test-evidence.schema.json",
     "test-postmerge.json": "test-evidence.schema.json",
@@ -147,6 +166,12 @@ ARTIFACT_SCHEMAS = {
     "risk-decision.json": "risk-decision.schema.json",
 }
 
+ARTIFACT_SCHEMA_PATTERNS = (
+    (re.compile(r"^authority-snapshot-(?:baseline|candidate)\.json$"), "authority-snapshot.schema.json"),
+    (re.compile(r"^protected-tests-(?:baseline|candidate)\.json$"), "protected-tests.schema.json"),
+    (re.compile(r"^role-[a-z0-9-]+\.json$"), "role.schema.json"),
+)
+
 
 def validate_evidence_directory(repository_root: Path, evidence: Path) -> list[str]:
     validated: list[str] = []
@@ -155,6 +180,14 @@ def validate_evidence_directory(repository_root: Path, evidence: Path) -> list[s
         if path.is_file():
             validate_json_file(path, repository_root / "schemas" / schema_name)
             validated.append(filename)
+    for path in sorted(evidence.glob("*.json")):
+        if path.name in ARTIFACT_SCHEMAS:
+            continue
+        for pattern, schema_name in ARTIFACT_SCHEMA_PATTERNS:
+            if pattern.fullmatch(path.name):
+                validate_json_file(path, repository_root / "schemas" / schema_name)
+                validated.append(path.name)
+                break
     events = evidence / "events.jsonl"
     if events.is_file():
         validate_jsonl_file(events, repository_root / "schemas" / "event.schema.json")

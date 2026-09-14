@@ -1,84 +1,43 @@
 # Evidence model
 
-## Authority evidence
+## Authority and protected-test evidence
 
-Authority snapshots enumerate real matching workspace files using the same memoized segment-aware matcher used by write gates. Contract v5 also binds the controller-side `verification-probes.json` by SHA-256 even though that file is deliberately omitted from the candidate workspace.
+Authority snapshots enumerate real matching workspace files with the same matcher used by policy gates and separately bind the controller-side verification-definition digest. Protected-test snapshots record byte digests of owner-controlled baseline tests.
 
-The runtime fails closed if the workspace authority snapshot or a configured authority pattern matches no file.
+Contract v6 gives both artifact families explicit JSON Schemas; they are not merely opaque objects in the evidence directory.
 
-## Diagnostic JUnit evidence
+## Diagnostic JUnit
 
-`test-baseline.json`, `test-candidate.json` and `test-postmerge.json` record candidate-process diagnostics:
+`test-baseline.json`, `test-candidate.json` and `test-postmerge.json` record exact SHA, exit/timeout state, testcase identities/counts, stdout/stderr digests and executor metadata. Stale JUnit is deleted before execution.
 
-- exact tested Git SHA;
-- exit code and timeout flag;
-- testcase count and identities;
-- failures/errors/skips;
-- stdout/stderr digests;
-- process-group/resource metadata.
+These artifacts carry `authoritative: false` because candidate code executes in the same process that produces those diagnostics.
 
-Before each run stale JUnit output is removed.
+## Signed verifier evidence
 
-These artifacts explicitly carry `authoritative: false`. Candidate code is imported by the same Python process that produces JUnit, so test names/counts/XML are not a sufficient authorization channel.
+`probe-baseline.json`, `probe-negative-control.json`, `probe-candidate.json` and `probe-postmerge.json` record verifier-definition identity, probe identities, one authenticated parent receipt per probe and structured per-case results.
 
-## Signed controller probe evidence
+Each case records input digest, child exit status, raw-outcome count, observed outcome, pass/fail reason and how many candidate **final-receipt injection attempts** were observed in child stdout. This lets conformance prove an attack path actually executed instead of inferring it from a scenario name.
 
-Standalone verification is recorded in:
+The receipt schema validates protocol, challenge, probe identity, case count and case rows. Semantic HMAC validation remains a controller operation because the schema does not possess the per-run secret key.
 
-```text
-probe-baseline.json
-probe-negative-control.json
-probe-candidate.json
-probe-postmerge.json
-```
+## Case-level negative control
 
-The product authors the probe definition, but it is read from controller-side product source rather than copied into the candidate workspace. Each probe evidence artifact records the verifier-definition digest.
+New acceptance probes first run on baseline. Negative control succeeds only when all probe receipts complete and **every generated acceptance case** is rejected. Evidence records total case count and `negative_control_all_cases_rejected` explicitly.
 
-For each probe the controller creates a fresh secret HMAC key and challenge. They are delivered only to a trusted verifier parent through an inherited control FD. They do not appear in argv or environment.
+Regression probes are separate and must pass on baseline.
 
-The verifier parent reads and closes the control FD before any candidate child starts. It then generates fresh cases, executes a candidate child for each case, evaluates raw child outcomes against the private oracle and emits one HMAC-SHA256 authenticated receipt.
+## Generic oracle evidence
 
-The controller accepts a probe only when:
+Product authority defines generators and declarative expressions through the generic probe DSL. The controller/verifier runtime no longer contains product-specific `greet`/`normalize_name` oracle functions. Fresh cases are generated separately for baseline, negative-control, candidate and post-merge phases.
 
-1. there is exactly one final receipt line;
-2. its HMAC verifies with the controller-held key;
-3. challenge and probe identity match;
-4. the verifier parent reports protocol completion;
-5. all generated cases satisfy the invariant/oracle;
-6. the worker exits normally within the execution budget.
+## Durable/human evidence
 
-Candidate child output is captured by the verifier parent and is not forwarded into the final receipt stream.
+Contract v6 adds schema coverage for `merge-intent.json`, `human-decision.json`, requests, proposals, role artifacts and fault-injection evidence in addition to merge/recovery/state/terminal evidence. The core authority, verification, risk and recovery path is therefore schema-checked rather than only selected endpoints.
 
-## Generated-case evidence
+## Event chain
 
-Receipt case rows expose generated inputs only **after execution** for auditability, along with input digests and observed raw outcomes. Candidate and post-merge cases are freshly generated and independent from the baseline negative-control cases.
-
-Probe definitions contain generator/invariant descriptions rather than literal fixed input/expected-result tuples. This makes a lookup table over published fixtures insufficient. It remains randomized testing, not formal proof.
-
-## Negative control
-
-New acceptance properties are first executed against baseline. Negative control is valid only if those generated cases complete and fail against the baseline implementation. Regression/baseline probes are separate and must pass on baseline.
-
-## Candidate review evidence
-
-`review.json` is computed from authority preservation, write policy, protected tests, negative-control result, signed controller-probe result, exact probe SHA binding and supplemental diagnostic status.
-
-Conformance deliberately proves that green forged JUnit, argv nonce forgery and fixed-example overfitting cannot override failing signed probes.
-
-## Effect evidence
-
-Merge intent is persisted before effect execution. Merge commits carry a stable `Effect-Id` as the final non-empty trailer line. Recovery accepts an effect only when that exact trailer identifies one merge commit.
-
-## Event chain: consistency, not authenticity
-
-Events are hash-linked. This detects corruption or edits where hashes are not recomputed.
-
-There is no secret key or external anchor in the standalone event log. A full evidence-directory rewriter can recompute the chain and terminal tip. Production systems need an independent anchor/signature/transparency mechanism.
-
-## JSON Schema
-
-The built-in validator supports an explicit Draft 2020-12 subset and rejects unknown keywords. Scenario fixtures, verifier definitions, diagnostic evidence, signed probe evidence, post-merge evidence and core safety artifacts are schema-validated during conformance.
+Events are hash-linked consistency evidence, not authenticity. A writer able to replace the whole evidence directory can recompute an unkeyed chain. Production systems require an independent signed/external anchor.
 
 ## Scope boundary
 
-Signed controller probe evidence is authoritative **within the deterministic trusted-fixture scope of this repository**. Same-host malicious Python can still attempt process/kernel/filesystem attacks outside the protocol model. Production hostile-code verification requires a stronger isolation boundary and independently trusted result channel.
+Candidate-child raw output remains an untrusted same-host observation. The trusted verifier parent evaluates it and signs the resulting receipt within the deterministic fixture model. This is not hostile-code isolation; production verification requires a container/VM/remote boundary and independently controlled result channel.
