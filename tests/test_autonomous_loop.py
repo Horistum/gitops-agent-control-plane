@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from reference_runtime.base import PolicyConfigurationError
 from reference_runtime.contracts import (
     CORE_CONTRACT,
     REFERENCE_CONTRACT,
@@ -169,6 +170,16 @@ class AutonomousSelectionTests(unittest.TestCase):
             path.write_text(json.dumps(state))
             engine.authority = engine.load_authority()
             self.assertEqual([item["id"] for item in engine.eligible_items()], ["EXAMPLE-002"])
+
+    def test_runtime_rejects_semantically_invalid_authority_as_policy_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self._engine("autonomous-two-item", directory)
+            path = engine.workspace / ".agent-control" / "roadmap.json"
+            roadmap = json.loads(path.read_text())
+            roadmap["items"][0]["dependencies"] = ["EXAMPLE-002"]
+            path.write_text(json.dumps(roadmap))
+            with self.assertRaisesRegex(PolicyConfigurationError, "dependency cycle"):
+                engine.load_authority()
 
     def test_repair_catalog_has_two_attempts(self):
         request = build_request(
