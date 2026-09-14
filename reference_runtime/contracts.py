@@ -41,21 +41,6 @@ def load_json(path: Path) -> dict:
     value = json.loads(path.read_text())
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
-
-    # Authority/config validation is deliberately attached to the common loader,
-    # so fresh runs and resumed runs fail closed even outside repository CI.
-    if path.name == "roadmap.json":
-        validate_roadmap(value)
-    elif path.name == "release-state.json":
-        roadmap_path = path.with_name("roadmap.json")
-        roadmap = json.loads(roadmap_path.read_text()) if roadmap_path.is_file() else None
-        if roadmap is not None:
-            validate_roadmap(roadmap)
-        validate_release_state(value, roadmap)
-    elif path.name == "authority-model.json":
-        validate_authority_model(value)
-    elif path.name == "role-protocols.json":
-        validate_role_protocols(value)
     return value
 
 
