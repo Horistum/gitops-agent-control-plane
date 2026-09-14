@@ -2,7 +2,9 @@
 
 ## Authority evidence
 
-Authority snapshots enumerate real matching files using the exact same memoized segment-aware matcher used by write gates. The runtime fails closed if the authority snapshot or a configured authority pattern matches no file.
+Authority snapshots enumerate real matching workspace files using the same memoized segment-aware matcher used by write gates. Contract v5 also binds the controller-side `verification-probes.json` by SHA-256 even though that file is deliberately omitted from the candidate workspace.
+
+The runtime fails closed if the workspace authority snapshot or a configured authority pattern matches no file.
 
 ## Diagnostic JUnit evidence
 
@@ -19,9 +21,9 @@ Before each run stale JUnit output is removed.
 
 These artifacts explicitly carry `authoritative: false`. Candidate code is imported by the same Python process that produces JUnit, so test names/counts/XML are not a sufficient authorization channel.
 
-## Controller probe evidence
+## Signed controller probe evidence
 
-Authoritative standalone verification is recorded in:
+Standalone verification is recorded in:
 
 ```text
 probe-baseline.json
@@ -30,25 +32,38 @@ probe-candidate.json
 probe-postmerge.json
 ```
 
-Probe definitions live in protected product authority, not in the candidate write envelope.
+The product authors the probe definition, but it is read from controller-side product source rather than copied into the candidate workspace. Each probe evidence artifact records the verifier-definition digest.
 
-Each required probe:
+For each probe the controller creates a fresh secret HMAC key and challenge. They are delivered only to a trusted verifier parent through an inherited control FD. They do not appear in argv or environment.
 
-1. runs in a fresh child process;
-2. directly loads the declared target source file rather than the candidate package initializer;
-3. uses a controller-generated nonce;
-4. must emit a matching completion receipt after protocol completion;
-5. records pass/fail plus worker exit/timeout evidence.
+The verifier parent reads and closes the control FD before any candidate child starts. It then generates fresh cases, executes a candidate child for each case, evaluates raw child outcomes against the private oracle and emits one HMAC-SHA256 authenticated receipt.
 
-A child that merely calls `os._exit(0)` leaves no completion receipt and fails verification.
+The controller accepts a probe only when:
 
-New acceptance probes are first executed against the baseline. The negative control is valid only if those probes complete and fail there. This prevents empty/tautological acceptance checks from becoming useful evidence merely because their names look correct.
+1. there is exactly one final receipt line;
+2. its HMAC verifies with the controller-held key;
+3. challenge and probe identity match;
+4. the verifier parent reports protocol completion;
+5. all generated cases satisfy the invariant/oracle;
+6. the worker exits normally within the execution budget.
+
+Candidate child output is captured by the verifier parent and is not forwarded into the final receipt stream.
+
+## Generated-case evidence
+
+Receipt case rows expose generated inputs only **after execution** for auditability, along with input digests and observed raw outcomes. Candidate and post-merge cases are freshly generated and independent from the baseline negative-control cases.
+
+Probe definitions contain generator/invariant descriptions rather than literal fixed input/expected-result tuples. This makes a lookup table over published fixtures insufficient. It remains randomized testing, not formal proof.
+
+## Negative control
+
+New acceptance properties are first executed against baseline. Negative control is valid only if those generated cases complete and fail against the baseline implementation. Regression/baseline probes are separate and must pass on baseline.
 
 ## Candidate review evidence
 
-`review.json` is computed from authority preservation, write policy, protected tests, negative-control result, controller probe result, exact probe SHA binding and supplemental diagnostic status.
+`review.json` is computed from authority preservation, write policy, protected tests, negative-control result, signed controller-probe result, exact probe SHA binding and supplemental diagnostic status.
 
-Conformance deliberately proves that green forged JUnit evidence cannot override failing controller probes.
+Conformance deliberately proves that green forged JUnit, argv nonce forgery and fixed-example overfitting cannot override failing signed probes.
 
 ## Effect evidence
 
@@ -58,12 +73,12 @@ Merge intent is persisted before effect execution. Merge commits carry a stable 
 
 Events are hash-linked. This detects corruption or edits where hashes are not recomputed.
 
-There is no secret key or external anchor in the standalone reference. A full evidence-directory rewriter can recompute the chain and terminal tip. Production systems need an independent anchor/signature/transparency mechanism.
+There is no secret key or external anchor in the standalone event log. A full evidence-directory rewriter can recompute the chain and terminal tip. Production systems need an independent anchor/signature/transparency mechanism.
 
 ## JSON Schema
 
-The built-in validator supports an explicit Draft 2020-12 subset and rejects unknown keywords. Scenario fixtures, diagnostic test evidence, controller probe evidence, post-merge evidence and the existing core safety artifacts are schema-validated during conformance.
+The built-in validator supports an explicit Draft 2020-12 subset and rejects unknown keywords. Scenario fixtures, verifier definitions, diagnostic evidence, signed probe evidence, post-merge evidence and core safety artifacts are schema-validated during conformance.
 
 ## Scope boundary
 
-Controller probe evidence is authoritative **within the deterministic trusted-fixture scope of this repository**. It is not a cryptographic guarantee against arbitrary hostile Python executing in the same host/process sandbox. Production hostile-code verification requires a stronger isolation boundary and independently trusted result channel.
+Signed controller probe evidence is authoritative **within the deterministic trusted-fixture scope of this repository**. Same-host malicious Python can still attempt process/kernel/filesystem attacks outside the protocol model. Production hostile-code verification requires a stronger isolation boundary and independently trusted result channel.
