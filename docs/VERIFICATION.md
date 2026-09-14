@@ -17,7 +17,7 @@ It performs:
 3. authority-layout validation using the same path matcher as runtime gates;
 4. Python and shell syntax checks;
 5. example baseline verification in a temporary copy;
-6. unit tests over matcher, risk, review, executor timeout, event-chain boundary and harness failure behavior;
+6. unit tests over matcher, risk, review, stale-JUnit rejection, executor timeout, event-chain boundary and harness failure behavior;
 7. the full conformance matrix.
 
 ## Supported Python range
@@ -32,20 +32,21 @@ This specifically protects the reference from interpreter-dependent glob behavio
 
 ## Conformance scenarios
 
-The matrix currently covers ten independent behaviors:
+The matrix currently covers eleven independent behaviors:
 
 - successful low-risk lifecycle;
 - forbidden authority path;
 - protected baseline-test tampering;
 - executable implementation failure;
 - insufficient/tautological acceptance testing;
-- pre-write budget rejection;
+- pre-write changed-file budget rejection;
+- independently reachable pre-write patch-byte budget rejection;
 - goal risk-ceiling rejection;
 - reachable MEDIUM risk plus independent auto-merge ceiling;
 - top-level HIGH security path plus human gate;
 - actual process termination and recovery of an already-performed merge effect.
 
-The harness catches per-scenario failures, continues remaining scenarios and persists a structured `conformance-report.json`.
+The harness discovers scenarios from `examples/scenarios/`, catches per-scenario failures, continues remaining scenarios and persists a structured `conformance-report.json`.
 
 ## Schema validation
 
