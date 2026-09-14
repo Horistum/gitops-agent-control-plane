@@ -1,95 +1,37 @@
 # Policy
 
-`config/reference-policy.json` is contract v5 policy.
+`config/reference-policy.json` is contract v6 policy.
 
-## Actor-specific write envelopes
+## Write envelopes
 
-The developer may write implementation source:
+Developer writes implementation source only. Tester writes diagnostic acceptance files only. Protected baseline tests and authority/CI paths remain outside both proposal envelopes.
 
-```json
-"developer_allowed_paths": ["src/**"]
-```
-
-The independent tester may add only diagnostic acceptance-test files:
-
-```json
-"tester_allowed_paths": ["tests/test_acceptance_*.py"]
-```
-
-Those test files are useful diagnostics but are not the authoritative acceptance channel.
-
-Protected baseline tests are owner-controlled:
-
-```json
-"protected_test_paths": ["tests/test_service.py"]
-```
-
-Workspace authority/verification infrastructure is snapshotted through:
-
-```json
-"authority_paths": [".agent-control/**", "ci/**", ".github/**"]
-```
-
-The controller-side `verification-probes.json` is versioned under `.agent-control/`, but v5 intentionally omits it from the candidate workspace and binds its source digest separately in authority/probe evidence.
+Candidate-process tests are diagnostics, not the authoritative acceptance channel.
 
 ## Executable quality gates
 
-`quality-gates.json` is not decorative. Contract v5 requires and reads each flag:
+`quality-gates.json` is runtime input. Mandatory gates protect baseline files, require controller probes, require case-level negative control, bind probes to exact Git SHA and require green diagnostic JUnit. Disabling a mandatory gate is invalid authority and fails closed.
 
-- `protect_baseline_test_files`;
-- `require_controller_probes`;
-- `require_negative_control`;
-- `bind_probes_to_exact_git_sha`;
-- `require_diagnostic_junit_green`.
+## Generic verification definitions
 
-Disabling a mandatory gate makes the authority configuration invalid and terminates the run as `BLOCKED_POLICY`.
+Roadmap acceptance criteria reference product-owned `probe_ids`. The controller resolves them from the controller-side verification definition, whose source digest is evidence-bound but whose file is omitted from the candidate workspace.
 
-## Verification definitions
+A v6 probe declares target/callable, case count, positional `args` generators, named `kwargs` generators and a generic oracle. The reusable DSL supports constants, choices, primitive/random values, token/whitespace generation and expression composition. Product-specific oracle code does not live in the control plane.
 
-Roadmap acceptance criteria reference product-authored `probe_ids`. The controller resolves those IDs from the controller-side verification definition.
-
-A probe contains:
-
-- target source file;
-- callable name;
-- runtime case generator;
-- case count;
-- invariant/oracle kind.
-
-It does **not** contain a public fixed `args` plus literal expected return tuple.
-
-Baseline properties must pass on baseline. New acceptance properties must fail against baseline as a negative control. Candidate and post-merge properties use independently generated fresh cases and must pass against the exact observed Git SHA.
-
-JUnit remains a required green diagnostic in this reference, but it cannot compensate for a failing signed controller probe.
+Regression probes must pass on baseline. For new acceptance behavior, **every generated acceptance case** must fail on baseline. Candidate and post-merge probes use fresh independently generated cases and must pass on the exact observed SHA.
 
 ## Receipt policy
 
-The controller creates a fresh HMAC key/challenge per probe and transfers it to the trusted verifier parent through an inherited anonymous control FD. Receipt secrets are forbidden from worker argv/environment. Exactly one HMAC-valid receipt is accepted per probe.
+The controller creates a fresh HMAC key/challenge and supplies the trusted verifier parent through an inherited control pipe. The executor starts the reader before writing payload bytes. The parent closes the control FD before candidate execution and emits exactly one signed receipt. Candidate-child stdout is untrusted observation and cannot become the final parent receipt stream.
 
-## Structured forbidden paths
+## Structured forbidden paths, risk and budgets
 
-The goal contains `forbidden_paths`; product authority contains structured forbidden-path rules. These are executable policy inputs.
+Goal/authority forbidden paths are executable structured inputs. Human-readable prose remains context.
 
-Free-form `forbidden_directions`, `authority.md` and `architecture.md` remain explanatory/contextual material included in the authority model. They are not silently interpreted as executable natural-language policy.
+Risk rules produce LOW/MEDIUM/HIGH with independent goal ceiling, auto-merge ceiling and human-gate threshold. Changed-file and patch-byte budgets run before candidate mutation.
 
-## Risk
+Path matching is segment-aware and memoized. `**` matches zero or more segments with O(P*L) memoized states rather than exponential backtracking.
 
-Risk rules can produce LOW, MEDIUM or HIGH:
+## Execution boundary
 
-- contract paths -> MEDIUM;
-- security paths -> HIGH;
-- otherwise policy default -> LOW.
-
-`**` matches zero or more complete path segments. Matching is memoized, so repetitive owner-authored patterns do not create exponential recursion.
-
-Owner risk ceiling, automatic-merge ceiling and policy human-gate threshold are independent controls.
-
-## Budgets
-
-Changed-file count and patch bytes are evaluated before candidate workspace mutation. Conformance exercises both independently.
-
-## Execution budget
-
-`test_timeout_seconds` controls wall-clock timeout. The local executor derives its CPU backstop from that value and runs worker/candidate processes in a dedicated process group so descendants are cleaned up.
-
-These controls bound the fixture executor; they do not turn it into a hostile-code sandbox.
+`test_timeout_seconds` controls wall-clock execution, with CPU backstop and process-group cleanup derived from policy. These are bounded-execution controls, not a hostile-code sandbox.
