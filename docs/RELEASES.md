@@ -33,7 +33,7 @@ A repository PATCH or MINOR release does not automatically change the contract. 
 
 Schemas use their instance `schema` field for document revision. The v3 hardening adds schemas for policy decisions, reviews, candidate/merge/test/risk/recovery evidence and events.
 
-Schema `$id` is intentionally omitted until a stable public resolution namespace is selected. Placeholder identifiers such as `example.invalid` are forbidden by repository validation.
+Schema `$id` is intentionally omitted until a stable public resolution namespace is selected. Placeholder schema identifiers are forbidden by repository validation.
 
 ## Release gate
 
