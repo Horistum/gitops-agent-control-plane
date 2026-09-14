@@ -13,7 +13,6 @@ _ORIGINAL_JSON_DUMPS = json.dumps
 _ORIGINAL_OS_WRITE = os.write
 _ORIGINAL_TYPE = builtins.type
 _RAW_PREFIX = "REFERENCE_RAW_OUTCOME="
-_ALLOWED_RETURN_TYPES = {str, int, float, bool, type(None)}
 
 
 def _target(workspace: Path, relative: str) -> Path:
@@ -37,6 +36,17 @@ def _load_module(target: Path):
     return module
 
 
+def _json_native(value: object) -> bool:
+    kind = _ORIGINAL_TYPE(value)
+    if kind in {str, int, float, bool, type(None)}:
+        return True
+    if kind is list:
+        return all(_json_native(item) for item in value)
+    if kind is dict:
+        return all(_ORIGINAL_TYPE(key) is str and _json_native(item) for key, item in value.items())
+    return False
+
+
 def _emit(value: dict) -> None:
     raw = _RAW_PREFIX + _ORIGINAL_JSON_DUMPS(value, sort_keys=True, separators=(",", ":")) + "\n"
     _ORIGINAL_OS_WRITE(1, raw.encode("utf-8"))
@@ -49,11 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--callable", dest="callable_name", required=True)
     args = parser.parse_args(argv)
 
-    # Input is read and stdin is detached before candidate code is imported.
     payload = json.loads(sys.stdin.read())
     sys.stdin = open(os.devnull, "r")
-    # Candidate stdout/stderr are discarded. The wrapper keeps fd 1 itself as
-    # the raw outcome channel through the captured os.write reference.
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
 
@@ -73,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                     "exception": _ORIGINAL_TYPE(exc).__name__,
                 }
             else:
-                if _ORIGINAL_TYPE(value) not in _ALLOWED_RETURN_TYPES:
+                if not _json_native(value):
                     outcome = {
                         "completed": True,
                         "kind": "unsupported-return",
