@@ -44,17 +44,12 @@ class DemoEngine(BaseEngine):
         self.event("plan-created", {"plan_sha256": sha256_json(plan)})
 
         proposal = proposal_for(self.scenario)
-        diff = self.diff_for(proposal)
-        (self.evidence / "candidate.patch").write_text(diff)
-        self.write_json(
-            "proposal.json",
-            {
-                "schema": 1,
-                "role": "developer",
-                "edits": [{"path": e["path"], "reason": e["reason"], "content_sha256": sha256_bytes(e["content"].encode())} for e in proposal],
-                "patch_sha256": sha256_bytes(diff.encode()),
-            },
-        )
+        proposal_evidence = {
+            "schema": 1,
+            "role": "developer",
+            "edits": [{"path": e["path"], "reason": e["reason"], "content_sha256": sha256_bytes(e["content"].encode())} for e in proposal],
+        }
+        self.write_json("proposal.json", proposal_evidence)
         self.role_artifact("developer", "propose", "Produced a bounded candidate proposal.", changed_paths=[e["path"] for e in proposal])
 
         allowed, decisions = self.check_proposal(proposal)
@@ -62,15 +57,24 @@ class DemoEngine(BaseEngine):
             self.role_artifact(
                 "reviewer",
                 "block",
-                "Proposal attempted to modify owner-controlled authority or a path outside the write envelope.",
+                "Proposal attempted to modify owner-controlled authority, escape the repository, or write outside the bounded envelope.",
                 policy_decisions=decisions,
             )
             self.event("proposal-blocked", {"decisions": decisions})
             return self.finish("BLOCKED_POLICY", unauthorized_paths=[d["path"] for d in decisions if not d["accepted"]])
 
+        diff = self.diff_for(proposal)
+        (self.evidence / "candidate.patch").write_text(diff)
+        proposal_evidence["patch_sha256"] = sha256_bytes(diff.encode())
+        self.write_json("proposal.json", proposal_evidence)
+
         self.git("checkout", "-b", "reference-candidate")
         self.apply_proposal(proposal)
-        changed = [e["path"] for e in proposal]
+        changed = [d["canonical_path"] for d in decisions]
+        candidate_authority = self.authority_snapshot("candidate")
+        if candidate_authority["digest"] != authority["digest"]:
+            self.event("authority-drift-blocked", {"before": authority["digest"], "after": candidate_authority["digest"]})
+            return self.finish("BLOCKED_POLICY", reason="product authority changed during candidate application")
         if len(changed) > self.policy["max_changed_files"] or len(diff.encode()) > self.policy["max_patch_bytes"]:
             self.event("proposal-blocked", {"reason": "change budget exceeded"})
             return self.finish("BLOCKED_POLICY", reason="change budget exceeded")
@@ -94,7 +98,8 @@ class DemoEngine(BaseEngine):
                 "changed_paths": changed,
                 "patch_sha256": sha256_bytes(diff.encode()),
                 "tree_digest": digest_tree(self.workspace),
-                "authority_snapshot_digest": authority["digest"],
+                "authority_snapshot_before": authority["digest"],
+                "authority_snapshot_candidate": candidate_authority["digest"],
             },
         )
         self.event("candidate-created", {"candidate_sha": candidate_sha, "changed_paths": changed})
@@ -120,7 +125,7 @@ class DemoEngine(BaseEngine):
             "changed_paths": changed,
             "checks": {
                 "acceptance_covered": True,
-                "authority_unchanged": self.authority_snapshot()["digest"] == authority["digest"],
+                "authority_unchanged": candidate_authority["digest"] == authority["digest"],
                 "deterministic_tests_green": True,
                 "scope_bounded": True,
             },
