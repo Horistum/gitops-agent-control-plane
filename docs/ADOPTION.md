@@ -1,16 +1,36 @@
 # Adoption and first end-to-end run
 
-This procedure creates a clean demonstration with separate product and control repositories.
+This procedure creates a clean reference deployment with separate product and control repositories, explicit GitHub governance, a pinned runtime adapter and one intentionally small live goal.
 
-## 1. Prerequisites
+For Linux host provisioning, service lifecycle and diagnostics, see `LINUX.md`.
 
-Use a dedicated unprivileged Linux user with Git, GitHub CLI, Python 3.11+, rootless Podman, systemd user services, the model CLI required by the active runtime adapter, GitHub write access to product/control repositories and sufficient product privileges to establish governance.
+## 1. Validate the reference before touching external systems
 
-The control repository should be private and have Issues enabled.
+From the reference repository:
 
-## 2. Create the example product
+```bash
+./scripts/agentctl validate
+```
 
-Copy `examples/minimal-product` into a new separate repository:
+This offline suite executes the minimal-product baseline, inspects JUnit identities, validates policy/goal/control/governance contracts, compiles Python and checks Linux Bash scripts. It does not authenticate a model and does not mutate GitHub.
+
+On Linux, also run:
+
+```bash
+./scripts/agentctl bootstrap check
+```
+
+If prerequisites are missing on a supported Debian/Ubuntu or Fedora/RHEL-family host:
+
+```bash
+./scripts/agentctl bootstrap prepare
+```
+
+The controller/runtime itself must run under a dedicated unprivileged user.
+
+## 2. Create the example product repository
+
+Copy `examples/minimal-product` into a new repository:
 
 ```bash
 mkdir ~/agent-reference-product
@@ -31,9 +51,11 @@ python3 ci/run_tests.py
 
 Three tests must pass and `build/test-results/reference/TEST-reference.xml` must contain three testcase identities. Push once and confirm the GitHub Actions job named `agent-control-reference-ci` succeeds.
 
-## 3. Create the control repository
+The example's `.agent-control/` directory is product-authored authority. It is intentionally outside the controller write envelope.
 
-Create a separate private repository with Issues enabled. This repository is not the product and should not contain product source.
+## 3. Create the separate control repository
+
+Create a **different private repository** with Issues enabled. It stores the owner/control surface and the remote execution-state branch; it must not contain product source.
 
 Create one long-lived control issue:
 
@@ -47,82 +69,168 @@ Record the issue number.
 
 ## 4. Prepare deterministic test infrastructure
 
-Build a product-specific container image containing the tools required by `test_commands`. Load it into rootless Podman on the controller host and obtain its immutable digest.
+Build or choose a product-specific container image containing exactly the tooling required by `test_commands`.
 
-The runtime executes with no network and no floating pull, so the image must exist locally under the exact digest.
+Load it into rootless Podman on the controller host and obtain its immutable digest:
 
-## 5. Authenticate the model runtime
+```bash
+podman image inspect YOUR_IMAGE --format '{{.Digest}}'
+```
 
-Use the dedicated credential home required by the active adapter. Do not reuse a general shell environment containing unrelated API or repository secrets. Verify the exact CLI version after login; that version becomes part of runtime identity.
+The runtime executes product verification with no network and no floating pull, so the image must exist locally under the exact digest used by policy.
+
+Never put credentials into the test image.
+
+## 5. Authenticate GitHub and the runtime/model CLI
+
+GitHub:
+
+```bash
+gh auth login --hostname github.com
+gh auth setup-git --hostname github.com
+gh auth status --hostname github.com
+```
+
+The portable architecture does not require one particular model provider. The active runtime adapter may require its own CLI and authentication home. Authenticate that CLI separately and record the **exact** version in policy.
+
+Do not put a broad API key into `policy.json`.
 
 ## 6. Render tenant policy
 
+Using the Linux/Bash front end:
+
 ```bash
-python3 scripts/render_policy.py \
+./scripts/agentctl render-policy \
   --product-repo YOUR_ORG/YOUR_PRODUCT \
   --control-repo YOUR_ORG/YOUR_CONTROL_REPO \
   --owner YOUR_GITHUB_LOGIN \
   --command-issue YOUR_ISSUE_NUMBER \
   --controller-id YOUR_CONTROLLER_ID \
   --test-image 'YOUR_IMAGE@sha256:YOUR_64_HEX_DIGEST' \
-  --codex-version 'YOUR_EXACT_MODEL_CLI_VERSION'
+  --codex-version 'YOUR_EXACT_RUNTIME_MODEL_CLI_VERSION'
 ```
 
-Inspect `policy.json`. The renderer refuses obvious identity/digest mistakes, but it cannot decide your real architecture or critical paths for you.
+The direct Python command remains available:
+
+```bash
+python3 scripts/render_policy.py ...
+```
+
+Inspect `policy.json`. The renderer refuses obvious identity/digest mistakes, but it cannot decide your real architecture, authority paths or risk model for you.
+
+`policy.json` is intentionally ignored by Git. Treat it as host-local reviewed configuration.
 
 ## 7. Establish product governance
 
-Preview:
+Preview the exact desired ruleset:
 
 ```bash
-python3 scripts/product_governance.py --policy policy.json
+./scripts/agentctl governance --policy policy.json
 ```
 
-Apply after inspection:
+Apply only after inspection:
 
 ```bash
-python3 scripts/product_governance.py --policy policy.json --apply
+./scripts/agentctl governance --policy policy.json --apply
 ```
 
-The helper requires pull requests, resolved review threads, no delete/force-push and exact trusted status checks on `main`. It will not silently replace an existing ruleset with the same name.
+The helper requires pull requests, resolved review threads, no delete/force-push and exact trusted status checks on `main`. It will not silently replace an existing incompatible ruleset with the same name.
 
-## 8. Install and prove the runtime adapter
+## 8. Install and prove the pinned runtime adapter
 
 ```bash
-python3 scripts/install_runtime.py --policy policy.json
+./scripts/agentctl install --policy policy.json
 ```
 
-The installer validates repositories and control issue, fetches the exact pinned runtime, verifies its release manifest/file set, runs runtime unit tests and doctor, performs a real model protocol smoke and executes the real product baseline in the isolated test container.
+The installer validates repositories and the control issue, fetches the exact pinned runtime source, verifies its release manifest and exact file set, runs adapter unit tests and doctor, performs a real model protocol smoke, executes the real product baseline in the isolated test container and installs the user systemd service.
 
-A successful install prints a runtime fingerprint.
+A successful install prints exact runtime source commit, immutable installed runtime directory, policy/work directories, service identity, runtime/policy fingerprint and the portable activation input.
+
+The service is not considered owner-authorized merely because installation succeeded.
 
 ## 9. Activate through the portable operator interface
 
+Use the fingerprint printed by installation:
+
 ```bash
-python3 scripts/control.py --policy policy.json \
+./scripts/agentctl control --policy policy.json \
   activate --fingerprint THE_PRINTED_FINGERPRINT
 ```
 
-The wrapper posts the exact backend command to the configured control issue. Backend-specific syntax is intentionally not part of the operator contract.
+The wrapper translates this portable action into the currently pinned runtime protocol. Backend-specific syntax is deliberately not the operator contract.
 
-## 10. Submit the first goal
+## 10. Submit the first portable goal
 
-Review `examples/goal.example.json`, then:
+Inspect:
 
 ```bash
-python3 scripts/submit_goal.py --policy policy.json --file examples/goal.example.json
+cat examples/goal.example.json
+```
+
+Then submit:
+
+```bash
+./scripts/agentctl goal --policy policy.json \
+  --file examples/goal.example.json
 ```
 
 The goal authorizes `EXAMPLE-001`, allows medium risk, permits automatic merge only through low risk and forbids CI/authority changes.
 
-## 11. Expected lifecycle
+## 11. Observe the expected lifecycle
 
-A successful run should produce accepted goal evidence, selected `EXAMPLE-001`, architecture plan and bounded working set, implementation adding `greet()`, executable independent tests, green local verification, a product pull request, green `agent-control-reference-ci` on the exact candidate SHA, merge according to risk authority, green post-merge check on the exact merge SHA and durable completion evidence.
+A successful live run should create evidence for all of the following:
 
-Inspect all of it. A reference system that cannot be understood on its smallest example will not become more understandable after being pointed at a large production repository.
+1. goal accepted with immutable source identity/hash;
+2. `EXAMPLE-001` selected from product-authored roadmap authority;
+3. bounded architecture plan and working set;
+4. implementation adding `greet()` while preserving normalization behavior;
+5. deterministic local verification;
+6. executable independent tests and independent review evidence;
+7. product pull request bound to the exact candidate SHA;
+8. green trusted `agent-control-reference-ci` for that exact candidate;
+9. merge only when risk/governance/authority permit it;
+10. green post-merge check on the exact merge SHA;
+11. durable completion state/evidence.
 
-## 12. Adapt to a real repository
+Inspect each artifact. A reference system that cannot be understood on its smallest example will not become more understandable after being pointed at a large production repository.
 
-Do not simply rename `EXAMPLE-001`. Replace the example authority model with real architecture constraints, roadmap identifiers/dependencies, deterministic build/test commands, critical/public/security paths, trusted CI checks, realistic context/cost budgets and human decision boundaries.
+## 12. Normal owner controls
 
-Then rerun the complete installation/live-verification path before granting auto-merge authority.
+Portable commands include:
+
+```bash
+./scripts/agentctl control --policy policy.json pause
+./scripts/agentctl control --policy policy.json drain
+./scripts/agentctl control --policy policy.json resume
+./scripts/agentctl control --policy policy.json refresh
+```
+
+Retry, approval, replanning and goal cancellation additionally require the exact task/goal ID and hash rendered by the control plane. That prevents a stale human decision from silently approving a changed candidate.
+
+## 13. Diagnostics
+
+Read-only host/reference diagnostics:
+
+```bash
+./scripts/agentctl diagnose --policy policy.json
+```
+
+See `LINUX.md` for detailed systemd, rootless Podman, log and uninstall procedures.
+
+## 14. Adapt the reference to a real repository
+
+Do not merely rename `EXAMPLE-001`.
+
+Replace the example authority model with real architecture constraints and invariants, roadmap IDs and dependency rules, deterministic build/test commands, critical/public/security paths, trusted CI check identities, context/cost/time budgets, risk thresholds and explicit human-decision conditions.
+
+Then rerun both the offline reference validation and complete live installation/verification path before granting auto-merge authority.
+
+## 15. What success actually proves
+
+Passing `scripts/validate_reference.py` proves the **reference repository layer**.
+
+A successful runtime installation additionally proves the **host/runtime integration layer**.
+
+Only a completed live goal with exact candidate/post-merge evidence proves the **end-to-end delivery lifecycle**.
+
+These are deliberately separate claims. Combining them into one vague "it works" badge would be shorter, but considerably less useful.
