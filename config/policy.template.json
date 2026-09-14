@@ -1,0 +1,217 @@
+{
+  "product_repo": "REPLACE/PRODUCT_REPO",
+  "control_repo": "REPLACE/CONTROL_REPO",
+  "controller_id": "reference-loop-primary",
+  "owners": [
+    "REPLACE_OWNER"
+  ],
+  "command_issue": 1,
+  "base_branch": "main",
+  "mission": "Autonomously complete exactly one authorized roadmap item at a time. Preserve authored semantics, architecture, compatibility, safety and reproducible evidence. Never expand authority or scope.",
+  "approved_items": [],
+  "github_goals": {
+    "enabled": true,
+    "max_items": 10,
+    "allowed_item_patterns": [
+      "DEMO-*"
+    ],
+    "max_risk": "high",
+    "max_auto_merge_risk": "medium"
+  },
+  "context_paths": [
+    ".flow-agent/agent-contract.md",
+    ".flow-agent/architecture-constitution.md",
+    ".flow-agent/roadmap.yaml",
+    ".flow-agent/release-state.yaml",
+    ".flow-agent/forbidden-directions.yaml",
+    ".flow-agent/quality-gates.yaml",
+    "README.md"
+  ],
+  "allowed_paths": [
+    "src/**",
+    "tests/**",
+    "docs/**",
+    "README.md"
+  ],
+  "critical_paths": [
+    "src/**/security/**",
+    "src/**/contract/**"
+  ],
+  "independent_test_paths": [
+    "tests/**"
+  ],
+  "required_checks": [
+    {
+      "name": "flowai-reference-ci",
+      "app_id": 15368
+    }
+  ],
+  "postmerge_checks": [
+    {
+      "name": "flowai-reference-ci",
+      "app_id": 15368
+    }
+  ],
+  "auto_merge": true,
+  "adaptive_agent_graph": true,
+  "max_changed_files": 20,
+  "max_patch_bytes": 120000,
+  "max_context_bytes": 1000000,
+  "max_context_rounds": 6,
+  "max_protocol_repairs": 2,
+  "max_repairs": 3,
+  "max_agent_calls_per_day": 30,
+  "max_ci_candidates_per_day": 3,
+  "max_ci_candidates_per_task": 3,
+  "agent_timeout_seconds": 1200,
+  "test_timeout_seconds": 600,
+  "ci_timeout_seconds": 3600,
+  "quota_backoff_seconds": 1800,
+  "discovery_interval_seconds": 3600,
+  "poll_seconds": 60,
+  "minimum_junit_tests": 1,
+  "test_image": "REPLACE_TEST_IMAGE@sha256:REPLACE_64_HEX_DIGEST",
+  "test_memory": "2g",
+  "test_cpus": 2,
+  "gradle_seed": "",
+  "test_commands": [
+    [
+      "python3",
+      "ci/run_tests.py"
+    ]
+  ],
+  "codex_home": "REPLACE_CODEX_HOME",
+  "codex_version": "REPLACE_CODEX_VERSION",
+  "models": {},
+  "goal_contract": {
+    "objective": "Deliver one explicitly authorized roadmap item from a verified current main to a merged, post-merge-green state while preserving authored semantics and all safety boundaries.",
+    "priority_order": [
+      "Correctness and authored semantics.",
+      "Architecture and single-source-of-truth boundaries.",
+      "Public compatibility, safety and fail-closed behavior.",
+      "Reproducible evidence on exact Git SHAs.",
+      "Small reviewable implementation.",
+      "Token efficiency and speed."
+    ],
+    "success_conditions": [
+      "The selected item is authorized and its dependencies are complete.",
+      "Baseline is green on the exact base SHA.",
+      "Every acceptance criterion has implementation and independent verification evidence.",
+      "Required reviews contain no unresolved blocking finding.",
+      "Required CI belongs to the exact candidate SHA and post-merge CI to the exact merge SHA.",
+      "No stale receipt, prior commit, label or model assertion is treated as current execution evidence."
+    ],
+    "forbidden_shortcuts": [
+      "Do not weaken, remove or skip tests, quality gates, branch governance or required checks.",
+      "Do not rewrite the goal, acceptance criteria or architecture to fit an implementation.",
+      "Do not add silent compatibility aliases, fail-open fallbacks, silent coercions or a second source of truth.",
+      "Do not broaden a change when a smaller implementation satisfies the invariant.",
+      "Do not claim a model statement or stale receipt proves a test executed on the current SHA."
+    ],
+    "human_decision_conditions": [
+      "A public-contract change not explicitly authorized by the roadmap item.",
+      "High-risk, critical-path, security, credential, control-plane, destructive or migration work.",
+      "Scope expansion or changes to controller, policy, agent instructions or CI identity.",
+      "Non-converging repairs, exhausted hard budget or conflicting authoritative sources."
+    ]
+  },
+  "phase_context_paths": {
+    "discovery": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/roadmap.yaml",
+      ".flow-agent/release-state.yaml",
+      ".flow-agent/forbidden-directions.yaml",
+      ".flow-agent/quality-gates.yaml",
+      "README.md"
+    ],
+    "architect": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml",
+      "README.md"
+    ],
+    "test_design": [
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/architecture-constitution.md"
+    ],
+    "chief_plan": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml"
+    ],
+    "developer": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      "README.md"
+    ],
+    "tester": [
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/architecture-constitution.md"
+    ],
+    "reviewer": [
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml"
+    ],
+    "challenge_review": [
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml"
+    ],
+    "architect_accept": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml"
+    ],
+    "chief_accept": [
+      ".flow-agent/agent-contract.md",
+      ".flow-agent/architecture-constitution.md",
+      ".flow-agent/quality-gates.yaml",
+      ".flow-agent/forbidden-directions.yaml"
+    ]
+  },
+  "phase_context_bytes": {
+    "discovery": 500000,
+    "architect": 700000,
+    "test_design": 350000,
+    "chief_plan": 300000,
+    "developer": 800000,
+    "tester": 500000,
+    "reviewer": 600000,
+    "challenge_review": 500000,
+    "architect_accept": 450000,
+    "chief_accept": 300000
+  },
+  "max_agent_calls_per_task": 18,
+  "soft_token_budget_per_task": 800000,
+  "challenge_review": {
+    "enabled": true,
+    "on_risk": [
+      "medium",
+      "high"
+    ],
+    "on_critical_paths": true,
+    "on_changed_files_at_least": 8,
+    "on_diff_bytes_at_least": 80000
+  },
+  "blocking_medium_kinds": [
+    "correctness",
+    "architecture",
+    "compatibility",
+    "security",
+    "testing",
+    "scope",
+    "evidence"
+  ],
+  "billing": {
+    "provider": "chatgpt",
+    "credit_mode": "included_then_purchased",
+    "api_fallback": false
+  },
+  "test_tmpfs": "1g"
+}
