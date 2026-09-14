@@ -28,7 +28,7 @@ Using public-only access:
 ./scripts/agentctl conformance
 ```
 
-Acceptance requires all **ten** conformance scenarios to reach their documented outcomes on the supported Python range, with no private dependency or credential.
+Acceptance requires **all documented conformance scenarios** to reach their documented outcomes on every supported Python version, with no private dependency or credential. The scenario set is discovered from `examples/scenarios/`; publication checks must not silently assume a stale hard-coded count.
 
 ## First public release
 
