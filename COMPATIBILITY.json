@@ -1,14 +1,17 @@
 {
   "schema": 1,
-  "flowai_control": {
+  "reference_contract": "gitops-agent-control-plane/v1",
+  "runtime_adapter": {
+    "kind": "git-pinned-python-controller",
     "repository": "Horistum/FlowAi-control",
     "version": "0.3.0",
-    "commit": "38f7f5c3328d2f8e1b4d6e66dd9750d53cc259a6"
+    "commit": "38f7f5c3328d2f8e1b4d6e66dd9750d53cc259a6",
+    "state_branch": "loop-state",
+    "service_name": "agent-control-plane.service"
   },
-  "reference_contract": "flowai-control-reference/v1",
   "github_actions_app_id": 15368,
   "notes": [
-    "The reference repository is a tenant control/state plane, not a copy of the controller source.",
-    "Goal Issue v1 section labels are protocol-visible in FlowAI-Control 0.3.0 and must not be translated or renamed."
+    "The public reference contract is runtime-neutral; runtime_adapter is one concrete backend binding.",
+    "Operator-facing goal and control commands are translated by scripts/submit_goal.py and scripts/control.py."
   ]
 }
