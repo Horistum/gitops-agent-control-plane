@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import string
 import subprocess
 import sys
 
@@ -37,13 +38,21 @@ def _read_control(fd: int) -> dict:
     return value
 
 
+def _random_token() -> str:
+    alphabet = string.ascii_letters + string.digits + "-'._"
+    return "".join(secrets.choice(alphabet) for _ in range(1 + secrets.randbelow(12)))
+
+
 def _random_name() -> str:
-    first = "N" + secrets.token_hex(5)
-    last = "S" + secrets.token_hex(5)
-    left = secrets.choice([" ", "  ", "\t", " \t"])
-    middle = secrets.choice([" ", "   ", "\t", " \t "])
-    right = secrets.choice([" ", "  ", "\t", "\t "])
-    return f"{left}{first}{middle}{last}{right}"
+    token_count = 1 + secrets.randbelow(5)
+    tokens = [_random_token() for _ in range(token_count)]
+    separators = [" ", "  ", "   ", "\t", " \t ", "\t  "]
+    body = tokens[0]
+    for token in tokens[1:]:
+        body += secrets.choice(separators) + token
+    left = secrets.choice(["", " ", "  ", "\t", " \t"])
+    right = secrets.choice(["", " ", "  ", "\t", "\t "])
+    return f"{left}{body}{right}"
 
 
 def _blank_whitespace() -> str:
