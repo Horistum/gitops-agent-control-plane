@@ -47,6 +47,39 @@ def validate_brand_neutrality() -> None:
             check(token not in text, f"internal/backend branding leaked into {path.relative_to(ROOT)}: {token}")
 
 
+def validate_publication_identity() -> None:
+    required = {
+        "LICENSE": ROOT / "LICENSE",
+        "NOTICE": ROOT / "NOTICE",
+        "TRADEMARKS.md": ROOT / "TRADEMARKS.md",
+        "CONTRIBUTING.md": ROOT / "CONTRIBUTING.md",
+    }
+    for name, path in required.items():
+        check(path.is_file(), f"publication file missing: {name}")
+
+    license_text = required["LICENSE"].read_text()
+    check("Apache License" in license_text and "Version 2.0, January 2004" in license_text, "LICENSE is not Apache-2.0")
+    check("END OF TERMS AND CONDITIONS" in license_text, "LICENSE appears incomplete")
+
+    notice = required["NOTICE"].read_text()
+    check("Copyright 2026 Horistum contributors" in notice, "NOTICE copyright/provenance drift")
+    check("https://github.com/Horistum/gitops-agent-control-plane" in notice, "NOTICE canonical repository missing")
+
+    trademarks = required["TRADEMARKS.md"].read_text()
+    check("Horistum" in trademarks and "Apache License 2.0" in trademarks, "trademark/license boundary missing")
+
+    contributing = required["CONTRIBUTING.md"].read_text()
+    check("Apache License 2.0" in contributing, "contribution licensing policy missing")
+
+    readme = (ROOT / "README.md").read_text()
+    check("Initiated and maintained by the Horistum project." in readme, "README Horistum provenance missing")
+    check("Apache License 2.0" in readme and "TRADEMARKS.md" in readme, "README licensing/branding guidance missing")
+
+    publication = (ROOT / "docs" / "PUBLICATION.md").read_text()
+    for phrase in ("Apache License 2.0", "Horistum positioning", "Clean-room acceptance test"):
+        check(phrase in publication, f"publication policy missing: {phrase}")
+
+
 def validate_json() -> None:
     for base in (ROOT / "config", ROOT / "schemas", ROOT / "examples"):
         for path in base.rglob("*.json"):
@@ -108,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fast", action="store_true", help="Skip the product baseline; useful inside diagnostics.")
     a = p.parse_args(argv)
     validate_brand_neutrality()
+    validate_publication_identity()
     validate_json()
     validate_authority_layout()
     validate_python()
@@ -115,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_workflow()
     if not a.fast:
         validate_product_baseline()
-    print(json.dumps({"passed": True, "reference_contract": "gitops-agent-control-plane/v2", "brand_neutral": True, "standalone": True, "baseline_tests": 0 if a.fast else 3}, indent=2))
+    print(json.dumps({"passed": True, "reference_contract": "gitops-agent-control-plane/v2", "brand_neutral": True, "standalone": True, "licensed": "Apache-2.0", "provenance": "Horistum", "baseline_tests": 0 if a.fast else 3}, indent=2))
     return 0
 
 

@@ -2,6 +2,8 @@
 
 A **standalone executable reference** for bounded autonomous software delivery through Git.
 
+**Initiated and maintained by the Horistum project.**
+
 This repository is intentionally not a product brochure and is not tied to any private controller, model provider, or internal project. Its purpose is to make the important mechanics visible and testable:
 
 - who is allowed to decide what;
@@ -139,6 +141,10 @@ The reference separates **authority**, **reasoning**, **execution** and **eviden
 ## Repository map
 
 ```text
+LICENSE                Apache License 2.0
+NOTICE                 Horistum provenance and attribution
+TRADEMARKS.md          naming and brand-use boundary
+CONTRIBUTING.md        contribution and licensing policy
 reference_runtime/     executable reference state machine
 schemas/               portable JSON Schema contracts
 config/                standalone reference policy
@@ -163,6 +169,7 @@ docs/
   VERIFICATION.md      what each test layer really proves
   ADOPTION.md          how to adapt the reference to a real product
   LINUX.md             Linux usage
+  PUBLICATION.md       publication, provenance and release readiness
 ```
 
 ## Validate the repository
@@ -214,6 +221,18 @@ Automatic provisioning is available for Debian/Ubuntu and Fedora/RHEL-family sys
 ```
 
 The showcase deliberately does **not** require GitHub CLI, Podman, a model CLI or systemd services.
+
+## Origin, license and branding
+
+This reference architecture was originally developed and published from the **Horistum GitHub organization** as an open exploration of verifiable, policy-bounded autonomous software delivery.
+
+The source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE). The repository also includes [`NOTICE`](NOTICE), which records project provenance and attribution expected to travel with distributed derivatives under the license.
+
+The Apache-2.0 license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. Truthful statements describing the origin of the work are welcome. See [`TRADEMARKS.md`](TRADEMARKS.md) for the naming policy.
+
+Contributions are governed by [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+The long-term intent is deliberate: keep this repository useful as a standalone, implementation-neutral reference while preserving a clear historical record that the reference originated in the Horistum project. A future Horistum product can build on these principles without turning this repository into private-product documentation.
 
 ## What this repository does not claim
 
