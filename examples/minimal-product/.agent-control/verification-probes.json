@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "baseline": [
+    {
+      "id": "normalize-trims",
+      "target": "src/reference_app/service.py",
+      "callable": "normalize_name",
+      "args": ["  Ada   Lovelace "],
+      "kwargs": {},
+      "expect": {"return": "Ada Lovelace"}
+    },
+    {
+      "id": "normalize-blank",
+      "target": "src/reference_app/service.py",
+      "callable": "normalize_name",
+      "args": ["   "],
+      "kwargs": {},
+      "expect": {"exception": "ValueError"}
+    },
+    {
+      "id": "normalize-type",
+      "target": "src/reference_app/service.py",
+      "callable": "normalize_name",
+      "args": [null],
+      "kwargs": {},
+      "expect": {"exception": "TypeError"}
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "greet-normalized",
+      "target": "src/reference_app/service.py",
+      "callable": "greet",
+      "args": ["  Ada   Lovelace "],
+      "kwargs": {},
+      "expect": {"return": "Hello, Ada Lovelace!"}
+    },
+    {
+      "id": "greet-blank",
+      "target": "src/reference_app/service.py",
+      "callable": "greet",
+      "args": ["   "],
+      "kwargs": {},
+      "expect": {"exception": "ValueError"}
+    }
+  ]
+}

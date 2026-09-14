@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import json
 from pathlib import Path
+import secrets
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,10 @@ class InjectedCrash(RuntimeError):
     pass
 
 
+class PolicyConfigurationError(RuntimeError):
+    pass
+
+
 class BaseEngine:
     def __init__(self, repository_root: Path, request: dict, output_root: Path, *, run_id: str | None = None):
         self.repo = repository_root.resolve()
@@ -39,8 +44,7 @@ class BaseEngine:
         self.policy = load_json(self.repo / "config" / "reference-policy.json")
         validate_goal(self.goal)
         validate_policy(self.policy)
-        if request.get("proposal_source") != "trusted-fixture" or self.policy["executor_mode"] != "trusted-fixture-local":
-            raise ValueError("standalone runtime refuses non-fixture/untrusted proposal sources without a real sandbox")
+        self._validate_proposal_source()
 
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self.run_id = run_id or f"{stamp}-{self.label}-{sha256_json({'label': self.label, 'ns': time.time_ns()})[:8]}"
@@ -51,7 +55,6 @@ class BaseEngine:
         shutil.copytree(self.product_source, self.workspace)
         self.events = EventLog(self.evidence / "events.jsonl")
         self.executor = LocalFixtureExecutor(self.policy["test_timeout_seconds"])
-        self.authority = self.load_authority()
         self.state = {
             "schema": 2,
             "run_id": self.run_id,
@@ -69,6 +72,12 @@ class BaseEngine:
         self.write_json("goal.json", self.goal)
         self.write_json("policy.json", self.policy)
         self.save_state()
+        self.authority_error: str | None = None
+        try:
+            self.authority = self.load_authority()
+        except PolicyConfigurationError as exc:
+            self.authority = {}
+            self.authority_error = str(exc)
 
     @classmethod
     def resume_from(cls, repository_root: Path, run_dir: Path) -> "BaseEngine":
@@ -84,13 +93,36 @@ class BaseEngine:
         obj.policy = load_json(obj.evidence / "policy.json")
         validate_goal(obj.goal)
         validate_policy(obj.policy)
+        obj._validate_proposal_source()
         obj.product_source = obj.repo / "examples" / "minimal-product"
         obj.events = EventLog(obj.evidence / "events.jsonl")
         obj.executor = LocalFixtureExecutor(obj.policy["test_timeout_seconds"])
         obj.state = load_json(obj.evidence / "state.json")
         obj.run_id = obj.state["run_id"]
-        obj.authority = obj.load_authority()
+        obj.authority_error = None
+        try:
+            obj.authority = obj.load_authority()
+        except PolicyConfigurationError as exc:
+            obj.authority = {}
+            obj.authority_error = str(exc)
         return obj
+
+    def _validate_proposal_source(self) -> None:
+        if self.request.get("proposal_source") != "trusted-fixture" or self.policy["executor_mode"] != "trusted-fixture-local":
+            raise ValueError("standalone runtime refuses non-fixture/untrusted proposal sources without a real sandbox")
+
+    @staticmethod
+    def _validate_probe(probe: dict) -> None:
+        required = {"id", "target", "callable", "args", "kwargs", "expect"}
+        if set(probe) != required:
+            raise PolicyConfigurationError(f"verification probe fields invalid: {sorted(set(probe))}")
+        safe_relative_path(probe["target"])
+        if not isinstance(probe["id"], str) or not probe["id"] or not isinstance(probe["callable"], str) or not probe["callable"]:
+            raise PolicyConfigurationError("verification probe id/callable must be non-empty strings")
+        if not isinstance(probe["args"], list) or not isinstance(probe["kwargs"], dict) or not isinstance(probe["expect"], dict):
+            raise PolicyConfigurationError("verification probe args/kwargs/expect types invalid")
+        if set(probe["expect"]) not in ({"return"}, {"exception"}):
+            raise PolicyConfigurationError("verification probe expect must contain exactly return or exception")
 
     def load_authority(self) -> dict:
         authority_dir = self.workspace / ".agent-control"
@@ -99,11 +131,33 @@ class BaseEngine:
             "quality_gates": load_json(authority_dir / "quality-gates.json"),
             "forbidden": load_json(authority_dir / "forbidden.json"),
             "release_state": load_json(authority_dir / "release-state.json"),
-            "authority_text": (authority_dir / "authority.md").read_text(),
-            "architecture_text": (authority_dir / "architecture.md").read_text(),
+            "verification_probes": load_json(authority_dir / "verification-probes.json"),
         }
-        if value["quality_gates"].get("preserve_baseline_test_identities") is not True:
-            raise ValueError("reference requires preserve_baseline_test_identities")
+        gates = value["quality_gates"]
+        expected_flags = {
+            "protect_baseline_test_files",
+            "require_controller_probes",
+            "require_negative_control",
+            "bind_probes_to_exact_git_sha",
+            "require_diagnostic_junit_green",
+        }
+        if gates.get("schema") != 3 or set(gates) != {"schema", *expected_flags}:
+            raise PolicyConfigurationError("quality-gates.json contract v4 fields invalid")
+        for flag in expected_flags:
+            if gates.get(flag) is not True:
+                raise PolicyConfigurationError(f"required quality gate disabled: {flag}")
+
+        probes = value["verification_probes"]
+        if probes.get("schema") != 1 or not isinstance(probes.get("baseline"), list) or not isinstance(probes.get("acceptance"), list):
+            raise PolicyConfigurationError("verification-probes.json shape invalid")
+        all_probes = probes["baseline"] + probes["acceptance"]
+        if not probes["baseline"] or not probes["acceptance"]:
+            raise PolicyConfigurationError("baseline and acceptance probe sets must both be non-empty")
+        for probe in all_probes:
+            self._validate_probe(probe)
+        ids = [probe["id"] for probe in all_probes]
+        if len(ids) != len(set(ids)):
+            raise PolicyConfigurationError("verification probe ids must be unique")
         return value
 
     def write_json(self, name: str, value: dict | list) -> Path:
@@ -140,6 +194,7 @@ class BaseEngine:
         return self.git("rev-parse", "HEAD")
 
     def run_tests(self, label: str) -> dict:
+        """Run the protected JUnit suite as diagnostic evidence, not as sole proof."""
         junit = self.workspace / "build" / "test-results" / "reference" / "TEST-reference.xml"
         if junit.exists():
             junit.unlink()
@@ -147,13 +202,17 @@ class BaseEngine:
         result_exec = self.executor.run([sys.executable, "-S", "ci/run_tests.py"], self.workspace)
         tests = failures = errors = skipped = 0
         identities: list[str] = []
+        parse_error = None
         if junit.is_file():
-            suite = ET.parse(junit).getroot()
-            tests = int(suite.attrib.get("tests", "0"))
-            failures = int(suite.attrib.get("failures", "0"))
-            errors = int(suite.attrib.get("errors", "0"))
-            skipped = int(suite.attrib.get("skipped", "0"))
-            identities = sorted(f"{case.attrib.get('classname')}.{case.attrib.get('name')}" for case in suite.iter("testcase"))
+            try:
+                suite = ET.parse(junit).getroot()
+                tests = int(suite.attrib.get("tests", "0"))
+                failures = int(suite.attrib.get("failures", "0"))
+                errors = int(suite.attrib.get("errors", "0"))
+                skipped = int(suite.attrib.get("skipped", "0"))
+                identities = sorted(f"{case.attrib.get('classname')}.{case.attrib.get('name')}" for case in suite.iter("testcase"))
+            except Exception as exc:
+                parse_error = f"{type(exc).__name__}: {exc}"
         result = {
             "schema": 2,
             "label": label,
@@ -166,22 +225,117 @@ class BaseEngine:
             "errors": errors,
             "skipped": skipped,
             "test_identities": identities,
+            "junit_parse_error": parse_error,
             "stdout_sha256": sha256_bytes(result_exec.stdout.encode()),
             "stderr_sha256": sha256_bytes(result_exec.stderr.encode()),
-            "executor": {"isolation": result_exec.isolation, "security_sandbox": result_exec.security_sandbox, "trusted_fixture_only": True},
-            "passed": result_exec.returncode == 0 and not result_exec.timed_out and failures == 0 and errors == 0,
+            "executor": {
+                "isolation": result_exec.isolation,
+                "security_sandbox": result_exec.security_sandbox,
+                "trusted_fixture_only": True,
+                "process_group_terminated": result_exec.process_group_terminated,
+                "cpu_limit_seconds": result_exec.cpu_limit_seconds,
+            },
+            "passed": result_exec.returncode == 0 and not result_exec.timed_out and parse_error is None and failures == 0 and errors == 0 and tests >= 1,
+            "authoritative": False,
         }
         self.write_json(f"test-{label}.json", result)
         return result
 
+    def _probe_index(self) -> dict[str, dict]:
+        probes = self.authority["verification_probes"]
+        return {probe["id"]: probe for probe in probes["baseline"] + probes["acceptance"]}
+
+    def acceptance_probe_ids(self, selected: dict) -> set[str]:
+        result: set[str] = set()
+        for criterion in selected["acceptance"]:
+            ids = criterion.get("probe_ids")
+            if not isinstance(ids, list) or not ids:
+                raise PolicyConfigurationError(f"acceptance criterion {criterion.get('id')} has no probe_ids")
+            result.update(ids)
+        known = set(self._probe_index())
+        missing = result - known
+        if missing:
+            raise PolicyConfigurationError(f"roadmap references unknown verification probes: {sorted(missing)}")
+        return result
+
+    def run_probes(self, label: str, probe_ids: set[str]) -> dict:
+        tested_sha = self.git("rev-parse", "HEAD")
+        index = self._probe_index()
+        worker = self.repo / "reference_runtime" / "probe_worker.py"
+        rows: list[dict] = []
+        for probe_id in sorted(probe_ids):
+            probe = index[probe_id]
+            nonce = secrets.token_hex(16)
+            execution = self.executor.run(
+                [
+                    sys.executable,
+                    "-S",
+                    str(worker),
+                    "--workspace",
+                    str(self.workspace),
+                    "--probe-json",
+                    json.dumps(probe, sort_keys=True, separators=(",", ":")),
+                    "--nonce",
+                    nonce,
+                ],
+                self.workspace,
+            )
+            receipt = None
+            prefix = "REFERENCE_PROBE_RECEIPT="
+            for line in execution.stdout.splitlines():
+                if line.startswith(prefix):
+                    try:
+                        candidate = json.loads(line[len(prefix):])
+                    except json.JSONDecodeError:
+                        continue
+                    if candidate.get("nonce") == nonce and candidate.get("probe_id") == probe_id:
+                        receipt = candidate
+            completed = bool(receipt and receipt.get("completed"))
+            passed = bool(completed and receipt.get("passed") and execution.returncode == 0 and not execution.timed_out)
+            rows.append({
+                "probe_id": probe_id,
+                "completed": completed,
+                "passed": passed,
+                "receipt": receipt,
+                "worker_exit_code": execution.returncode,
+                "timed_out": execution.timed_out,
+                "duration_ms": execution.duration_ms,
+                "stdout_sha256": sha256_bytes(execution.stdout.encode()),
+                "stderr_sha256": sha256_bytes(execution.stderr.encode()),
+            })
+        result = {
+            "schema": 1,
+            "label": label,
+            "tested_sha": tested_sha,
+            "probe_ids": sorted(probe_ids),
+            "probes": rows,
+            "all_completed": all(row["completed"] for row in rows),
+            "all_passed": bool(rows) and all(row["passed"] for row in rows),
+            "authoritative_within_trusted_fixture_scope": True,
+        }
+        self.write_json(f"probe-{label}.json", result)
+        return result
+
+    def run_negative_control(self, selected: dict) -> dict:
+        acceptance_ids = self.acceptance_probe_ids(selected)
+        evidence = self.run_probes("negative-control", acceptance_ids)
+        negative_passed = evidence["all_completed"] and all(not row["passed"] for row in evidence["probes"])
+        evidence["negative_control_passed"] = negative_passed
+        self.write_json("probe-negative-control.json", evidence)
+        return evidence
+
+    def required_probe_ids(self, selected: dict) -> set[str]:
+        baseline_ids = {probe["id"] for probe in self.authority["verification_probes"]["baseline"]}
+        return baseline_ids | self.acceptance_probe_ids(selected)
+
     def authority_snapshot(self, label: str) -> dict:
         snapshot = digest_paths(self.workspace, self.policy["authority_paths"])
         if not snapshot["files"]:
-            raise RuntimeError("authority snapshot is empty; configured authority_paths matched no files")
+            raise PolicyConfigurationError("authority snapshot is empty; configured authority_paths matched no files")
         per_pattern = {pattern: sorted(path for path in snapshot["files"] if matches_any(path, [pattern])) for pattern in self.policy["authority_paths"]}
         empty = [pattern for pattern, paths in per_pattern.items() if not paths]
         if empty:
-            raise RuntimeError(f"authority patterns matched no files: {empty}")
+            raise PolicyConfigurationError(f"authority patterns matched no files: {empty}")
         snapshot["matches"] = per_pattern
         self.write_json(f"authority-snapshot-{label}.json", snapshot)
         return snapshot
@@ -189,9 +343,27 @@ class BaseEngine:
     def protected_test_snapshot(self, label: str) -> dict:
         snapshot = digest_paths(self.workspace, self.policy["protected_test_paths"])
         if not snapshot["files"]:
-            raise RuntimeError("protected baseline test snapshot is empty")
+            raise PolicyConfigurationError("protected baseline test snapshot is empty")
         self.write_json(f"protected-tests-{label}.json", snapshot)
         return snapshot
+
+    def select_authorized_item(self) -> dict:
+        roadmap = self.authority["roadmap"]
+        release = self.authority["release_state"]
+        completed = set(release.get("completed", []))
+        selected = next(
+            (
+                item for item in roadmap["items"]
+                if item["id"] in self.goal["items"]
+                and item["status"] == "ready"
+                and set(item.get("dependencies", [])) <= completed
+            ),
+            None,
+        )
+        if selected is None:
+            raise PolicyConfigurationError("no authorized ready item with satisfied dependencies")
+        self.acceptance_probe_ids(selected)
+        return selected
 
     def workspace_path(self, relative: str) -> Path:
         canonical = safe_relative_path(relative)
@@ -265,42 +437,44 @@ class BaseEngine:
                     risk = rule["risk"]
         return risk, matched
 
-    def baseline_invariants(self, baseline: dict, candidate: dict, protected_before: dict, protected_after: dict) -> dict:
-        baseline_ids = set(baseline["test_identities"])
-        candidate_ids = set(candidate["test_identities"])
-        return {"baseline_identities_preserved": baseline_ids <= candidate_ids, "protected_test_files_unchanged": protected_before["digest"] == protected_after["digest"], "baseline_count": len(baseline_ids), "missing_baseline_identities": sorted(baseline_ids - candidate_ids)}
-
-    def acceptance_test_identities(self, selected: dict) -> set[str]:
-        result: set[str] = set()
-        for criterion in selected["acceptance"]:
-            result.update(criterion.get("test_identities", []))
-        return result
-
-    def compute_review(self, *, selected: dict, changed_paths: list[str], policy_decisions: list[dict], authority_before: dict, authority_after: dict, protected_before: dict, protected_after: dict, baseline: dict, candidate_tests: dict, candidate_sha: str) -> dict:
-        baseline_checks = self.baseline_invariants(baseline, candidate_tests, protected_before, protected_after)
-        required_acceptance = self.acceptance_test_identities(selected)
-        observed = set(candidate_tests["test_identities"])
+    def compute_review(
+        self,
+        *,
+        changed_paths: list[str],
+        policy_decisions: list[dict],
+        authority_before: dict,
+        authority_after: dict,
+        protected_before: dict,
+        protected_after: dict,
+        diagnostic_tests: dict,
+        candidate_probes: dict,
+        negative_control: dict,
+        candidate_sha: str,
+    ) -> dict:
+        gates = self.authority["quality_gates"]
         checks = {
             "authority_snapshot_nonempty": bool(authority_before["files"]) and bool(authority_after["files"]),
             "authority_unchanged": authority_before["digest"] == authority_after["digest"],
             "scope_bounded": all(row["accepted"] for row in policy_decisions),
-            "deterministic_tests_green": candidate_tests["passed"],
-            "tests_bound_to_candidate_sha": candidate_tests["tested_sha"] == candidate_sha,
-            "baseline_identities_preserved": baseline_checks["baseline_identities_preserved"],
-            "protected_test_files_unchanged": baseline_checks["protected_test_files_unchanged"],
-            "acceptance_covered": required_acceptance <= observed,
-            "minimum_candidate_tests_met": candidate_tests["tests"] >= self.policy["minimum_candidate_tests"],
+            "protected_test_files_unchanged": (not gates["protect_baseline_test_files"]) or protected_before["digest"] == protected_after["digest"],
+            "negative_control_passed": (not gates["require_negative_control"]) or bool(negative_control.get("negative_control_passed")),
+            "controller_probes_green": (not gates["require_controller_probes"]) or candidate_probes["all_passed"],
+            "probes_bound_to_candidate_sha": (not gates["bind_probes_to_exact_git_sha"]) or candidate_probes["tested_sha"] == candidate_sha,
+            "diagnostic_junit_green": (not gates["require_diagnostic_junit_green"]) or diagnostic_tests["passed"],
         }
-        findings: list[dict] = []
-        for name, passed in checks.items():
-            if not passed:
-                findings.append({"kind": name, "severity": "blocking", "message": f"Computed review check failed: {name}"})
-        if baseline_checks["missing_baseline_identities"]:
-            findings.append({"kind": "missing-baseline-tests", "severity": "blocking", "message": "Baseline test identities disappeared.", "missing": baseline_checks["missing_baseline_identities"]})
-        missing_acceptance = sorted(required_acceptance - observed)
-        if missing_acceptance:
-            findings.append({"kind": "missing-acceptance-tests", "severity": "blocking", "message": "Required acceptance test identities are missing.", "missing": missing_acceptance})
-        return {"schema": 2, "role": "reviewer", "verdict": "accept" if not findings else "block", "candidate_sha": candidate_sha, "changed_paths": changed_paths, "checks": checks, "blocking_findings": findings}
+        findings = [
+            {"kind": name, "severity": "blocking", "message": f"Computed review check failed: {name}"}
+            for name, passed in checks.items() if not passed
+        ]
+        return {
+            "schema": 2,
+            "role": "reviewer",
+            "verdict": "accept" if not findings else "block",
+            "candidate_sha": candidate_sha,
+            "changed_paths": changed_paths,
+            "checks": checks,
+            "blocking_findings": findings,
+        }
 
     def build_summary(self, **extra) -> dict:
         seq, tip = EventLog.verify(self.evidence / "events.jsonl")
@@ -337,7 +511,8 @@ class BaseEngine:
         commits: list[str] = []
         for i in range(0, len(chunks) - 1, 2):
             sha, body = chunks[i].strip(), chunks[i + 1]
-            if sha and marker in body:
+            trailing = [line.strip() for line in body.splitlines() if line.strip()]
+            if sha and trailing and trailing[-1] == marker:
                 commits.append(sha)
         return commits
 

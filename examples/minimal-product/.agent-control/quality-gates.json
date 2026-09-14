@@ -1,7 +1,8 @@
 {
-  "schema": 2,
-  "preserve_baseline_test_identities": true,
+  "schema": 3,
   "protect_baseline_test_files": true,
-  "require_acceptance_test_identities": true,
-  "bind_tests_to_exact_git_sha": true
+  "require_controller_probes": true,
+  "require_negative_control": true,
+  "bind_probes_to_exact_git_sha": true,
+  "require_diagnostic_junit_green": true
 }

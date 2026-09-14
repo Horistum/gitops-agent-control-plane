@@ -1,41 +1,30 @@
 {
-  "schema": 2,
+  "schema": 3,
   "items": [
     {
       "id": "EXAMPLE-001",
       "title": "Add deterministic greeting API",
       "status": "ready",
+      "dependencies": [],
       "goal": "Add a small public greeting function while preserving existing normalization behavior.",
       "acceptance": [
         {
           "id": "AC-1",
           "text": "reference_app.service.greet(\"  Ada   Lovelace \" ) returns \"Hello, Ada Lovelace!\".",
-          "test_identities": [
-            "test_acceptance_greet.GreetingAcceptanceTests.test_greet_reuses_normalization"
-          ]
+          "probe_ids": ["greet-normalized"]
         },
         {
           "id": "AC-2",
           "text": "greet rejects a blank or whitespace-only name with ValueError.",
-          "test_identities": [
-            "test_acceptance_greet.GreetingAcceptanceTests.test_greet_rejects_blank_name"
-          ]
-        },
-        {
-          "id": "AC-3",
-          "text": "normalize_name keeps its existing behavior and protected baseline tests remain green.",
-          "test_identities": [
-            "test_service.NormalizeNameTests.test_trims_and_collapses_whitespace",
-            "test_service.NormalizeNameTests.test_rejects_blank_name",
-            "test_service.NormalizeNameTests.test_rejects_non_string"
-          ]
+          "probe_ids": ["greet-blank"]
         }
       ],
       "non_goals": [
         "Localization.",
         "CLI or HTTP endpoints.",
         "External dependencies.",
-        "CI, baseline-test, or authority-document changes."
+        "Changing normalize_name behavior; that regression is protected by baseline probes.",
+        "CI, verification-probe, baseline-test, or authority-document changes."
       ]
     }
   ]

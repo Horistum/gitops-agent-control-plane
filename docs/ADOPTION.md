@@ -1,6 +1,6 @@
 # Adapting the reference
 
-Do not start by connecting a model. Start by defining authority.
+Do not start by connecting a model. Start by defining authority and the verifier trust boundary.
 
 ## 1. Replace the example product authority
 
@@ -14,43 +14,37 @@ Create your equivalent of:
   release-state.json
   forbidden.json
   quality-gates.json
+  verification-probes.json
 ```
 
-Keep these files outside the normal implementation write envelope.
+Keep structured authority and verification definitions outside the implementation write envelope.
 
-## 2. Define deterministic verification
+## 2. Define authoritative verification separately from diagnostics
 
-A production system needs executable commands whose outputs can be tied to an exact candidate revision.
+Do not treat test names, counts or JUnit XML produced inside a candidate process as sufficient authorization evidence.
 
-Record test identities, not only exit code.
+Define protected verification inputs and a verifier-owned result protocol. For new behavior, include a negative control showing that the acceptance check fails against the baseline revision and passes only after the candidate implements the behavior.
 
-## 3. Define path authority
+For production untrusted/model-generated code, run the verifier behind a container/VM/remote CI boundary whose result channel the candidate cannot write or impersonate.
 
-Separate:
+## 3. Bind verification to exact revisions
 
-- readable authority/context;
-- normal implementation paths;
-- critical paths;
-- controller/CI infrastructure.
+Record the exact candidate/merge identity observed by the verifier. A green result without an exact revision identity is incomplete evidence.
 
-## 4. Define risk and human boundaries
+## 4. Define path authority
 
-A successful test is not permission to cross a security, contract, credential or migration boundary.
+Separate readable context, implementation paths, diagnostic test paths, protected verification inputs, critical paths and controller/CI infrastructure.
 
-## 5. Preserve evidence identities
+## 5. Define risk and human boundaries
 
-Your external Git/CI adapter should preserve the same relationships shown locally:
+Successful verification is not permission to cross a security, contract, credential or migration boundary.
 
-```text
-base revision
-  -> candidate revision
-      -> candidate verification
-          -> merge revision
-              -> post-merge verification
-```
+## 6. Preserve durable effect identity
 
-## 6. Add AI last
+Before a non-idempotent external effect, persist a stable request identity. Recovery should discover whether that exact effect already happened instead of blindly retrying it.
 
-Replace deterministic role producers with a model only after controller-owned policy, execution and evidence boundaries work without it.
+## 7. Add AI last
 
-That keeps AI as a reasoning component instead of accidentally making it the root of trust.
+Replace deterministic role producers with a model only after controller-owned authority, isolated verification and durable execution boundaries work without it.
+
+That keeps AI as a reasoning component instead of accidentally making candidate code or model output the root of trust.

@@ -4,7 +4,7 @@ A **standalone executable reference** for policy-bounded autonomous software del
 
 **Initiated and maintained by the Horistum project.**
 
-This repository demonstrates control-plane mechanics, not a production AI product. It is deliberately small enough that every authority decision, Git identity, test result, review gate and recovery effect can be inspected.
+This repository demonstrates control-plane mechanics, not a production AI product. The current portable contract is `gitops-agent-control-plane/v4`.
 
 The reference runs with **Bash, Git and Python 3.11+**. CI executes the same contract on Python 3.11, 3.12 and 3.13.
 
@@ -14,9 +14,23 @@ The reference runs with **Bash, Git and Python 3.11+**. CI executes the same con
 ./scripts/agentctl demo happy-path
 ```
 
-A successful run creates a real local baseline commit, a separate candidate commit, executable verification bound to that candidate SHA, a computed review, a real non-fast-forward merge commit, post-merge verification bound to the merge SHA, durable state and evidence.
+A successful run creates a real baseline commit, negative-control evidence, a separate candidate commit, controller-owned verification bound to that candidate SHA, a computed review, a real non-fast-forward merge, post-merge verification bound to the merge SHA, durable state and audit evidence.
 
 Evidence is written under `.demo/runs/<run-id>/evidence/`.
+
+## Why v4 exists
+
+Candidate-process JUnit is not a trustworthy authorization channel by itself. Candidate code can execute inside the same Python process as tests and can influence assertions, imports or XML serialization.
+
+Contract v4 therefore distinguishes:
+
+- **diagnostic JUnit**: useful visibility, explicitly non-authoritative;
+- **controller probes**: product-authored structured checks under `.agent-control/verification-probes.json`;
+- **negative control**: new acceptance probes must fail against the baseline implementation before a candidate can use them as evidence;
+- **completion receipt**: every probe runs in a fresh process and must return a controller-recognized nonce-bound receipt; `exit(0)` alone is not success;
+- **exact Git binding**: candidate and post-merge probe evidence records the exact SHA being observed.
+
+This is a stronger reference protocol, but it is still not a complete hostile-code sandbox. Production model-generated code requires a verifier behind a stronger isolation boundary.
 
 ## Conformance is more important than the happy path
 
@@ -24,112 +38,53 @@ Evidence is written under `.demo/runs/<run-id>/evidence/`.
 ./scripts/agentctl conformance
 ```
 
-Contract v3 currently exercises eleven scenarios discovered from `examples/scenarios/`:
+Scenarios are discovered from `examples/scenarios/`. Contract v4 includes the existing lifecycle/risk/recovery cases plus three direct evidence-forgery regressions:
 
 | Scenario | Expected terminal state | Property |
 |---|---|---|
-| `happy-path` | `COMPLETED` | full bounded lifecycle |
+| `happy-path` | `COMPLETED` | full bounded lifecycle with negative control and controller probes |
 | `forbidden-path` | `BLOCKED_POLICY` | authority rewrite rejected before candidate side effect |
 | `test-tamper` | `BLOCKED_POLICY` | developer cannot replace protected baseline tests |
-| `test-failure` | `FAILED_VERIFICATION` | executable failure blocks merge |
-| `insufficient-tests` | `FAILED_VERIFICATION` | green-but-insufficient tests fail computed review |
+| `test-failure` | `FAILED_VERIFICATION` | wrong behavior fails diagnostic tests and controller probes |
+| `insufficient-tests` | `FAILED_VERIFICATION` | correct test names with empty bodies cannot manufacture acceptance |
+| `assertion-tamper` | `FAILED_VERIFICATION` | monkeypatched `unittest` assertions cannot manufacture controller evidence |
+| `junit-forgery` | `FAILED_VERIFICATION` | forged five-test XML cannot authorize a wrong candidate |
 | `budget-exceeded` | `BLOCKED_POLICY` | changed-file budget blocks before workspace mutation |
-| `patch-budget-exceeded` | `BLOCKED_POLICY` | patch-byte budget is independently reachable at an allowed file count |
+| `patch-budget-exceeded` | `BLOCKED_POLICY` | patch-byte budget is independently reachable |
 | `risk-ceiling` | `BLOCKED_POLICY` | effective risk may exceed owner goal authority |
-| `medium-auto-boundary` | `NEEDS_DECISION` | MEDIUM is reachable and auto-merge ceiling is independent |
+| `medium-auto-boundary` | `NEEDS_DECISION` | MEDIUM risk and auto-merge ceiling are independent |
 | `human-gate` | `NEEDS_DECISION` | top-level `src/security/**` is classified HIGH |
-| `crash-recovery` | `COMPLETED` | a second process recovers an already-performed merge effect without duplicating it |
+| `crash-recovery` | `COMPLETED` | a fresh process recovers an already-performed merge effect without duplicating it |
 
-A conformance failure does not abort the matrix. Remaining scenarios continue and a structured `conformance-report.json` plus failure evidence are retained.
+A scenario failure does not abort the matrix. Remaining scenarios continue and `conformance-report.json` plus run evidence are retained.
 
-## Authority and tests are different write domains
+## Authority and write domains
 
-Product-authored authority lives under:
+Product-authored authority lives under `examples/minimal-product/.agent-control/`.
 
-```text
-examples/minimal-product/.agent-control/
-```
+The standalone policy separates developer source writes, tester diagnostic-test writes, protected baseline tests and authority/CI paths. `verification-probes.json`, `quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are executable structured inputs.
 
-The standalone policy separates:
-
-- developer write paths: implementation source only;
-- tester write paths: new independent acceptance-test files only;
-- protected baseline tests: owner-controlled and immutable to both proposal roles;
-- authority/CI paths: readable but not proposal-writable.
-
-Candidate verification requires:
-
-1. protected baseline test files remain byte-identical;
-2. all baseline JUnit identities remain present;
-3. roadmap acceptance criteria map to required test identities and those identities are observed;
-4. candidate tests pass;
-5. test evidence records the exact candidate SHA;
-6. post-merge evidence records the exact merge SHA.
-
-`quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are runtime inputs, not decorative documentation. `authority.md`, `architecture.md` and free-form `forbidden_directions` remain human-readable context; executable restrictions use the structured policy fields and are included in the authority snapshot rather than being falsely presented as machine-understood prose.
+`authority.md`, `architecture.md` and free-form `forbidden_directions` are included in the authority snapshot but remain human-readable context rather than silently machine-interpreted natural language.
 
 ## Review is computed
 
-`review.json` is derived from evidence. The runtime computes:
+`review.json` is derived from observable controller state. It checks authority preservation, bounded paths, protected tests, baseline negative control, controller probe results, exact candidate-SHA probe binding and supplemental diagnostic JUnit status.
 
-- non-empty authority snapshot;
-- unchanged authority digest;
-- accepted path policy decisions;
-- candidate test result;
-- exact candidate-SHA test binding;
-- protected baseline file preservation;
-- baseline test-identity preservation;
-- required acceptance-test identities;
-- candidate minimum test count.
+A green JUnit file cannot override a failing controller probe.
 
-Any failed check becomes a blocking finding.
+## Path and execution bounds
 
-## Recovery is a real process boundary
+Policy matching uses one memoized segment-aware matcher everywhere. `**` means zero or more complete path segments, including zero, without exponential recursive backtracking.
 
-The crash-recovery conformance case persists a merge-effect intent, performs the merge, intentionally terminates the controller process before writing the receipt, and starts a new Python process.
+The local executor uses a policy-derived timeout/CPU budget and a dedicated process group. Descendant processes are cleaned up on timeout and after the direct child exits.
 
-The new process loads durable state, discovers the already-performed merge by its stable `Effect-Id`, records one receipt, and refuses duplicate effect identities. A second fresh resume is an idempotent no-op.
-
-## Path semantics are part of the contract
-
-Policy matching uses one segment-aware matcher everywhere. `**` means zero or more full path segments, so:
-
-```text
-src/security/guard.py
-src/reference_app/security/guard.py
-```
-
-both match:
-
-```text
-src/**/security/**
-```
-
-The same matcher is used for write gates, authority snapshots, protected paths and risk rules. No `Path.glob`/`fnmatch` split is used.
+These are bounded-execution controls, **not a security sandbox**.
 
 ## Evidence and schemas
 
-JSON Schema Draft 2020-12 contracts exist for the core public and safety artifacts, including:
+The repository validates goal, policy, scenario, state, decision, review, test, probe, effect, recovery and terminal evidence against a fail-closed supported subset of JSON Schema Draft 2020-12. Unsupported schema keywords are rejected instead of ignored.
 
-- goal and policy;
-- plan and durable state;
-- policy decision and review;
-- candidate and merge evidence;
-- test and risk evidence;
-- recovery evidence;
-- events and terminal summary.
-
-Conformance validates emitted artifacts against those schemas.
-
-The event log is **hash-linked consistency evidence, not a cryptographic authenticity signature**. Someone able to rewrite the whole evidence directory can recompute an unkeyed chain. A production system needs an external or signed anchor.
-
-## Local execution boundary
-
-The showcase executes only built-in **trusted deterministic fixture proposals**. Its local test executor has timeout, environment scrubbing and process resource limits, but it is **not a security sandbox** and does not provide filesystem or network isolation.
-
-The runtime refuses proposal sources other than `trusted-fixture` in this standalone mode.
-
-Do **not** connect an external model or untrusted code producer to this local executor. A production adapter must provide a real sandbox/container/VM boundary before executing untrusted candidate code.
+The event log is hash-linked consistency evidence, not cryptographic authenticity. A production system needs an external or signed anchor.
 
 ## Validate
 
@@ -137,33 +92,18 @@ Do **not** connect an external model or untrusted code producer to this local ex
 ./scripts/agentctl validate
 ```
 
-This performs non-mutating repository validation, unit tests of control functions and the complete conformance matrix.
-
-## Repository map
-
-```text
-reference_runtime/          runtime, matcher, executor, evidence/schema validation
-schemas/                    JSON Schema contracts
-config/reference-policy.json
-examples/minimal-product/   product + product-authored authority
-examples/scenarios/         executable conformance fixtures
-scripts/agentctl            operator entry point
-tests/                      code-path and publication tests
-docs/                       architecture, policy, evidence, verification, publication
-```
+This runs non-mutating repository validation, direct unit tests over control functions and the complete conformance matrix.
 
 ## Origin, license and branding
 
 This reference architecture was originally developed and published from the **Horistum GitHub organization**.
 
-Source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
-
-The Apache-2.0 license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. See `TRADEMARKS.md`.
+Source code, documentation, schemas and examples are licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`. The license does not grant rights to use the **Horistum** name, logos or distinctive branding as the identity of a fork, product or service. See `TRADEMARKS.md`.
 
 Contributions are governed by `CONTRIBUTING.md`; support expectations by `SUPPORT.md`; security reporting by `.github/SECURITY.md`; release rules by `docs/RELEASES.md`.
 
 ## What this repository does not claim
 
-It does not claim that deterministic fixture roles are equivalent to a production AI system. It does not claim the local executor is safe for untrusted code. It does not claim the unkeyed event chain proves authenticity.
+It does not claim deterministic fixture roles are equivalent to a production AI system. It does not claim the local executor/probe worker is safe against arbitrary malicious code. It does not claim unkeyed event hashes prove authenticity.
 
-It demonstrates the surrounding control-plane properties in executable form: bounded authority, independent write domains, exact identity, evidence-based review, risk boundaries, durable state, process recovery and conformance.
+It demonstrates bounded authority, exact identity, controller-observed verification, negative controls, evidence-aware review, risk boundaries, durable state, process recovery and conformance within the explicitly documented standalone trust model.
