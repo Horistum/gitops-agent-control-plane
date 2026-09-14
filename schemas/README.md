@@ -1,9 +1,11 @@
 # Portable JSON Schema contracts
 
-Contract: `gitops-agent-control-plane/v5`.
+Contract: `gitops-agent-control-plane/v6`.
 
-Schemas use JSON Schema Draft 2020-12 syntax but the repository intentionally implements a documented subset. The validator rejects unsupported keywords instead of silently ignoring constraints.
+Schemas use Draft 2020-12 syntax through an intentionally explicit supported subset. Unsupported keywords fail validation rather than being silently ignored. The subset supports boolean or schema-valued `additionalProperties`, allowing digest maps and similar evidence structures to be typed.
 
-Coverage includes goal, policy, generated verification definitions, conformance scenarios, plan, durable state, terminal evidence, policy decisions, computed review, candidate/merge/post-merge evidence, diagnostic test evidence, signed controller-probe evidence, risk/recovery evidence and individual events.
+Coverage includes goal, policy, generic verification definitions, conformance scenarios, request/proposal/plan, durable state, authority snapshots, protected-test snapshots, diagnostic tests, signed per-case probe evidence, policy/review/risk decisions, merge intent, merge/post-merge/recovery evidence, human-decision evidence, role/fault-injection artifacts, terminal evidence and events.
+
+Semantic probe-DSL validation supplements JSON Schema for generator/expression-specific constraints.
 
 `$id` is intentionally omitted until a stable public schema-resolution namespace is selected before the first tagged public release.
