@@ -1,94 +1,59 @@
 # Security model
 
-## 1. Models are not the privileged executor
+## Primary threat
 
-The controller, not the LLM, holds GitHub authority and runs tests. Model sessions are constrained to
-read-only structured proposal work without shell, web, subagents or inherited GitHub credentials.
+The dangerous failure mode is not merely a bad patch. It is a bad patch combined with enough authority to redefine the evidence proving that the patch was acceptable.
 
-This reduces prompt-injection impact: malicious repository text can influence a proposal, but it
-cannot directly execute a shell command or push a branch from the model session.
+The design therefore focuses on authority separation and evidence provenance.
 
-## 2. Product changes are path-bounded twice
+## Untrusted model sessions
 
-A candidate must satisfy:
+Model sessions are proposal generators. They do not receive privileged repository credentials, do not directly merge changes and do not become the component applying arbitrary shell commands.
 
-1. tenant `allowed_paths`;
-2. engine hard-deny paths.
+Repository text is treated as untrusted data. Prompt injection in source must not create a route to new tools or credentials.
 
-The second layer prevents a product goal from authorizing edits to controller-sensitive surfaces such
-as workflows, Git metadata and trusted agent/authority instructions.
+## Narrow mutation surface
 
-## 3. Tests are isolated
+Only the controller applies proposed edits. Every path is checked against policy and runtime hard denies, and architecture-selected working sets narrow the envelope again.
 
-Local verification is executed by the controller in rootless Podman with:
+Lifecycle actions are controller-owned and tied to a specific task/candidate identity.
 
-- no network;
-- read-only root filesystem;
-- all Linux capabilities dropped;
-- no-new-privileges;
-- pid, memory and CPU bounds;
-- temporary HOME and Gradle home;
-- exact preloaded image;
-- fixed owner-approved argv commands.
+## Deterministic execution isolation
 
-The product source is the writable mounted workspace. Credentials are not intentionally passed into
-the container.
+Local product commands should run in rootless containers with no network, dropped capabilities, no-new-privileges, bounded memory/CPU/PIDs, read-only container root, explicit writable workspace, no inherited model/repository credential set and a pinned local image digest.
 
-## 4. CI identity matters
+The test image is trusted execution infrastructure and must not float by tag.
 
-A green string named `flowai-reference-ci` is insufficient by itself. Policy binds required checks
-to the GitHub Actions App id.
+## CI spoof resistance
 
-Product governance also requires strict checks against current `main` and blocks force push/deletion.
+A green string with the expected check name is insufficient. Policy binds the expected application identity and the runtime checks the exact commit SHA whose checks are consumed. Post-merge verification repeats that relation on the merge SHA.
 
-## 5. State integrity
+## State integrity
 
-`loop-state` uses:
+Execution state uses a dedicated remote branch with one controller identity, non-force writes, monotonically increasing sequence, hash-linked events, immutable receipts and explicit pending-effect identity.
 
-- single `controller_id` writer identity;
-- non-force pushes;
-- sequence numbers;
-- previous-event hashes;
-- state hashes;
-- immutable run receipts.
+A failed state push is not treated as success. Remote state must be reconciled before another effect.
 
-A disappeared established state branch, wrong controller identity or inconsistent event hash fails
-closed.
+## Replay resistance
 
-## 6. Exact-SHA evidence
+Receipts carry enough identity to reject stale evidence across runtime/policy activation, task phase, base/candidate SHA and request hash. Reusing old evidence merely because the task name matches is forbidden.
 
-Baseline, candidate, CI, merge and post-merge evidence are tied to exact SHAs. Evidence from a prior
-candidate cannot be promoted merely because the task name is the same.
+## Owner commands
 
-## 7. Human authorization is immutable input
+The portable operator interface is `scripts/control.py`. The adapter translates explicit owner verbs to the active backend protocol. This translation does not broaden authority.
 
-Flow Loop Goal issues and owner command comments are rejected when they are edited after creation.
-This deliberately chooses auditable immutable authorization over convenient in-place correction.
+## Goal immutability
 
-Correction path: close/reject the old goal and create a fresh one.
+`scripts/submit_goal.py` creates a goal request from a portable JSON document. The backend records exact source identity; later server-side edits are not silently treated as authorization changes.
 
-## 8. Secrets
+## Secrets
 
-Do not commit:
+Do not commit tokens, provider credentials, repository credentials, copied credential homes, controller state directories or machine-specific policy containing sensitive operational details.
 
-- `policy.json` if it contains environment-specific authority details you do not want reviewed;
-- GitHub tokens;
-- Codex/ChatGPT auth state;
-- `.env` credentials;
-- model provider API keys.
+Use dedicated credential homes and pass only the minimum environment into child processes.
 
-FlowAI-Control 0.3.0 does not use an OpenAI API fallback in the supported billing contract.
+## Threats deliberately not solved
 
-## 9. Control repo visibility
+The reference is not a substitute for compromised organization administration, compromised host root, malicious trusted CI application, malicious pinned test image, distributed multi-writer consensus or formal verification of model reasoning.
 
-The current setup path requires a private control repository. That branch contains detailed
-engineering state, reports and receipts even when it should contain no ordinary credentials.
-
-Treat it as operational metadata, not as harmless sample output.
-
-## 10. Supply-chain pin
-
-`COMPATIBILITY.json` pins a full controller source SHA. Installation also verifies
-`RELEASE-MANIFEST.json` against the exact Git tree and file hashes before copying runtime bytes.
-
-Do not change the pin to `main` or a floating tag merely to make upgrades more convenient.
+Those boundaries are documented rather than disguised as generic “AI safety”.
