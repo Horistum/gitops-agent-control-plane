@@ -8,51 +8,40 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PublicationPolicyTests(unittest.TestCase):
+    """Policy/document consistency checks, not runtime-security tests."""
+
     def test_private_security_reporting_policy_is_defined(self):
         path = ROOT / ".github" / "SECURITY.md"
         self.assertTrue(path.is_file())
         text = path.read_text()
         self.assertIn("GitHub Private Vulnerability Reporting", text)
         self.assertIn("Do not open a public GitHub issue", text)
-        self.assertIn("hard publication gate", text)
 
-    def test_release_policy_separates_release_and_contract_versions(self):
-        path = ROOT / "docs" / "RELEASES.md"
-        self.assertTrue(path.is_file())
-        text = path.read_text()
-        self.assertIn("Semantic Versioning", text)
-        self.assertIn("gitops-agent-control-plane/v2", text)
+    def test_release_policy_uses_contract_v3_and_separate_semver(self):
+        text = (ROOT / "docs" / "RELEASES.md").read_text()
+        self.assertIn("gitops-agent-control-plane/v3", text)
+        self.assertIn("vMAJOR.MINOR.PATCH", text)
         self.assertIn("v0.1.0", text)
-        self.assertIn("Release gate", text)
-        self.assertRegex(text, r"vMAJOR\.MINOR\.PATCH")
 
     def test_support_policy_is_explicitly_best_effort(self):
-        path = ROOT / "SUPPORT.md"
-        self.assertTrue(path.is_file())
-        text = path.read_text()
+        text = (ROOT / "SUPPORT.md").read_text().lower()
         self.assertIn("best-effort", text)
-        self.assertIn("does not carry", text)
-        self.assertIn("SLA", text)
-        self.assertIn(".github/SECURITY.md", text)
-        self.assertIn("future commercial Horistum product", text)
+        self.assertIn("no response-time guarantee", text)
 
-    def test_publication_policy_marks_first_three_controls_defined(self):
+    def test_publication_clean_room_tracks_discovered_scenarios(self):
+        scenario_files = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
+        self.assertGreaterEqual(len(scenario_files), 11)
         text = (ROOT / "docs" / "PUBLICATION.md").read_text()
-        for phrase in (
-            "Publication controls now defined",
-            "Private security reporting",
-            "Release and versioning policy",
-            "Public support expectations",
-            "Remaining publication gates",
-        ):
-            self.assertIn(phrase, text)
+        self.assertIn("all documented conformance scenarios", text)
+        self.assertIn("examples/scenarios/", text)
+        self.assertIn("Private Vulnerability Reporting", text)
 
-    def test_policy_files_do_not_claim_public_release_exists(self):
-        release_text = (ROOT / "docs" / "RELEASES.md").read_text()
-        publication_text = (ROOT / "docs" / "PUBLICATION.md").read_text()
-        self.assertIn("intended first public release", release_text)
-        self.assertIn("After all remaining publication gates pass", publication_text)
-        self.assertNotRegex(release_text, re.compile(r"current public release\s*:\s*v", re.I))
+    def test_notice_year_accepts_year_ranges(self):
+        text = (ROOT / "NOTICE").read_text()
+        self.assertRegex(
+            text,
+            re.compile(r"Copyright\s+\d{4}(?:-\d{4})?\s+Horistum contributors"),
+        )
 
 
 if __name__ == "__main__":

@@ -1,12 +1,11 @@
-# Contract schemas
+# Portable JSON Schema contracts
 
-These JSON Schema documents describe the portable surfaces demonstrated by the reference runtime:
+Contract: `gitops-agent-control-plane/v3`.
 
-- `goal.schema.json` — owner intent and authority ceiling;
-- `policy.schema.json` — write/risk/test boundaries;
-- `plan.schema.json` — bounded architecture plan;
-- `state.schema.json` — durable execution state;
-- `evidence.schema.json` — terminal run evidence.
+Schemas use JSON Schema Draft 2020-12 and cover goal, policy, plan, durable state,
+terminal evidence, policy decisions, computed review, candidate/merge/test/risk/recovery
+evidence and individual events.
 
-The standalone runtime performs dependency-free semantic validation so the demo needs only Python.
-The schemas exist so other implementations can validate the same contracts with any standards-compliant JSON Schema tool.
+`$id` is intentionally omitted until a stable public schema-resolution namespace is
+selected before the first tagged public release. Repository conformance validates emitted
+artifacts against these schemas with the built-in supported-keyword validator.

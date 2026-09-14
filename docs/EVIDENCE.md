@@ -1,63 +1,38 @@
 # Evidence model
 
-## Evidence classes
+## Authority evidence
 
-### Authored authority
+Authority snapshots enumerate real matching files using the exact same segment-aware path matcher used by write gates. The runtime fails if the configured authority snapshot or any configured authority pattern matches no file.
 
-Goal, roadmap item, architecture and policy.
+## Test evidence
 
-These define the question the system is allowed to answer.
+For each test run the controller records:
 
-### Reasoning artifacts
+- exact tested Git SHA;
+- exit code and timeout flag;
+- testcase count and identities;
+- failures/errors/skips;
+- stdout/stderr digests;
+- executor isolation metadata.
 
-Role discovery, plan, developer proposal, tester assessment and review.
+Before each run, stale JUnit output is removed. A failed runner that writes no new XML therefore cannot inherit old testcase identities.
 
-Useful explanations, but not execution proof.
+## Candidate review evidence
 
-### Controller evidence
+Review is derived from the evidence predicates documented in `MODEL.md`. Protected baseline tests are both content-digested and identity-checked. Acceptance coverage is derived from roadmap acceptance → test identity mappings.
 
-Policy decisions, candidate patch digest, changed paths, test results and state transitions.
+## Effect evidence
 
-### Git identity
+Merge intent is persisted before effect execution. Merge commits carry a stable effect request ID. Recovery checks the Git history for that ID and requires one occurrence before consuming the effect.
 
-Baseline, candidate and merge SHAs.
+## Event chain: consistency, not authenticity
 
-These prevent evidence from silently drifting to another revision.
+Events are hash-linked. This detects corruption or edits where hashes are not recomputed.
 
-## Test identity
+The chain is deliberately **not described as tamper-proof**. There is no secret key or external anchor in the standalone reference. A full evidence-directory rewriter can recompute the chain and terminal tip.
 
-The test runner writes JUnit. The controller records both aggregate counts and testcase identities.
+Production systems need an independent anchor/signature/transparency mechanism.
 
-A zero exit code with zero tests is not useful evidence.
+## JSON Schema
 
-## Event chain
-
-Every event contains:
-
-```json
-{
-  "seq": 4,
-  "type": "candidate-created",
-  "payload": {},
-  "previous_hash": "...",
-  "hash": "..."
-}
-```
-
-`hash` is calculated from sequence, type, payload and previous hash.
-
-Editing an old event invalidates the following chain.
-
-## Pending effects
-
-Crash recovery requires durable intent before a non-idempotent effect. The recovery scenario persists a merge request hash, reloads it after a simulated restart and refuses to invent a new identity.
-
-## Evidence directory
-
-Each demo run is self-contained:
-
-```text
-.demo/runs/<run-id>/evidence/
-```
-
-That directory is intentionally ignored by Git.
+Core safety artifacts and individual events are validated against Draft 2020-12 schemas during conformance.

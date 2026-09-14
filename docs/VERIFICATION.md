@@ -1,40 +1,64 @@
 # Verification
 
-## Repository validation
+The current portable contract is:
 
-```bash
-./scripts/agentctl validate
+```text
+gitops-agent-control-plane/v3
 ```
 
-Checks:
+## `./scripts/agentctl validate`
 
-- internal/project branding does not leak into the reference;
-- JSON documents parse;
-- portable contracts validate semantically;
-- JSON Schema documents use Draft 2020-12;
-- authority files exist and stay outside the write envelope;
-- Python parses;
-- Bash entrypoints pass `bash -n`;
-- Linux bootstrap pure self-test passes;
-- the example baseline executes three real tests;
-- the complete five-scenario conformance matrix passes.
+Validation is intentionally executable and non-mutating with respect to the example source tree.
 
-## Conformance matrix
+It performs:
 
-```bash
-./scripts/agentctl conformance
-```
+1. publication/licensing checks;
+2. JSON Schema loading plus static goal/policy validation;
+3. authority-layout validation using the same path matcher as runtime gates;
+4. Python and shell syntax checks;
+5. example baseline verification in a temporary copy;
+6. unit tests over matcher, risk, review, stale-JUnit rejection, executor timeout, event-chain boundary and harness failure behavior;
+7. the full conformance matrix.
 
-This executes real temporary Git repositories and real product tests.
+## Supported Python range
 
-It proves behavior of the standalone reference runtime, including negative gates and recovery.
+GitHub Actions executes validation on:
 
-## CI
+- Python 3.11;
+- Python 3.12;
+- Python 3.13.
 
-GitHub Actions runs the same validation on every pull request and on `main`, then runs another preserved happy-path demo so the lifecycle is visible in CI logs.
+This specifically protects the reference from interpreter-dependent glob behavior. Policy matching is implemented by the reference rather than delegated to version-dependent `Path.glob("**")` behavior.
 
-## What it does not prove
+## Conformance scenarios
 
-The standalone reference intentionally does not contact an external model, Git host or CI provider.
+The matrix currently covers eleven independent behaviors:
 
-It demonstrates the control-plane invariants those integrations must preserve.
+- successful low-risk lifecycle;
+- forbidden authority path;
+- protected baseline-test tampering;
+- executable implementation failure;
+- insufficient/tautological acceptance testing;
+- pre-write changed-file budget rejection;
+- independently reachable pre-write patch-byte budget rejection;
+- goal risk-ceiling rejection;
+- reachable MEDIUM risk plus independent auto-merge ceiling;
+- top-level HIGH security path plus human gate;
+- actual process termination and recovery of an already-performed merge effect.
+
+The harness discovers scenarios from `examples/scenarios/`, catches per-scenario failures, continues remaining scenarios and persists a structured `conformance-report.json`.
+
+## Schema validation
+
+Emitted safety artifacts are validated against repository JSON Schemas, including policy decisions, review, test evidence, candidate/merge evidence, recovery, risk, durable state, terminal evidence and individual events.
+
+## What verification does not prove
+
+It does not prove that:
+
+- the local executor is safe for untrusted/model-generated code;
+- the unkeyed event chain is authentic against a full evidence-directory rewriter;
+- a remote Git provider or external CI integration is configured safely;
+- deterministic fixture roles have the capabilities of a production reasoning model.
+
+Those boundaries are deliberate and documented rather than silently promoted to guarantees.

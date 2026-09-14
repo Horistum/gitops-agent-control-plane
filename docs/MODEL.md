@@ -1,51 +1,33 @@
 # Reasoning-role model
 
-The reference separates roles because "the same intelligence checked its own homework" is a weak assurance model, even when the intelligence is impressive.
+The reference separates roles, but the roles in this repository are deterministic fixtures rather than production AI agents.
 
-## Roles
+## Write domains
 
-### Discovery
+- Discovery and architect produce no product edits.
+- Developer proposes implementation source only.
+- Independent test designer proposes only new acceptance-test files.
+- Reviewer writes no product content and computes its verdict from controller evidence.
 
-Selects an authorized ready work item from product-authored roadmap data.
+The developer therefore cannot write its own acceptance criteria or replace protected baseline tests.
 
-### Architect
+## Computed reviewer
 
-Defines working set, acceptance mapping, verification and non-goals.
+`review.json` is not a set of hard-coded `true` literals. It is computed from:
 
-### Developer
+- authority snapshot presence and equality;
+- path-policy decisions;
+- candidate process result;
+- candidate SHA/tested SHA equality;
+- protected baseline file digest;
+- baseline test identity preservation;
+- roadmap-required acceptance identities;
+- minimum candidate test count.
 
-Produces a proposal. The developer does not directly write authority or execute merge operations.
+Any failed predicate becomes a blocking finding.
 
-### Tester
+## Production model integration boundary
 
-Evaluates executable acceptance/regression evidence separately from developer reasoning.
+Replacing deterministic proposal fixtures with an AI model is not just a different function call. The standalone local executor is explicitly not a security sandbox and the runtime refuses non-fixture proposal sources.
 
-### Reviewer
-
-Evaluates scope, authority preservation, executable evidence and blocking findings.
-
-## Deterministic implementation
-
-In this repository these roles are deterministic reference producers. That makes the showcase:
-
-- offline;
-- repeatable;
-- auditable;
-- free from provider/model branding.
-
-The point is to demonstrate the control-plane contract.
-
-A production AI integration may replace role producers, but the controller must still independently enforce policy and execute tests/effects.
-
-## What reasoning never proves
-
-A reasoning artifact cannot prove:
-
-- that a test process actually ran;
-- which Git SHA was tested;
-- that a merge happened;
-- that state was persisted;
-- that a pending effect was recovered;
-- that an authority boundary was respected.
-
-Those claims require evidence from the component that can observe the fact.
+A production integration needs a sandboxed execution adapter plus the same authority/evidence invariants.

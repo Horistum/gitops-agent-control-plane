@@ -1,21 +1,23 @@
 # Limitations
 
-## Deterministic roles
+The reference is deliberately executable, but it is not a production autonomous engineering runtime.
 
-The standalone roles are deliberately deterministic. They demonstrate orchestration and trust boundaries, not model quality.
+## No security sandbox
 
-## Local Git
+The local executor is suitable only for trusted deterministic fixtures. Timeout/resource limits are not filesystem or network isolation. Untrusted model-generated code must not be connected to it.
 
-Candidate and merge identities are real Git SHAs, but the merge happens in an isolated local repository. Remote forge permissions and CI producer identity require an integration layer.
+## No evidence authenticity anchor
 
-## Minimal product
+The event chain provides internal consistency only. It does not defeat a party able to rewrite the complete evidence directory.
 
-The example is intentionally small so every artifact can be inspected. Production repositories need product-specific authority, test infrastructure, risk classification and recovery procedures.
+## No remote forge/CI proof
 
-## JSON Schema execution
+Local Git commits and tests demonstrate exact-identity mechanics. A production adapter must separately establish remote Git, trusted CI producer identity, credentials and remote effect semantics.
 
-Schemas are published as standard Draft 2020-12 documents. The zero-dependency runtime performs its own semantic validation rather than bundling a third-party schema library.
+## Natural-language policy is not magically executable
 
-## Single-process demonstration
+Structured paths, risk rules, acceptance-test identities and quality-gate fields are enforced. Free-form explanatory fields remain context, not hard gates, unless translated into structured policy.
 
-Crash recovery is simulated by persisting and reloading durable state inside one command. The request identity and state mechanics are real; operating-system process failure injection is outside this compact showcase.
+## Reference fixtures are deterministic
+
+They demonstrate controller behavior, not model capability or model independence. The important separation is that controller gates do not accept role assertions as proof.

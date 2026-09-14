@@ -10,14 +10,19 @@ permissions:
 
 jobs:
   validate-reference:
-    name: validate-reference
+    name: validate-reference-py${{ matrix.python }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - name: Shell and repository validation
+          python-version: ${{ matrix.python }}
+      - name: Repository, unit, and conformance validation
         run: ./scripts/agentctl validate
-      - name: Preserve a real happy-path showcase in CI logs
+      - name: Preserve happy-path showcase in logs
+        if: matrix.python == '3.13'
         run: ./scripts/agentctl demo happy-path

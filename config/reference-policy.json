@@ -1,22 +1,40 @@
 {
-  "schema": 1,
-  "reference_contract": "gitops-agent-control-plane/v2",
-  "allowed_paths": [
-    "src/**",
-    "tests/**"
+  "schema": 2,
+  "reference_contract": "gitops-agent-control-plane/v3",
+  "executor_mode": "trusted-fixture-local",
+  "developer_allowed_paths": [
+    "src/**"
   ],
-  "critical_paths": [
-    "src/**/security/**",
-    "src/**/contract/**"
+  "tester_allowed_paths": [
+    "tests/test_acceptance_*.py"
   ],
   "authority_paths": [
     ".agent-control/**",
     "ci/**",
     ".github/**"
   ],
-  "minimum_tests": 1,
-  "max_changed_files": 12,
-  "max_patch_bytes": 80000,
+  "protected_test_paths": [
+    "tests/test_service.py"
+  ],
+  "risk_rules": [
+    {
+      "risk": "high",
+      "paths": [
+        "src/**/security/**"
+      ]
+    },
+    {
+      "risk": "medium",
+      "paths": [
+        "src/**/contract/**"
+      ]
+    }
+  ],
+  "minimum_baseline_tests": 3,
+  "minimum_candidate_tests": 5,
+  "max_changed_files": 4,
+  "max_patch_bytes": 12000,
+  "test_timeout_seconds": 10,
   "default_risk": "low",
   "human_gate_at": "high"
 }

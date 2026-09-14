@@ -1,9 +1,11 @@
 {
   "schema": 2,
-  "name": "human-gate",
-  "expected_status": "NEEDS_DECISION",
+  "name": "risk-ceiling",
+  "expected_status": "BLOCKED_POLICY",
   "developer_fixture": "critical-top-level",
   "tester_fixture": "acceptance",
-  "goal_overrides": {},
+  "goal_overrides": {
+    "risk_ceiling": "medium"
+  },
   "fault_injection": null
 }

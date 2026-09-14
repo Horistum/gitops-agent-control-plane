@@ -1,6 +1,9 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "crash-recovery",
   "expected_status": "COMPLETED",
-  "purpose": "Persists a merge-effect intent, simulates restart, rehydrates exact request identity, and completes without duplicate effect."
+  "developer_fixture": "correct",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": "after-merge-effect-before-receipt"
 }
