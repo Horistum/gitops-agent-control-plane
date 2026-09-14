@@ -1,16 +1,16 @@
-name: FlowAI reference product CI
+name: Agent control reference product CI
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  product:
-    name: flowai-reference-ci
+  test:
+    name: agent-control-reference-ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
