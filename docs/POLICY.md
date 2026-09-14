@@ -34,7 +34,7 @@ The same segment-aware matcher is used for every path category.
 
 The goal contains `forbidden_paths`; product authority contains structured forbidden-path rules. These are executable policy inputs.
 
-Free-form `forbidden_directions` remains explanatory text. It is not represented as magically machine-enforceable natural language.
+Free-form `forbidden_directions` remains explanatory text. It is not represented as magically machine-enforceable natural language. Likewise `authority.md` and `architecture.md` are owner-authored context included in the immutable authority snapshot; executable enforcement comes from the structured policy and authority documents.
 
 ## Risk
 
@@ -52,4 +52,4 @@ Owner risk ceiling, automatic-merge ceiling and policy human-gate threshold are 
 
 Changed-file count and patch bytes are evaluated before candidate workspace mutation. A blocked budget therefore creates no candidate side effect.
 
-The conformance matrix includes a deliberately reachable budget violation.
+Conformance exercises both limits independently: one scenario exceeds the changed-file limit, while `patch-budget-exceeded` stays within the file-count limit and exceeds only `max_patch_bytes`.
