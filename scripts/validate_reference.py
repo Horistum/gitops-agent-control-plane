@@ -27,6 +27,17 @@ def load(name: str, path: Path):
     return module
 
 
+def run(argv: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(argv, cwd=cwd, text=True, capture_output=True)
+    if result.returncode:
+        raise SystemExit(
+            "reference validation failed: command failed: " + " ".join(argv)
+            + "\nSTDOUT:\n" + result.stdout[-4000:]
+            + "\nSTDERR:\n" + result.stderr[-4000:]
+        )
+    return result
+
+
 def run_product() -> int:
     p = subprocess.run([sys.executable, "ci/run_tests.py"], cwd=PRODUCT)
     check(p.returncode == 0, "minimal product baseline is not green")
@@ -34,6 +45,8 @@ def run_product() -> int:
     check(xml.is_file(), "minimal product did not emit JUnit")
     cases = list(ET.parse(xml).getroot().iter("testcase"))
     check(len(cases) == 3, f"expected exactly 3 baseline testcase identities, observed {len(cases)}")
+    identities = {(case.get("classname"), case.get("name")) for case in cases}
+    check(len(identities) == 3, "baseline JUnit testcase identities are not unique")
     return len(cases)
 
 
@@ -113,10 +126,15 @@ def validate_files() -> None:
     check("EXAMPLE-001" in (PRODUCT / ".agent-control" / "roadmap.yaml").read_text(), "roadmap id drift")
     check(not (ROOT / ".github" / "ISSUE_TEMPLATE" / "flow-loop-goal.yml").exists(),
           "backend-specific goal form leaked into public UI")
+    check((ROOT / "docs" / "LINUX.md").is_file(), "Linux runbook is missing")
 
     forbidden = ("FlowAI-Control", "Flow Loop", "Horistum/FlowAi-control")
-    for relative in ("README.md", "docs/ARCHITECTURE.md", "docs/MODEL.md", "docs/POLICY.md",
-                     "docs/SECURITY.md", "docs/ADOPTION.md", "docs/OPERATIONS.md", "docs/LIMITATIONS.md"):
+    portable_docs = (
+        "README.md", "docs/ARCHITECTURE.md", "docs/MODEL.md", "docs/POLICY.md",
+        "docs/SECURITY.md", "docs/ADOPTION.md", "docs/OPERATIONS.md", "docs/LIMITATIONS.md",
+        "docs/LINUX.md",
+    )
+    for relative in portable_docs:
         text = (ROOT / relative).read_text()
         for token in forbidden:
             check(token not in text, f"backend branding leaked into portable narrative: {relative}: {token}")
@@ -129,6 +147,37 @@ def validate_compatibility() -> None:
     check(len(runtime["commit"]) == 40 and all(c in "0123456789abcdef" for c in runtime["commit"]),
           "runtime commit is not an exact Git SHA")
     check(runtime["service_name"] == "agent-control-plane.service", "service identity drift")
+
+
+def validate_shell() -> int:
+    scripts = [
+        ROOT / "scripts" / "agentctl",
+        ROOT / "scripts" / "bootstrap-linux.sh",
+        ROOT / "scripts" / "diagnose-linux.sh",
+        ROOT / "scripts" / "uninstall-linux.sh",
+        ROOT / "scripts" / "control.sh",
+        ROOT / "scripts" / "submit-goal.sh",
+    ]
+    for path in scripts:
+        check(path.is_file(), f"missing shell entry point: {path.relative_to(ROOT)}")
+        check(path.stat().st_mode & 0o111 != 0, f"shell entry point is not executable: {path.relative_to(ROOT)}")
+        check("set -E" in path.read_text() or "set -e" in path.read_text(),
+              f"shell entry point is not fail-fast: {path.relative_to(ROOT)}")
+        run(["bash", "-n", str(path)])
+
+    run([str(ROOT / "scripts" / "bootstrap-linux.sh"), "self-test"])
+    run([str(ROOT / "scripts" / "agentctl"), "self-test"])
+    run([str(ROOT / "scripts" / "diagnose-linux.sh"), "--help"])
+    run([str(ROOT / "scripts" / "uninstall-linux.sh"), "--help"])
+    run([str(ROOT / "scripts" / "control.sh"), "--help"])
+    run([str(ROOT / "scripts" / "submit-goal.sh"), "--help"])
+
+    bootstrap = (ROOT / "scripts" / "bootstrap-linux.sh").read_text()
+    check("apt-get" in bootstrap and "dnf" in bootstrap, "Linux bootstrap lost supported package-manager paths")
+    uninstall = (ROOT / "scripts" / "uninstall-linux.sh").read_text()
+    check("Remote GitHub" in uninstall and "--purge-state" in uninstall,
+          "uninstall safety contract drift")
+    return len(scripts)
 
 
 def compile_python() -> None:
@@ -145,9 +194,14 @@ def main() -> int:
     validate_governance()
     validate_files()
     validate_compatibility()
+    shell_scripts = validate_shell()
     compile_python()
-    print(json.dumps({"passed": True, "baseline_tests": tests,
-                      "reference_contract": "gitops-agent-control-plane/v1"}, indent=2))
+    print(json.dumps({
+        "passed": True,
+        "baseline_tests": tests,
+        "shell_entrypoints": shell_scripts,
+        "reference_contract": "gitops-agent-control-plane/v1",
+    }, indent=2))
     return 0
 
 
