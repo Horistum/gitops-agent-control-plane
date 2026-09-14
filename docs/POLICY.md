@@ -1,6 +1,6 @@
 # Policy
 
-`config/reference-policy.json` is contract v4 policy.
+`config/reference-policy.json` is contract v5 policy.
 
 ## Actor-specific write envelopes
 
@@ -24,17 +24,17 @@ Protected baseline tests are owner-controlled:
 "protected_test_paths": ["tests/test_service.py"]
 ```
 
-Product authority/verification infrastructure is snapshotted through:
+Workspace authority/verification infrastructure is snapshotted through:
 
 ```json
 "authority_paths": [".agent-control/**", "ci/**", ".github/**"]
 ```
 
-This includes `.agent-control/verification-probes.json`.
+The controller-side `verification-probes.json` is versioned under `.agent-control/`, but v5 intentionally omits it from the candidate workspace and binds its source digest separately in authority/probe evidence.
 
 ## Executable quality gates
 
-`quality-gates.json` is not decorative. Contract v4 requires and reads each flag:
+`quality-gates.json` is not decorative. Contract v5 requires and reads each flag:
 
 - `protect_baseline_test_files`;
 - `require_controller_probes`;
@@ -42,21 +42,35 @@ This includes `.agent-control/verification-probes.json`.
 - `bind_probes_to_exact_git_sha`;
 - `require_diagnostic_junit_green`.
 
-Disabling a mandatory v4 gate makes the authority configuration invalid and terminates the run as `BLOCKED_POLICY`.
+Disabling a mandatory gate makes the authority configuration invalid and terminates the run as `BLOCKED_POLICY`.
 
-## Verification probes
+## Verification definitions
 
-Roadmap acceptance criteria reference product-authored `probe_ids`. The controller resolves those IDs from `verification-probes.json`.
+Roadmap acceptance criteria reference product-authored `probe_ids`. The controller resolves those IDs from the controller-side verification definition.
 
-Baseline probes must pass on the baseline revision. New acceptance probes must fail on that same baseline as a negative control. Candidate/post-merge probes must then pass and be bound to the exact observed Git SHA.
+A probe contains:
 
-JUnit remains a required green diagnostic in this reference, but it cannot compensate for a failing controller probe.
+- target source file;
+- callable name;
+- runtime case generator;
+- case count;
+- invariant/oracle kind.
+
+It does **not** contain a public fixed `args` plus literal expected return tuple.
+
+Baseline properties must pass on baseline. New acceptance properties must fail against baseline as a negative control. Candidate and post-merge properties use independently generated fresh cases and must pass against the exact observed Git SHA.
+
+JUnit remains a required green diagnostic in this reference, but it cannot compensate for a failing signed controller probe.
+
+## Receipt policy
+
+The controller creates a fresh HMAC key/challenge per probe and transfers it to the trusted verifier parent through an inherited anonymous control FD. Receipt secrets are forbidden from worker argv/environment. Exactly one HMAC-valid receipt is accepted per probe.
 
 ## Structured forbidden paths
 
 The goal contains `forbidden_paths`; product authority contains structured forbidden-path rules. These are executable policy inputs.
 
-Free-form `forbidden_directions`, `authority.md` and `architecture.md` remain explanatory/contextual material included in the authority snapshot. They are not silently interpreted as executable natural-language policy.
+Free-form `forbidden_directions`, `authority.md` and `architecture.md` remain explanatory/contextual material included in the authority model. They are not silently interpreted as executable natural-language policy.
 
 ## Risk
 
@@ -76,6 +90,6 @@ Changed-file count and patch bytes are evaluated before candidate workspace muta
 
 ## Execution budget
 
-`test_timeout_seconds` controls the wall-clock timeout. The local executor derives its CPU backstop from that value and runs candidate/test/probe processes in dedicated process groups so descendants are cleaned up as well.
+`test_timeout_seconds` controls wall-clock timeout. The local executor derives its CPU backstop from that value and runs worker/candidate processes in a dedicated process group so descendants are cleaned up.
 
 These controls bound the fixture executor; they do not turn it into a hostile-code sandbox.
