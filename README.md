@@ -1,144 +1,224 @@
 # GitOps Agent Control Plane Reference
 
-A runtime-neutral reference architecture for **bounded autonomous software delivery through Git**.
+A **standalone executable reference** for bounded autonomous software delivery through Git.
 
-The repository answers a practical question: if an engineering agent is allowed to propose and deliver changes with minimal human intervention, what must exist around the model so the result remains reviewable, reproducible, recoverable and safe?
+This repository is intentionally not a product brochure and is not tied to any private controller, model provider, or internal project. Its purpose is to make the important mechanics visible and testable:
 
-This is deliberately not documentation for one product or one model provider. The reference separates portable control-plane concepts from a replaceable runtime adapter. You can keep the architecture, policy model, product authority files, evidence rules and GitHub operating model while replacing the controller implementation underneath them.
+- who is allowed to decide what;
+- how an autonomous system is prevented from rewriting its own rules;
+- how planning, implementation, testing, review, risk, merge and recovery remain separate concerns;
+- how evidence is bound to exact Git identities;
+- how failed tests, forbidden paths and critical changes stop progress instead of being explained away;
+- how a crashed controller can resume a pending effect without duplicating it.
 
-## What the reference demonstrates
+The reference runs locally with **Bash, Git and Python 3.11+**. No account, token, model, container engine or external service is required.
 
-The example implements a complete bounded-delivery model:
+## Try the idea in one command
 
-1. an owner defines a **goal** and an explicit authority envelope;
-2. the controller discovers one eligible work item from product-authored roadmap data;
-3. independent roles plan, implement, test and review the change;
-4. deterministic tests run outside the model session;
-5. GitHub CI must prove the exact candidate commit;
-6. merge authority is evaluated from risk, critical paths and policy;
-7. post-merge verification proves the exact merge commit;
-8. every durable state transition and external effect has auditable evidence.
+```bash
+./scripts/agentctl demo happy-path
+```
 
-The human is not replaced by a long prompt. Human authority is converted into explicit, machine-checkable boundaries. A language model can reason inside those boundaries, but cannot redefine them merely because doing so would make the task easier.
+The runtime copies the example product into an isolated workspace, initializes a real local Git repository, runs the green baseline, creates a bounded plan, proposes and applies a candidate, runs executable acceptance tests, records an independent review, creates a real candidate commit, performs a real local merge commit, verifies the merged result and writes audit evidence.
 
-## Portable architecture
+Typical summary:
 
-The design has four distinct authorities:
+```text
+status: COMPLETED
+baseline tests: 3
+candidate tests: 5
+candidate SHA: <real git SHA>
+merge SHA: <different real git SHA>
+post-merge tests: 5
+```
 
-| Authority | Owns | Must not own |
+Evidence is written under:
+
+```text
+.demo/runs/<run-id>/evidence/
+```
+
+## The interesting part is not the happy path
+
+Run the full behavioral matrix:
+
+```bash
+./scripts/agentctl demo all
+```
+
+or:
+
+```bash
+./scripts/agentctl conformance
+```
+
+It exercises five scenarios:
+
+| Scenario | What it proves | Expected result |
 |---|---|---|
-| **Product repository** | source, tests, roadmap, architecture and acceptance criteria | controller state or model credentials |
-| **Control repository** | owner commands, goal intake and remote execution state | product source |
-| **Runtime adapter** | orchestration, role execution, policy enforcement and effect handling | product intent |
-| **External verifiers** | CI/check results tied to exact SHAs | authority to rewrite goals |
+| `happy-path` | bounded goal → plan → candidate → tests → review → merge → post-merge evidence | `COMPLETED` |
+| `forbidden-path` | an implementation cannot rewrite product authority | `BLOCKED_POLICY` |
+| `test-failure` | a plausible implementation with failing executable evidence cannot merge | `FAILED_VERIFICATION` |
+| `human-gate` | a critical path raises risk and stops for human authority | `NEEDS_DECISION` |
+| `crash-recovery` | a persisted pending effect can be recovered without duplicating the effect | `COMPLETED` |
 
-Keeping these separate prevents the controller from becoming both the thing being changed and the authority deciding whether the change was valid.
+That is the point of the reference. Autonomous delivery is not impressive because a model can write a patch. It becomes interesting when the surrounding system can reliably decide **what the model may change, what counts as proof, when automation must stop, and how execution can be recovered**.
+
+## What the runtime actually produces
+
+A successful run includes artifacts such as:
+
+```text
+goal.json
+policy.json
+authority-snapshot.json
+role-discovery.json
+plan.json
+role-architect.json
+proposal.json
+candidate.patch
+policy-decision.json
+candidate-evidence.json
+test-baseline.json
+test-candidate.json
+role-tester.json
+review.json
+risk-decision.json
+merge-evidence.json
+test-postmerge.json
+postmerge-evidence.json
+state.json
+events.jsonl
+run-summary.json
+```
+
+The crash-recovery scenario adds durable effect intent and recovery evidence. The human-gate scenario adds an unresolved human decision artifact. The forbidden-path scenario deliberately creates no candidate commit.
+
+## Architecture in one picture
+
+```text
+Product-authored authority
+        │
+        ▼
+      Goal
+        │
+        ▼
+   Discovery role
+        │
+        ▼
+ Bounded architecture plan
+        │
+        ▼
+ Developer proposal ───────► Policy/write-boundary gate
+        │                          │
+        │                          └── reject if authority/out-of-scope
+        ▼
+ Exact candidate Git commit
+        │
+        ▼
+ Executable tests + independent review
+        │
+        ▼
+ Risk / critical-path decision
+       / \
+      /   \
+auto-safe  human authority required
+    │
+    ▼
+ Exact merge Git commit
+    │
+    ▼
+ Post-merge verification
+    │
+    ▼
+ Durable evidence + hash-linked event history
+```
+
+The reference separates **authority**, **reasoning**, **execution** and **evidence**. A role may claim that a change is correct. Only executable tests and Git/evidence identities can prove what actually happened.
 
 ## Repository map
 
-| Path | Purpose |
-|---|---|
-| `docs/ARCHITECTURE.md` | components, trust boundaries, state and data flow |
-| `docs/MODEL.md` | role graph, model contract, context retrieval and evidence |
-| `docs/POLICY.md` | authority envelope and configuration semantics |
-| `docs/ADOPTION.md` | clean installation and first end-to-end run |
-| `docs/LINUX.md` | Linux host bootstrap, service lifecycle, diagnostics and uninstall |
-| `docs/OPERATIONS.md` | normal operation, recovery and human interventions |
-| `docs/SECURITY.md` | threat model and fail-closed design |
-| `docs/PORTABILITY.md` | what is portable and what belongs to a runtime adapter |
-| `docs/VERIFICATION.md` | exactly what is tested and what still requires live proof |
-| `docs/LIMITATIONS.md` | explicit constraints and unresolved trade-offs |
-| `examples/minimal-product/` | deliberately small product with one unfinished roadmap item |
-| `examples/goal.example.json` | portable goal input used by the first-run scenario |
-| `config/policy.template.json` | complete policy example |
-| `scripts/agentctl` | single Linux/operator entry point |
-| `scripts/bootstrap-linux.sh` | Linux prerequisite check/provisioning |
-| `scripts/diagnose-linux.sh` | read-only host/service diagnostics |
-| `scripts/uninstall-linux.sh` | safe local service/runtime cleanup |
-| `scripts/render_policy.py` | renders tenant-specific policy without modifying the template |
-| `scripts/submit_goal.py` | translates a portable goal into the active runtime protocol |
-| `scripts/control.py` | runtime-neutral operator commands |
-| `scripts/product_governance.py` | validates/applies required GitHub product governance |
-| `scripts/install_runtime.py` | installs and proves the pinned runtime adapter |
-| `scripts/validate_reference.py` | offline reference integrity suite |
+```text
+reference_runtime/     executable reference state machine
+schemas/               portable JSON Schema contracts
+config/                standalone reference policy
+examples/
+  minimal-product/     deliberately small product with authored authority
+  goal.example.json    owner goal
+scripts/
+  agentctl             single operator entry point
+  bootstrap-linux.sh   Linux prerequisite helper
+  diagnose-linux.sh    read-only diagnostics
+  cleanup-linux.sh     remove only local demo artifacts
+tests/                 conformance/runtime tests
+docs/
+  SHOWCASE.md          walk-through of the five scenarios
+  ARCHITECTURE.md      trust boundaries and control-plane model
+  STATE-MACHINE.md     durable phases and terminal states
+  EVIDENCE.md          evidence provenance and event chaining
+  MODEL.md             role separation and reasoning boundaries
+  POLICY.md            authority and risk model
+  PORTABILITY.md       contract for alternative implementations
+  SECURITY.md          threat model
+  VERIFICATION.md      what each test layer really proves
+  ADOPTION.md          how to adapt the reference to a real product
+  LINUX.md             Linux usage
+```
 
-## Reference scenario
-
-The runnable example starts green. `normalize_name()` is already implemented and tested. Roadmap item `EXAMPLE-001` asks the agent system to add a small `greet()` API without changing CI, architecture or existing normalization semantics.
-
-That small change is intentional. It is large enough to exercise discovery, planning, implementation, independent tests, review, candidate CI, merge and post-merge verification, while remaining small enough that a human can inspect every artifact and know whether the automation is telling the truth.
-
-Run the local reference checks first:
+## Validate the repository
 
 ```bash
 ./scripts/agentctl validate
 ```
 
-Expected result includes a real execution of the example product tests and a generated JUnit report. No model, GitHub write or external service is required for this offline check.
+This runs repository checks and the complete conformance matrix.
 
-## Linux quick start
+CI runs the same validation on pull requests and on `main`.
 
-On Debian/Ubuntu or Fedora/RHEL-family Linux:
+## Product authority is not implementation scope
+
+The example product contains:
+
+```text
+examples/minimal-product/.agent-control/
+```
+
+These files define the roadmap, architecture, forbidden directions and quality gates. The reference runtime can read them, but its implementation write envelope excludes them.
+
+The `forbidden-path` scenario attempts to change an authority file on purpose and demonstrates that the controller blocks the proposal **before a candidate side effect exists**.
+
+## Portable contracts
+
+Formal JSON Schema contracts live under `schemas/` for:
+
+- goal;
+- policy;
+- bounded plan;
+- durable state;
+- terminal evidence.
+
+The reference runtime is one implementation of those ideas. Another implementation is useful only if it preserves the same authority/evidence properties, not merely because it can open a pull request.
+
+## Linux
+
+Check the small standalone prerequisite set:
 
 ```bash
 ./scripts/agentctl bootstrap check
+```
+
+Automatic provisioning is available for Debian/Ubuntu and Fedora/RHEL-family systems:
+
+```bash
 ./scripts/agentctl bootstrap prepare
-./scripts/agentctl validate
 ```
 
-Then follow `docs/ADOPTION.md` to create separate product/control repositories and render the tenant policy. Once `policy.json`, the deterministic test image and runtime/model authentication are ready:
+The showcase deliberately does **not** require GitHub CLI, Podman, a model CLI or systemd services.
 
-```bash
-./scripts/agentctl governance --policy policy.json
-./scripts/agentctl governance --policy policy.json --apply
-./scripts/agentctl install --policy policy.json
+## What this repository does not claim
 
-./scripts/agentctl control --policy policy.json \
-  activate --fingerprint <PRINTED_FINGERPRINT>
+It does not claim that deterministic demo roles are equivalent to a production AI system. They are deliberately predictable so the control-plane mechanics can be inspected without an external black box.
 
-./scripts/agentctl goal --policy policy.json \
-  --file examples/goal.example.json
-```
+The reference demonstrates the difficult surrounding properties: authority, isolation, exact identity, executable evidence, risk escalation, human boundaries, state recovery and conformance.
 
-For host-level troubleshooting:
-
-```bash
-./scripts/agentctl diagnose --policy policy.json
-```
-
-The detailed Linux runbook, including rootless Podman, systemd user services, safe uninstall and host migration boundaries, is in `docs/LINUX.md`.
-
-## First live run
-
-The controller should select `EXAMPLE-001`, create a candidate, run deterministic verification, publish a pull request, wait for the trusted check identity and continue according to configured risk/merge authority.
-
-The portable owner surface is intentionally narrow:
-
-```bash
-./scripts/agentctl control --policy policy.json pause
-./scripts/agentctl control --policy policy.json drain
-./scripts/agentctl control --policy policy.json resume
-./scripts/agentctl control --policy policy.json refresh
-```
-
-Approval, retry, replan and cancellation require the exact task/goal identity and hash shown by the control plane. Backend-specific comment syntax remains an implementation detail inside the runtime adapter.
-
-## Design principles
-
-- **single writer** for authoritative execution state;
-- **immutable effect identity** for crash recovery;
-- **exact SHA evidence**, never “the latest build looked green”;
-- **model proposals are not execution evidence**;
-- **authority documents are product-authored and outside the agent write envelope**;
-- **critical paths cannot silently auto-merge**;
-- **runtime changes require explicit re-activation**;
-- **all external mutations are narrower than the model's reasoning scope**;
-- **no hidden fallback from a failed hard gate to a more convenient interpretation**.
-
-## Verification status
-
-The CI-safe layer runs on every PR and proves the portable reference itself: example tests, JUnit evidence, policy rendering, goal translation, operator command translation, governance payload shape, Linux shell syntax/self-tests and cross-file consistency.
-
-The live layer runs on a real controller host and additionally proves credentials, container isolation, pinned runtime, model protocol, product baseline and GitHub lifecycle.
-
-See `docs/VERIFICATION.md` for the exact matrix. A green unit test is useful; pretending it proved an external system that was never contacted is not.
+A real AI implementation can replace the deterministic role producers later. It should not be allowed to replace those guarantees.

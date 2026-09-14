@@ -1,14 +1,21 @@
-# Publication checklist
+# Publication readiness
 
-Before presenting this repository as a public reusable reference rather than an internal example:
+The reference is intentionally free of private runtime names and does not depend on private repositories.
 
-1. choose and add an explicit license;
-2. decide whether the concrete runtime adapter source is public or replace it with a distributable artifact;
-3. document supported versions and deprecation policy;
-4. publish security-reporting and contribution rules;
-5. remove organization/private assumptions from installation tooling;
-6. test onboarding from an account with no prior organization access;
-7. verify every documented command in a clean environment;
-8. publish a compatibility matrix for runtime adapters.
+Before making the repository public, still decide:
 
-Visibility alone is not a distribution strategy. A public repository with no license and a private runtime dependency is mostly a very elaborate screenshot.
+1. license;
+2. contribution policy;
+3. security reporting path;
+4. release/versioning policy;
+5. public support expectations.
+
+A clean-room publication test should clone the repository from a new account/environment and successfully run:
+
+```bash
+./scripts/agentctl bootstrap check
+./scripts/agentctl validate
+./scripts/agentctl demo all
+```
+
+No organization-specific access should be required.

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gitops-agent-control-plane/policy.schema.json",
+  "title": "Reference Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "reference_contract", "allowed_paths", "critical_paths", "authority_paths", "minimum_tests", "max_changed_files", "max_patch_bytes", "default_risk", "human_gate_at"],
+  "properties": {
+    "schema": {"const": 1},
+    "reference_contract": {"const": "gitops-agent-control-plane/v2"},
+    "allowed_paths": {"type": "array", "items": {"type": "string"}},
+    "critical_paths": {"type": "array", "items": {"type": "string"}},
+    "authority_paths": {"type": "array", "items": {"type": "string"}},
+    "minimum_tests": {"type": "integer", "minimum": 1},
+    "max_changed_files": {"type": "integer", "minimum": 1},
+    "max_patch_bytes": {"type": "integer", "minimum": 1},
+    "default_risk": {"enum": ["low", "medium", "high"]},
+    "human_gate_at": {"enum": ["medium", "high"]}
+  }
+}

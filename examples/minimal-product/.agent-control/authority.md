@@ -2,6 +2,6 @@
 
 This repository is an intentionally small autonomous-delivery reference product.
 
-Authoritative engineering intent is defined by the files in `.agent-control/`. These files are readable context but are not inside the ordinary agent write envelope.
+The files in `.agent-control/` define authored intent. They are readable by the runtime but not writable by an implementation proposal.
 
-A work item is eligible only when its status is `ready`, its acceptance criteria are explicit and its dependencies are complete according to `release-state.yaml`.
+A work item is eligible only when it is `ready`, its acceptance criteria are explicit, and its dependencies are complete.

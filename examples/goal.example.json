@@ -1,10 +1,11 @@
 {
-  "objective": "Add the deterministic greeting API described by the product roadmap without changing CI or authority files.",
+  "schema": 1,
+  "objective": "Add the deterministic greeting API described by the product roadmap without changing authority or verification infrastructure.",
   "items": [
     "EXAMPLE-001"
   ],
-  "risk_ceiling": "medium",
-  "auto_merge": "low",
-  "success_condition": "EXAMPLE-001 is merged and the trusted post-merge check is green on the merge commit.",
-  "forbidden_directions": "Do not modify CI workflows, control-plane authority documents or introduce external dependencies."
+  "risk_ceiling": "high",
+  "auto_merge_ceiling": "low",
+  "success_condition": "EXAMPLE-001 reaches a completed state with exact candidate and post-merge evidence.",
+  "forbidden_directions": "Do not modify CI, the test runner, authority documents, or add external dependencies."
 }

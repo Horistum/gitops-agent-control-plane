@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gitops-agent-control-plane/state.schema.json",
+  "title": "Durable Run State",
+  "type": "object",
+  "required": ["schema", "run_id", "scenario", "status", "base_sha", "candidate_sha", "merge_sha", "risk", "pending_effect", "event_tip"],
+  "properties": {
+    "schema": {"const": 1},
+    "run_id": {"type": "string"},
+    "scenario": {"type": "string"},
+    "status": {"type": "string"},
+    "base_sha": {"type": ["string", "null"]},
+    "candidate_sha": {"type": ["string", "null"]},
+    "merge_sha": {"type": ["string", "null"]},
+    "risk": {"enum": ["low", "medium", "high"]},
+    "pending_effect": {"type": ["object", "null"]},
+    "event_tip": {"type": ["string", "null"]}
+  }
+}

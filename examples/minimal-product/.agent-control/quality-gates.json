@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "gates": [
+    {
+      "id": "Q-1",
+      "rule": "Existing baseline tests remain green."
+    },
+    {
+      "id": "Q-2",
+      "rule": "New behavior has executable positive and invalid-input tests."
+    },
+    {
+      "id": "Q-3",
+      "rule": "Candidate verification is bound to the exact candidate Git SHA."
+    },
+    {
+      "id": "Q-4",
+      "rule": "Post-merge verification is bound to the exact merge Git SHA."
+    }
+  ]
+}

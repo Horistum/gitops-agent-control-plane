@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "name": "forbidden-path",
+  "expected_status": "BLOCKED_POLICY",
+  "purpose": "Attempts to rewrite product authority and proves the proposal is rejected before a candidate commit exists."
+}
