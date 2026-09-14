@@ -67,7 +67,7 @@ def validate_schemas_and_static_contracts() -> None:
     scenarios = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
     required_scenarios = {
         "insufficient-tests", "assertion-tamper", "junit-forgery", "receipt-injection",
-        "probe-aware", "crash-recovery", "happy-path",
+        "raw-outcome-forgery", "probe-aware", "crash-recovery", "happy-path",
     }
     names = {path.stem for path in scenarios}
     check(required_scenarios <= names, "critical conformance scenarios missing")
@@ -76,6 +76,8 @@ def validate_schemas_and_static_contracts() -> None:
         validate_json_file(path, scenario_schema)
         value = json.loads(path.read_text())
         check(value["name"] == path.stem, f"scenario identity drift: {path.name}")
+        if path.stem == "raw-outcome-forgery":
+            check(value.get("expectation") == "known-limit", "raw-outcome forgery must be explicitly classified as known-limit")
 
     probes = json.loads((PRODUCT / ".agent-control" / "verification-probes.json").read_text())
     check(probes.get("schema") == 3 and probes.get("baseline") and probes.get("acceptance"), "verification probes missing")
@@ -132,6 +134,7 @@ def validate_docs_claims() -> None:
     security = (ROOT / "docs" / "SECURITY.md").read_text().lower()
     architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text().lower()
     verification = (ROOT / "docs" / "VERIFICATION.md").read_text().lower()
+    limitations = (ROOT / "docs" / "LIMITATIONS.md").read_text().lower()
     adoption = (ROOT / "docs" / "ADOPTION.md").read_text().lower()
     check("gitops-agent-control-plane/v6" in verification, "verification docs do not name contract v6")
     check("not a security sandbox" in readme, "README must disclose local executor boundary")
@@ -139,6 +142,7 @@ def validate_docs_claims() -> None:
     check("hmac" in security and "control fd" in security, "SECURITY must describe private receipt challenge channel")
     check("every generated acceptance case" in verification, "VERIFICATION must describe case-level negative control")
     check("generic" in adoption and "invariant" in adoption and "kwargs" in adoption, "ADOPTION must describe generic probe DSL capabilities")
+    check("raw-outcome-forgery" in limitations and "known-limit" in limitations, "LIMITATIONS must name the executable raw-outcome known limit")
     check("cannot guarantee adversarial evidence integrity" in architecture, "ARCHITECTURE must not overclaim execution evidence")
     check("not an authenticity mechanism" in security and "anchor" in security, "SECURITY must disclose event-chain authenticity boundary")
 
