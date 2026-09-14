@@ -13,11 +13,17 @@ from .engine import run_request
 from .scenarios import load_scenario, scenario_names
 
 
+CONTROL_STATE_CRASH = "after-release-state-effect-before-receipt"
+POSTMERGE_PHASE_CRASH = "after-merge-receipt-before-postmerge"
+RECONCILE_PHASE_CRASH = "after-release-state-receipt-before-reconcile"
+
+
 def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple[dict, Path]:
-    if spec.get("fault_injection") != "after-release-state-effect-before-receipt":
+    point = spec.get("fault_injection")
+    if point not in {CONTROL_STATE_CRASH, POSTMERGE_PHASE_CRASH, RECONCILE_PHASE_CRASH}:
         return base.run_crash_recovery(repository_root, output, spec)
 
-    run_id = f"release-state-crash-recovery-{int(time.time()*1000)}"
+    run_id = f"{spec['name']}-{int(time.time()*1000)}"
     run_dir = output / run_id
     start = base._run_subprocess([
         sys.executable,
@@ -35,12 +41,34 @@ def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple
     ], repository_root)
     if start.returncode != 75:
         raise AssertionError(
-            f"control-state crash fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}"
+            f"recovery fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}"
         )
-    state = json.loads((run_dir / "evidence" / "state.json").read_text())
+
+    evidence = run_dir / "evidence"
+    state = json.loads((evidence / "state.json").read_text())
     pending = state.get("pending_effect")
-    if state.get("phase") != "CONTROL_STATE_PENDING" or not isinstance(pending, dict) or pending.get("effect") != "control-state":
-        raise AssertionError("pending control-state effect was not durable at crash boundary")
+    if point == CONTROL_STATE_CRASH:
+        if (
+            state.get("phase") != "CONTROL_STATE_PENDING"
+            or not isinstance(pending, dict)
+            or pending.get("effect") != "control-state"
+        ):
+            raise AssertionError("pending control-state effect was not durable at crash boundary")
+    elif point == POSTMERGE_PHASE_CRASH:
+        if (
+            state.get("phase") != "POSTMERGE_VERIFY"
+            or pending is not None
+            or not state.get("merge_sha")
+        ):
+            raise AssertionError("post-merge phase checkpoint was not durable before crash")
+    else:
+        if (
+            state.get("phase") != "RECONCILE"
+            or pending is not None
+            or "EXAMPLE-001" not in state.get("completed_items", [])
+        ):
+            raise AssertionError("reconciliation phase checkpoint was not durable after control-state receipt")
+
     resumed = base._run_subprocess([
         sys.executable,
         "-S",
@@ -52,41 +80,89 @@ def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple
         str(run_dir),
     ], repository_root)
     if resumed.returncode:
-        raise AssertionError(f"control-state resume process failed: {resumed.stderr}")
-    return base._load_summary(run_dir / "evidence"), run_dir / "evidence"
+        raise AssertionError(f"recovery process failed: {resumed.stderr}")
+    return base._load_summary(evidence), evidence
+
+
+def _assert_cycle_completed(evidence: Path, item: str = "EXAMPLE-001") -> None:
+    control = json.loads((evidence / "control-loop.json").read_text())
+    row = next((candidate for candidate in control.get("cycles", []) if candidate.get("item") == item), None)
+    if row is None or row.get("result") != "COMPLETED":
+        raise AssertionError(f"control-loop cycle did not end COMPLETED for {item}: {row}")
+    attempts = row.get("attempts", [])
+    if not attempts or attempts[-1].get("result") != "COMPLETED":
+        raise AssertionError(f"final attempt did not end COMPLETED for {item}: {attempts}")
 
 
 def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
     checks = base.assert_scenario(spec, summary, evidence)
-    if spec["name"] != "release-state-crash-recovery":
-        return checks
+    name = spec["name"]
 
-    if summary.get("status") != "COMPLETED" or summary.get("goal_status") != "SATISFIED":
-        raise AssertionError("control-state recovery did not continue through goal reconciliation")
-    if "EXAMPLE-001" not in summary.get("completed_items", []):
-        raise AssertionError("recovered control-state effect did not record completed item")
-    recovery = json.loads((evidence / "control-state-recovery.json").read_text())
-    if (
-        recovery.get("process_resumed") is not True
-        or recovery.get("effect") != "control-state"
-        or recovery.get("observed_existing_effect") is not True
-        or recovery.get("duplicate_effect_prevented") is not True
-        or recovery.get("effect_occurrences_before_resume") != 1
-    ):
-        raise AssertionError("control-state effect recovery did not observe and reuse the existing Git effect")
-    state = json.loads((evidence / "state.json").read_text())
-    if state.get("pending_effect") is not None:
-        raise AssertionError("control-state pending effect was not consumed after recovery")
-    if not (evidence / "control-state-intent.json").is_file():
-        raise AssertionError("control-state durable intent evidence missing")
-    if not (evidence / "release-transition-example-001.json").is_file():
-        raise AssertionError("release transition evidence missing after control-state recovery")
-    checks += [
-        "release-state effect intent persisted before Git side effect",
-        "actual process restart after control-state Git commit",
-        "existing Control-State-Id effect reused exactly once",
-        "recovered release-state transition reconciled the goal",
-    ]
+    if name == "human-approve-resume":
+        _assert_cycle_completed(evidence)
+        checks.append("human approval updates paused cycle evidence to COMPLETED")
+
+    if name == "human-request-changes":
+        control = json.loads((evidence / "control-loop.json").read_text())
+        row = next((candidate for candidate in control.get("cycles", []) if candidate.get("item") == "EXAMPLE-001"), None)
+        if row is None or not row.get("attempts") or row["attempts"][0].get("result") != "REPAIR_REQUESTED":
+            raise AssertionError("request_changes did not rewrite the paused attempt as repair-requested")
+        checks.append("human request_changes rewrites paused attempt into repair feedback")
+
+    if name == "release-state-crash-recovery":
+        if summary.get("status") != "COMPLETED" or summary.get("goal_status") != "SATISFIED":
+            raise AssertionError("control-state recovery did not continue through goal reconciliation")
+        if "EXAMPLE-001" not in summary.get("completed_items", []):
+            raise AssertionError("recovered control-state effect did not record completed item")
+        recovery = json.loads((evidence / "control-state-recovery.json").read_text())
+        if (
+            recovery.get("process_resumed") is not True
+            or recovery.get("effect") != "control-state"
+            or recovery.get("observed_existing_effect") is not True
+            or recovery.get("duplicate_effect_prevented") is not True
+            or recovery.get("effect_occurrences_before_resume") != 1
+        ):
+            raise AssertionError("control-state effect recovery did not reuse the existing Git effect")
+        state = json.loads((evidence / "state.json").read_text())
+        if state.get("pending_effect") is not None:
+            raise AssertionError("control-state pending effect was not consumed after recovery")
+        if not (evidence / "control-state-intent.json").is_file():
+            raise AssertionError("control-state durable intent evidence missing")
+        if not (evidence / "release-transition-example-001.json").is_file():
+            raise AssertionError("release transition evidence missing after control-state recovery")
+        _assert_cycle_completed(evidence)
+        checks += [
+            "release-state effect intent persisted before Git side effect",
+            "actual process restart after control-state Git commit",
+            "existing Control-State-Id effect reused exactly once",
+            "recovered release-state transition reconciled the goal",
+        ]
+
+    if name in {"postmerge-phase-crash-recovery", "reconcile-phase-crash-recovery"}:
+        if summary.get("status") != "COMPLETED" or summary.get("goal_status") != "SATISFIED":
+            raise AssertionError("phase recovery did not continue to goal satisfaction")
+        recovery = json.loads((evidence / "phase-recovery.json").read_text())
+        expected = (
+            ("POSTMERGE_VERIFY", "rerun-postmerge-verification")
+            if name == "postmerge-phase-crash-recovery"
+            else ("RECONCILE", "continue-goal-reconciliation")
+        )
+        if (
+            recovery.get("process_resumed") is not True
+            or recovery.get("from_phase") != expected[0]
+            or recovery.get("action") != expected[1]
+        ):
+            raise AssertionError(f"phase recovery evidence mismatch: {recovery}")
+        if json.loads((evidence / "state.json").read_text()).get("pending_effect") is not None:
+            raise AssertionError("phase recovery unexpectedly left a pending effect")
+        _assert_cycle_completed(evidence)
+        checks += [
+            f"fresh-process recovery from durable {expected[0]} checkpoint",
+            "no pending side effect required for phase recovery",
+            "recovered cycle evidence ends COMPLETED",
+            "goal reconciliation completed after phase recovery",
+        ]
+
     return checks
 
 

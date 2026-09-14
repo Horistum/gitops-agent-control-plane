@@ -12,7 +12,78 @@ from .scenarios import build_request
 
 
 class AutonomousEngine(_CoreAutonomousEngine):
-    """Public v7 engine facade with durable controller-state effect recovery."""
+    """Public v7 engine facade with durable effect and phase recovery."""
+
+    def _set_current_cycle_attempt_result(self, result: str, *, create_if_missing: bool) -> None:
+        item = self.state.get("current_item")
+        cycle = self.state.get("cycle", 0)
+        attempt = self.state.get("attempt", 0)
+        if not item or cycle < 1 or attempt < 1:
+            return
+        value = self._control_loop_value()
+        row = next(
+            (
+                candidate
+                for candidate in value.get("cycles", [])
+                if candidate.get("cycle") == cycle and candidate.get("item") == item
+            ),
+            None,
+        )
+        if row is None:
+            if not create_if_missing:
+                return
+            attempts: list[dict] = []
+            for prior in range(1, attempt):
+                feedback = self.evidence / f"feedback-{item.lower()}-attempt-{prior:02d}.json"
+                if feedback.is_file():
+                    attempts.append({"attempt": prior, "result": "REPAIR_REQUESTED"})
+            attempts.append({"attempt": attempt, "result": result})
+            value.setdefault("cycles", []).append({
+                "cycle": cycle,
+                "item": item,
+                "attempts": attempts,
+                "result": result,
+            })
+        else:
+            attempts = row.setdefault("attempts", [])
+            attempt_row = next((candidate for candidate in attempts if candidate.get("attempt") == attempt), None)
+            if attempt_row is None:
+                attempts.append({"attempt": attempt, "result": result})
+            else:
+                attempt_row["result"] = result
+            row["result"] = result
+        value["completed_items"] = list(self.state.get("completed_items", []))
+        value["goal_satisfied"] = self.state.get("goal_status") == "SATISFIED"
+        self.write_json("control-loop.json", value)
+
+    def apply_human_decision(self, decision: str, decided_by: str) -> dict:
+        if decision == "request_changes":
+            self._set_current_cycle_attempt_result("REPAIR_REQUESTED", create_if_missing=False)
+        elif decision == "reject":
+            self._set_current_cycle_attempt_result("BLOCKED_POLICY", create_if_missing=False)
+        return super().apply_human_decision(decision, decided_by)
+
+    def _consume_merge_effect(
+        self,
+        effect: dict,
+        merge_sha: str,
+        *,
+        recovered_existing: bool,
+    ) -> None:
+        super()._consume_merge_effect(
+            effect,
+            merge_sha,
+            recovered_existing=recovered_existing,
+        )
+        if self.request.get("fault_injection") == "after-merge-receipt-before-postmerge":
+            self.write_json("fault-injection.json", {
+                "schema": 1,
+                "point": self.request["fault_injection"],
+                "effect_sha": merge_sha,
+            })
+            raise InjectedCrash(
+                f"injected crash after merge receipt {merge_sha} before post-merge verification"
+            )
 
     def _desired_release_state(self, selected: dict, verified_merge_sha: str) -> dict:
         release_path = self.workspace / ".agent-control" / "release-state.json"
@@ -128,6 +199,7 @@ class AutonomousEngine(_CoreAutonomousEngine):
         self.state["base_sha"] = control_state_sha
         self.authority = self.load_authority()
         self.state["completed_items"] = list(self.authority["release_state"]["completed"])
+        self._set_current_cycle_attempt_result("COMPLETED", create_if_missing=False)
         self.event("effect-consumed", {
             "kind": "control-state",
             "request_hash": effect["request_hash"],
@@ -141,6 +213,15 @@ class AutonomousEngine(_CoreAutonomousEngine):
             "release_state_sha": control_state_sha,
             "control_state_id": effect["control_state_id"],
         })
+        if self.request.get("fault_injection") == "after-release-state-receipt-before-reconcile":
+            self.write_json("fault-injection.json", {
+                "schema": 1,
+                "point": self.request["fault_injection"],
+                "effect_sha": control_state_sha,
+            })
+            raise InjectedCrash(
+                f"injected crash after control-state receipt {control_state_sha} before reconciliation"
+            )
 
     def _record_release_state(self, selected: dict, verified_merge_sha: str) -> str:
         effect = self._prepare_control_state_effect(selected, verified_merge_sha)
@@ -160,6 +241,20 @@ class AutonomousEngine(_CoreAutonomousEngine):
             recovered_existing=False,
         )
         return control_state_sha
+
+    def _write_phase_recovery(self, from_phase: str, action: str) -> None:
+        artifact = {
+            "schema": 1,
+            "process_resumed": True,
+            "from_phase": from_phase,
+            "action": action,
+            "item": self.state.get("current_item"),
+            "candidate_sha": self.state.get("candidate_sha"),
+            "merge_sha": self.state.get("merge_sha"),
+            "completed_items": list(self.state.get("completed_items", [])),
+        }
+        self.write_json("phase-recovery.json", artifact)
+        self.event("phase-recovery", artifact)
 
     def recover_control_state(self) -> dict:
         effect = self.state.get("pending_effect")
@@ -195,7 +290,36 @@ class AutonomousEngine(_CoreAutonomousEngine):
             control_state_sha,
             recovered_existing=bool(before),
         )
+        self._set_current_cycle_attempt_result("COMPLETED", create_if_missing=True)
         return self._reconcile_loop()
+
+    def recover_phase(self) -> dict:
+        phase = self.state.get("phase")
+        if self.state.get("pending_effect") is not None:
+            raise RuntimeError("phase recovery cannot run while a durable effect is pending")
+        if self.state.get("status") != "RUNNING":
+            raise RuntimeError(f"phase recovery requires RUNNING state, observed {self.state.get('status')}")
+
+        if phase == "POSTMERGE_VERIFY":
+            item = self.state.get("current_item")
+            if not item or not self.state.get("merge_sha"):
+                raise RuntimeError("POSTMERGE_VERIFY recovery lacks item/merge identity")
+            self._write_phase_recovery(phase, "rerun-postmerge-verification")
+            selected = self._roadmap_item(item)
+            terminal = self._postmerge_verify_and_record(selected)
+            if terminal is not None:
+                return terminal
+            self._set_current_cycle_attempt_result("COMPLETED", create_if_missing=True)
+            return self._reconcile_loop()
+
+        if phase == "RECONCILE":
+            item = self.state.get("current_item")
+            self._write_phase_recovery(phase, "continue-goal-reconciliation")
+            if item and item in set(self.authority["release_state"].get("completed", [])):
+                self._set_current_cycle_attempt_result("COMPLETED", create_if_missing=True)
+            return self._reconcile_loop()
+
+        raise RuntimeError(f"phase is not safely resumable without a pending effect: {phase}")
 
 
 def run_request(
@@ -246,6 +370,10 @@ def resume_run(
     if engine.state.get("status") in TERMINAL_STATUSES:
         path = engine.evidence / "run-summary.json"
         return json.loads(path.read_text()) if path.is_file() else engine.build_summary()
+    if engine.state.get("phase") in {"POSTMERGE_VERIFY", "RECONCILE"}:
+        if decision is not None:
+            raise RuntimeError("human decision supplied during phase recovery")
+        return engine.recover_phase()
     raise RuntimeError(
         f"run is not resumable: status={engine.state.get('status')} phase={engine.state.get('phase')}"
     )

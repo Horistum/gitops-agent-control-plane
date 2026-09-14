@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "reconcile-phase-crash-recovery",
+  "expected_status": "COMPLETED",
+  "developer_fixture": "correct",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": "after-release-state-receipt-before-reconcile"
+}

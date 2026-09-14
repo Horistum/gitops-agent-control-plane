@@ -11,6 +11,7 @@ ARTIFACT_SCHEMAS = dict(_base.ARTIFACT_SCHEMAS)
 ARTIFACT_SCHEMAS.update({
     "control-state-intent.json": "control-state-intent.schema.json",
     "control-state-recovery.json": "control-state-recovery.schema.json",
+    "phase-recovery.json": "phase-recovery.schema.json",
 })
 
 ARTIFACT_SCHEMA_PATTERNS = _base.ARTIFACT_SCHEMA_PATTERNS + (
