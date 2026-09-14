@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -42,30 +43,40 @@ def safe_relative_path(value: str) -> str:
     return value
 
 
-def _glob_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...], i: int = 0, j: int = 0) -> bool:
-    """Segment-aware glob. ** matches zero or more complete path segments."""
-    while j < len(pattern_parts):
-        token = pattern_parts[j]
-        if token == "**":
-            if j == len(pattern_parts) - 1:
-                return True
-            for next_i in range(i, len(path_parts) + 1):
-                if _glob_parts(path_parts, pattern_parts, next_i, j + 1):
-                    return True
-            return False
-        if i >= len(path_parts) or not fnmatch.fnmatchcase(path_parts[i], token):
-            return False
-        i += 1
-        j += 1
-    return i == len(path_parts)
+def _validate_pattern(pattern: str) -> None:
+    if not isinstance(pattern, str) or not pattern:
+        raise ValueError("policy pattern must be non-empty")
+    p = PurePosixPath(pattern)
+    if p.is_absolute() or ".." in p.parts or p.as_posix() != pattern or "//" in pattern:
+        raise ValueError(f"unsafe policy pattern: {pattern!r}")
 
 
 def path_matches(path: str, pattern: str) -> bool:
+    """Segment-aware glob with memoized ** matching.
+
+    ** matches zero or more complete path segments. The memoization keeps even
+    pathologically repetitive owner-authored patterns bounded by O(P*L) states
+    rather than exponential recursive backtracking.
+    """
     path = safe_relative_path(path)
-    pattern_path = PurePosixPath(pattern)
-    if pattern_path.is_absolute() or ".." in pattern_path.parts or pattern_path.as_posix() != pattern:
-        raise ValueError(f"unsafe policy pattern: {pattern!r}")
-    return _glob_parts(tuple(PurePosixPath(path).parts), tuple(pattern_path.parts))
+    _validate_pattern(pattern)
+    path_parts = tuple(PurePosixPath(path).parts)
+    raw_pattern_parts = tuple(PurePosixPath(pattern).parts)
+    pattern_parts: tuple[str, ...] = tuple(
+        part for i, part in enumerate(raw_pattern_parts)
+        if part != "**" or i == 0 or raw_pattern_parts[i - 1] != "**"
+    )
+
+    @lru_cache(maxsize=None)
+    def match(i: int, j: int) -> bool:
+        if j == len(pattern_parts):
+            return i == len(path_parts)
+        token = pattern_parts[j]
+        if token == "**":
+            return match(i, j + 1) or (i < len(path_parts) and match(i + 1, j))
+        return i < len(path_parts) and fnmatch.fnmatchcase(path_parts[i], token) and match(i + 1, j + 1)
+
+    return match(0, 0)
 
 
 def matches_any(path: str, patterns: list[str]) -> bool:
@@ -73,7 +84,6 @@ def matches_any(path: str, patterns: list[str]) -> bool:
 
 
 def matching_files(root: Path, patterns: list[str]) -> dict[str, str]:
-    """Return stable path->sha256 map using exactly the same matcher as policy gates."""
     rows: dict[str, str] = {}
     for candidate in sorted(root.rglob("*")):
         if not candidate.is_file() or candidate.is_symlink():
@@ -103,14 +113,6 @@ def risk_rank(value: str) -> int:
     return {"low": 0, "medium": 1, "high": 2}[value]
 
 
-def _validate_pattern(pattern: str) -> None:
-    if not isinstance(pattern, str) or not pattern:
-        raise ValueError("policy pattern must be non-empty")
-    p = PurePosixPath(pattern)
-    if p.is_absolute() or ".." in p.parts or p.as_posix() != pattern:
-        raise ValueError(f"unsafe policy pattern: {pattern!r}")
-
-
 def validate_goal(goal: dict) -> None:
     required = {"schema", "objective", "items", "risk_ceiling", "auto_merge_ceiling", "success_condition", "forbidden_directions", "forbidden_paths"}
     require_fields(goal, required, where="goal")
@@ -135,14 +137,13 @@ def validate_policy(policy: dict) -> None:
     required = {
         "schema", "reference_contract", "executor_mode", "developer_allowed_paths", "tester_allowed_paths",
         "authority_paths", "protected_test_paths", "risk_rules", "minimum_baseline_tests",
-        "minimum_candidate_tests", "max_changed_files", "max_patch_bytes", "test_timeout_seconds",
-        "default_risk", "human_gate_at",
+        "max_changed_files", "max_patch_bytes", "test_timeout_seconds", "default_risk", "human_gate_at",
     }
     require_fields(policy, required, where="policy")
-    if policy["schema"] != 2 or policy["reference_contract"] != "gitops-agent-control-plane/v3":
+    if policy["schema"] != 3 or policy["reference_contract"] != "gitops-agent-control-plane/v4":
         raise ValueError("unsupported policy contract")
     for key in ("developer_allowed_paths", "tester_allowed_paths", "authority_paths", "protected_test_paths"):
-        if not isinstance(policy[key], list) or not all(isinstance(x, str) and x for x in policy[key]):
+        if not isinstance(policy[key], list) or not policy[key] or not all(isinstance(x, str) and x for x in policy[key]):
             raise ValueError(f"policy.{key} must be a non-empty string list")
         for pattern in policy[key]:
             _validate_pattern(pattern)
@@ -156,8 +157,10 @@ def validate_policy(policy: dict) -> None:
         require_fields(rule, {"risk", "paths"}, where="risk_rule")
         if rule["risk"] not in {"medium", "high"}:
             raise ValueError("risk rule must be medium/high")
+        if not isinstance(rule["paths"], list) or not rule["paths"]:
+            raise ValueError("risk rule paths must be a non-empty list")
         for pattern in rule["paths"]:
             _validate_pattern(pattern)
-    for key in ("minimum_baseline_tests", "minimum_candidate_tests", "max_changed_files", "max_patch_bytes", "test_timeout_seconds"):
+    for key in ("minimum_baseline_tests", "max_changed_files", "max_patch_bytes", "test_timeout_seconds"):
         if type(policy[key]) is not int or policy[key] < 1:
             raise ValueError(f"policy.{key} must be positive integer")
