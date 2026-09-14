@@ -36,66 +36,161 @@ def run(argv: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProc
 
 
 def validate_publication_identity() -> None:
-    for name in ("LICENSE", "NOTICE", "TRADEMARKS.md", "CONTRIBUTING.md", "SUPPORT.md", ".github/SECURITY.md", "docs/RELEASES.md"):
+    for name in (
+        "LICENSE", "NOTICE", "TRADEMARKS.md", "CONTRIBUTING.md", "SUPPORT.md",
+        ".github/SECURITY.md", "docs/RELEASES.md",
+    ):
         check((ROOT / name).is_file(), f"publication file missing: {name}")
     check("Apache License" in (ROOT / "LICENSE").read_text(), "LICENSE is not Apache-2.0")
     notice = (ROOT / "NOTICE").read_text()
-    check(re.search(r"Copyright\s+\d{4}(?:-\d{4})?\s+Horistum contributors", notice) is not None, "NOTICE copyright/provenance format drift")
+    check(
+        re.search(r"Copyright\s+\d{4}(?:-\d{4})?\s+Horistum contributors", notice) is not None,
+        "NOTICE copyright/provenance format drift",
+    )
 
 
 def validate_schemas_and_static_contracts() -> None:
-    from reference_runtime.schema_validation import ARTIFACT_SCHEMAS, ARTIFACT_SCHEMA_PATTERNS, load_schema, validate_json_file
-    from reference_runtime.contracts import validate_goal, validate_policy
     from reference_runtime.base import BaseEngine
+    from reference_runtime.contracts import (
+        CORE_CONTRACT,
+        REFERENCE_CONTRACT,
+        RUNTIME_PROFILE,
+        VERIFICATION_PROFILE,
+        load_json,
+        validate_authority_model,
+        validate_contract_set,
+        validate_goal,
+        validate_goal_against_roadmap,
+        validate_policy,
+        validate_release_state,
+        validate_roadmap,
+        validate_role_protocols,
+    )
+    from reference_runtime.schema_validation import (
+        ARTIFACT_SCHEMAS,
+        ARTIFACT_SCHEMA_PATTERNS,
+        load_schema,
+        validate_json_file,
+    )
 
     schema_files = sorted((ROOT / "schemas").glob("*.schema.json"))
     check(bool(schema_files), "no JSON Schemas found")
     for path in schema_files:
         load_schema(path)
 
-    validate_json_file(ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json")
-    validate_json_file(ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json")
-    validate_json_file(PRODUCT / ".agent-control" / "verification-probes.json", ROOT / "schemas" / "verification-probes.schema.json")
+    static_pairs = (
+        (ROOT / "config" / "contract-set.json", ROOT / "schemas" / "contract-set.schema.json"),
+        (ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json"),
+        (ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json"),
+        (ROOT / "config" / "role-protocols.json", ROOT / "schemas" / "role-protocols.schema.json"),
+        (PRODUCT / ".agent-control" / "authority-model.json", ROOT / "schemas" / "authority-model.schema.json"),
+        (PRODUCT / ".agent-control" / "roadmap.json", ROOT / "schemas" / "roadmap.schema.json"),
+        (PRODUCT / ".agent-control" / "release-state.json", ROOT / "schemas" / "release-state.schema.json"),
+        (PRODUCT / ".agent-control" / "verification-probes.json", ROOT / "schemas" / "verification-probes.schema.json"),
+    )
+    for instance, schema in static_pairs:
+        validate_json_file(instance, schema)
 
-    goal = json.loads((ROOT / "examples" / "goal.example.json").read_text())
-    policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
+    contracts = load_json(ROOT / "config" / "contract-set.json")
+    goal = load_json(ROOT / "examples" / "goal.example.json")
+    policy = load_json(ROOT / "config" / "reference-policy.json")
+    roadmap = load_json(PRODUCT / ".agent-control" / "roadmap.json")
+    release_state = load_json(PRODUCT / ".agent-control" / "release-state.json")
+    roles = load_json(ROOT / "config" / "role-protocols.json")
+    authority_model = load_json(PRODUCT / ".agent-control" / "authority-model.json")
+
+    validate_contract_set(contracts)
     validate_goal(goal)
     validate_policy(policy)
-    check(policy["reference_contract"] == "gitops-agent-control-plane/v6", "contract version drift")
+    validate_roadmap(roadmap)
+    validate_release_state(release_state, roadmap)
+    validate_goal_against_roadmap(goal, roadmap)
+    validate_role_protocols(roles)
+    validate_authority_model(authority_model)
+
+    check(contracts["reference_contract"] == REFERENCE_CONTRACT, "reference contract drift")
+    check(contracts["core_contract"] == CORE_CONTRACT, "core contract drift")
+    check(contracts["verification_profile"] == VERIFICATION_PROFILE, "verification profile drift")
+    check(contracts["runtime_profile"] == RUNTIME_PROFILE, "runtime profile drift")
+    check(goal["autonomy"]["max_cycles"] <= policy["max_cycles"], "goal exceeds policy cycle authority")
+    check(
+        goal["autonomy"]["max_attempts_per_item"] <= policy["max_attempts_per_item"],
+        "goal exceeds policy attempt authority",
+    )
+
+    ids = [row["id"] for row in roadmap["items"]]
+    check(ids == ["EXAMPLE-001", "EXAMPLE-002"], "reference roadmap no longer demonstrates two dependent items")
+    check(roadmap["items"][1]["dependencies"] == ["EXAMPLE-001"], "second roadmap item dependency drift")
+    check(
+        authority_model["artifacts"]["release-state.json"]["mutation"] == "controller-after-verified-effect",
+        "release state is not controller-owned state authority",
+    )
+    check(
+        authority_model["artifacts"]["architecture.md"]["enforcement"] == "reasoning-context",
+        "context prose is being presented as machine policy",
+    )
 
     scenario_schema = ROOT / "schemas" / "scenario.schema.json"
     scenarios = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
-    required_scenarios = {
-        "insufficient-tests", "assertion-tamper", "junit-forgery", "receipt-injection",
-        "raw-outcome-forgery", "probe-aware", "crash-recovery", "happy-path",
+    required = {
+        "happy-path", "raw-outcome-forgery", "receipt-injection", "crash-recovery",
+        "autonomous-two-item", "repair-loop", "dependency-blocked",
+        "human-approve-resume", "human-reject-resume", "human-request-changes",
     }
     names = {path.stem for path in scenarios}
-    check(required_scenarios <= names, "critical conformance scenarios missing")
-    check("nonce-forgery" not in names, "obsolete no-op nonce-forgery scenario remains")
+    check(required <= names, "core security/autonomy conformance scenarios missing")
+    check("nonce-forgery" not in names, "obsolete nonce-forgery scenario returned")
     for path in scenarios:
         validate_json_file(path, scenario_schema)
         value = json.loads(path.read_text())
         check(value["name"] == path.stem, f"scenario identity drift: {path.name}")
         if path.stem == "raw-outcome-forgery":
-            check(value.get("expectation") == "known-limit", "raw-outcome forgery must be explicitly classified as known-limit")
+            check(value.get("expectation") == "known-limit", "raw outcome must remain explicit known-limit")
 
-    probes = json.loads((PRODUCT / ".agent-control" / "verification-probes.json").read_text())
-    check(probes.get("schema") == 3 and probes.get("baseline") and probes.get("acceptance"), "verification probes missing")
-    probe_ids = [probe.get("id") for probe in probes["baseline"] + probes["acceptance"]]
-    check(all(isinstance(x, str) and x for x in probe_ids) and len(probe_ids) == len(set(probe_ids)), "verification probe ids invalid")
-    check("greet-unicode" in probe_ids, "broad product acceptance invariant missing")
+    probes = load_json(PRODUCT / ".agent-control" / "verification-probes.json")
+    probe_ids = [row["id"] for row in probes["baseline"] + probes["acceptance"]]
+    for required_probe in (
+        "greet-normalized", "greet-unicode", "greet-blank",
+        "shout-normalized", "shout-unicode", "shout-blank",
+    ):
+        check(required_probe in probe_ids, f"verification probe missing: {required_probe}")
     for probe in probes["baseline"] + probes["acceptance"]:
         BaseEngine._validate_probe(probe)
-        check("args" not in probe and "expect" not in probe, "legacy fixed public probe input/expectation returned")
+        check("args" not in probe and "expect" not in probe, "legacy fixed probe format returned")
 
-    for critical in ("request.json", "proposal.json", "merge-intent.json", "human-decision.json"):
+    for critical in (
+        "request.json", "proposal.json", "merge-intent.json", "human-decision.json",
+        "control-loop.json", "goal-evaluation.json", "contract-set.json",
+    ):
         check(critical in ARTIFACT_SCHEMAS, f"critical evidence schema mapping missing: {critical}")
-    for pattern_name in ("authority-snapshot-baseline.json", "protected-tests-candidate.json", "role-reviewer.json"):
-        check(any(pattern.fullmatch(pattern_name) for pattern, _ in ARTIFACT_SCHEMA_PATTERNS), f"pattern evidence schema mapping missing: {pattern_name}")
+    pattern_samples = (
+        "authority-snapshot-baseline.json",
+        "protected-tests-candidate.json",
+        "role-reviewer-example-001-attempt-01.json",
+        "feedback-example-001-attempt-01.json",
+        "release-transition-example-001.json",
+        "human-decision-example-001-attempt-01.json",
+        "test-baseline-example-001-cycle-01.json",
+        "probe-baseline-example-001-cycle-01.json",
+        "risk-decision-example-001-attempt-01.json",
+        "merge-intent-example-001.json",
+        "merge-evidence-example-001.json",
+        "test-postmerge-example-001.json",
+        "probe-postmerge-example-001.json",
+        "postmerge-evidence-example-001.json",
+    )
+    for sample in pattern_samples:
+        check(
+            any(pattern.fullmatch(sample) for pattern, _ in ARTIFACT_SCHEMA_PATTERNS),
+            f"pattern evidence schema mapping missing: {sample}",
+        )
 
 
 def validate_product_baseline_without_mutation() -> None:
-    before = {path.relative_to(PRODUCT).as_posix(): path.read_bytes() for path in PRODUCT.rglob("*") if path.is_file()}
+    before = {
+        path.relative_to(PRODUCT).as_posix(): path.read_bytes()
+        for path in PRODUCT.rglob("*") if path.is_file()
+    }
     with tempfile.TemporaryDirectory(prefix="reference-baseline-") as directory:
         copy = Path(directory) / "product"
         shutil.copytree(PRODUCT, copy)
@@ -104,7 +199,10 @@ def validate_product_baseline_without_mutation() -> None:
         check(junit.is_file(), "baseline JUnit missing")
         tests = list(ET.parse(junit).getroot().iter("testcase"))
         check(len(tests) == 3, f"expected 3 baseline tests, observed {len(tests)}")
-    after = {path.relative_to(PRODUCT).as_posix(): path.read_bytes() for path in PRODUCT.rglob("*") if path.is_file()}
+    after = {
+        path.relative_to(PRODUCT).as_posix(): path.read_bytes()
+        for path in PRODUCT.rglob("*") if path.is_file()
+    }
     check(before == after, "validator mutated source example")
 
 
@@ -114,13 +212,25 @@ def validate_authority_layout() -> None:
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
     snapshot = digest_paths(PRODUCT, policy["authority_paths"])
     check(bool(snapshot["files"]), "authority source snapshot would be empty")
-    check(".agent-control/verification-probes.json" in snapshot["files"], "verification probes are not owner-controlled source authority")
+    for required in (
+        ".agent-control/authority-model.json",
+        ".agent-control/roadmap.json",
+        ".agent-control/release-state.json",
+        ".agent-control/verification-probes.json",
+    ):
+        check(required in snapshot["files"], f"authority source missing from snapshot: {required}")
     for pattern in policy["authority_paths"]:
-        check(any(matches_any(path, [pattern]) for path in snapshot["files"]), f"authority pattern matched no source files: {pattern}")
+        check(
+            any(matches_any(path, [pattern]) for path in snapshot["files"]),
+            f"authority pattern matched no source files: {pattern}",
+        )
 
 
 def validate_python_and_shell() -> None:
-    for base in (ROOT / "reference_runtime", ROOT / "scripts", ROOT / "tests", PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci"):
+    for base in (
+        ROOT / "reference_runtime", ROOT / "scripts", ROOT / "tests",
+        PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci",
+    ):
         for path in base.rglob("*.py"):
             ast.parse(path.read_text(), filename=str(path))
     for path in (ROOT / "scripts").glob("*.sh"):
@@ -131,23 +241,25 @@ def validate_python_and_shell() -> None:
 
 def validate_docs_claims() -> None:
     readme = (ROOT / "README.md").read_text().lower()
-    security = (ROOT / "docs" / "SECURITY.md").read_text().lower()
-    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text().lower()
-    verification = (ROOT / "docs" / "VERIFICATION.md").read_text().lower()
+    core = (ROOT / "docs" / "CORE-CONTRACT.md").read_text().lower()
+    profiles = (ROOT / "docs" / "PROFILES.md").read_text().lower()
+    reconciliation = (ROOT / "docs" / "RECONCILIATION.md").read_text().lower()
+    human = (ROOT / "docs" / "HUMAN-AUTHORITY.md").read_text().lower()
     limitations = (ROOT / "docs" / "LIMITATIONS.md").read_text().lower()
-    adoption = (ROOT / "docs" / "ADOPTION.md").read_text().lower()
-    check("gitops-agent-control-plane/v6" in verification, "verification docs do not name contract v6")
-    check("not a security sandbox" in readme, "README must disclose local executor boundary")
-    check("not authoritative" in security and "junit" in security, "SECURITY must disclose diagnostic JUnit trust boundary")
-    check("hmac" in security and "control fd" in security, "SECURITY must describe private receipt challenge channel")
-    check("every generated acceptance case" in verification, "VERIFICATION must describe case-level negative control")
-    check("generic" in adoption and "invariant" in adoption and "kwargs" in adoption, "ADOPTION must describe generic probe DSL capabilities")
-    check("raw-outcome-forgery" in limitations and "known-limit" in limitations, "LIMITATIONS must name the executable raw-outcome known limit")
-    check("cannot guarantee adversarial evidence integrity" in architecture, "ARCHITECTURE must not overclaim execution evidence")
-    check("not an authenticity mechanism" in security and "anchor" in security, "SECURITY must disclose event-chain authenticity boundary")
+    check("gitops-agent-control-plane/v7" in readme, "README does not name v7")
+    check("autonomous-control-plane/v1" in readme and "property-probe/v6" in readme, "contract/profile split missing")
+    check("goal reconciliation" in readme and "release-state transition" in readme, "README lost autonomous loop")
+    check("authority" in core and "reasoning" in core and "effect" in core, "core contract is underspecified")
+    check("verification profile" in profiles and "runtime profile" in profiles, "profile split undocumented")
+    check("repair" in reconciliation and "dependency" in reconciliation, "reconciliation semantics incomplete")
+    for action in ("approve", "reject", "request_changes"):
+        check(action in human, f"human authority action undocumented: {action}")
+    check("raw-outcome-forgery" in limitations and "known-limit" in limitations, "known verifier limitation disappeared")
 
 
 def main(argv: list[str] | None = None) -> int:
+    from reference_runtime.contracts import CORE_CONTRACT, REFERENCE_CONTRACT, RUNTIME_PROFILE, VERIFICATION_PROFILE
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args(argv)
@@ -160,7 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         validate_product_baseline_without_mutation()
     print(json.dumps({
         "passed": True,
-        "reference_contract": "gitops-agent-control-plane/v6",
+        "reference_contract": REFERENCE_CONTRACT,
+        "core_contract": CORE_CONTRACT,
+        "verification_profile": VERIFICATION_PROFILE,
+        "runtime_profile": RUNTIME_PROFILE,
         "licensed": "Apache-2.0",
         "provenance": "Horistum",
         "baseline_tests": 0 if args.fast else 3,

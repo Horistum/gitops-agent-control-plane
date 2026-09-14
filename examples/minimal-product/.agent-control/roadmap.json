@@ -1,31 +1,29 @@
 {
-  "schema": 3,
+  "schema": 4,
   "items": [
     {
       "id": "EXAMPLE-001",
       "title": "Add deterministic greeting API",
       "status": "ready",
       "dependencies": [],
-      "goal": "Add a small public greeting function while preserving existing normalization behavior.",
+      "goal": "Add a public greeting function while preserving normalization behavior.",
       "acceptance": [
-        {
-          "id": "AC-1",
-          "text": "greet returns Hello plus the normalized non-blank input for varied generated names, including non-ASCII and punctuation cases.",
-          "probe_ids": ["greet-normalized", "greet-unicode"]
-        },
-        {
-          "id": "AC-2",
-          "text": "greet rejects a blank or whitespace-only name with ValueError.",
-          "probe_ids": ["greet-blank"]
-        }
+        {"id":"AC-1","text":"greet returns Hello plus normalized non-blank input for varied generated names.","probe_ids":["greet-normalized","greet-unicode"]},
+        {"id":"AC-2","text":"greet rejects blank input with ValueError.","probe_ids":["greet-blank"]}
       ],
-      "non_goals": [
-        "Localization.",
-        "CLI or HTTP endpoints.",
-        "External dependencies.",
-        "Changing normalize_name behavior; that regression is protected by baseline probes.",
-        "CI, verification-probe, baseline-test, or authority-document changes."
-      ]
+      "non_goals": ["Localization.","CLI or HTTP endpoints.","External dependencies.","Changing normalize_name behavior."]
+    },
+    {
+      "id": "EXAMPLE-002",
+      "title": "Add emphatic greeting API",
+      "status": "ready",
+      "dependencies": ["EXAMPLE-001"],
+      "goal": "Add shout_greeting as a dependent public API without regressing greet or normalize_name.",
+      "acceptance": [
+        {"id":"AC-3","text":"shout_greeting returns the normalized greeting in uppercase.","probe_ids":["shout-normalized","shout-unicode"]},
+        {"id":"AC-4","text":"shout_greeting rejects blank input with ValueError.","probe_ids":["shout-blank"]}
+      ],
+      "non_goals": ["Localization.","External dependencies.","Changing greet semantics.","Changing normalize_name behavior."]
     }
   ]
 }

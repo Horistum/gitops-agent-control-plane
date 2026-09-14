@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "roles": {
+    "discovery": {
+      "inputs": ["goal.intent", "roadmap", "release-state", "dependency-state"],
+      "outputs": ["eligible_items", "selected_item", "selection_reason"],
+      "product_write_power": "none",
+      "effect_power": "none"
+    },
+    "architect": {
+      "inputs": ["selected_item", "authority", "prior_feedback"],
+      "outputs": ["bounded_plan", "working_sets", "verification_plan"],
+      "product_write_power": "none",
+      "effect_power": "none"
+    },
+    "developer": {
+      "inputs": ["bounded_plan", "prior_feedback"],
+      "outputs": ["implementation_proposal"],
+      "product_write_power": "developer_allowed_paths",
+      "effect_power": "none"
+    },
+    "test-designer": {
+      "inputs": ["acceptance", "prior_feedback"],
+      "outputs": ["diagnostic_test_proposal"],
+      "product_write_power": "tester_allowed_paths",
+      "effect_power": "none"
+    },
+    "tester": {
+      "inputs": ["candidate_sha", "controller_probe_evidence", "diagnostic_evidence"],
+      "outputs": ["verification_assessment"],
+      "product_write_power": "none",
+      "effect_power": "none"
+    },
+    "reviewer": {
+      "inputs": ["policy_decisions", "verification_evidence", "authority_evidence", "feedback_history"],
+      "outputs": ["review_assessment"],
+      "product_write_power": "none",
+      "effect_power": "none"
+    }
+  }
+}

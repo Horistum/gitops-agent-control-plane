@@ -1,32 +1,17 @@
 # Durable state machine
 
-Contract v6 persists phase at each meaningful control boundary.
+The concrete standalone runtime uses these persisted phases:
 
-```text
-INITIALIZING
-  -> BASELINE_VERIFY
-       regression probes + every-case acceptance negative control
-  -> DISCOVERY
-  -> PLANNING
-  -> PROPOSAL_GATES
-  -> CANDIDATE_APPLY
-  -> CANDIDATE_COMMIT
-  -> CANDIDATE_VERIFY
-       generic generated probes + diagnostic JUnit
-  -> REVIEW
-  -> RISK_GATE
-  -> MERGE_PENDING / WAITING_EXTERNAL
-  -> POSTMERGE_VERIFY
-       fresh generated probes + diagnostics
-  -> COMPLETED
-```
+`INITIALIZING → RECONCILE → DISCOVERY → BASELINE_VERIFY → PLANNING → PROPOSAL_GATES → CANDIDATE_APPLY → CANDIDATE_COMMIT → CANDIDATE_VERIFY → REVIEW → RISK_GATE`.
 
-Terminal alternatives are `BLOCKED_POLICY`, `FAILED_VERIFICATION`, `NEEDS_DECISION`/`AWAITING_DECISION`, and `COMPLETED`.
+Review failure with remaining budget routes through durable feedback into another bounded `PLANNING` attempt. Human authority may pause at `AWAITING_DECISION` and resume with approve/reject/request_changes.
 
-Malformed authority/policy/probe configuration fails closed. HMAC receipt keys/challenges are ephemeral per probe and are deliberately not persisted in durable state or evidence.
+Approved work then uses two separately durable Git effects:
 
-## Recovery boundary
+`MERGE_PENDING → POSTMERGE_VERIFY → CONTROL_STATE_PENDING → RECONCILE`.
 
-Before merge, the runtime persists base SHA, candidate SHA, effect kind and stable request hash in schema-validated `merge-intent.json`. Crash recovery performs the merge effect, terminates before receipt consumption, starts a new controller process, reloads durable state, finds the existing merge by exact final `Effect-Id` trailer, consumes it once and runs fresh post-merge probes.
+`MERGE_PENDING` persists candidate merge intent before the product merge. `CONTROL_STATE_PENDING` persists the desired controller-owned release-state transition before committing it. Either pending effect can be recovered in a fresh process by stable Git trailer identity without duplicating the effect.
 
-A second resume is an idempotent terminal no-op.
+There are also safe **phase recovery** checkpoints after effect consumption. A restart in `POSTMERGE_VERIFY` reruns exact-revision post-merge verification; a restart in `RECONCILE` continues goal reconciliation from controller-owned release state. Neither path invents or repeats a Git effect.
+
+From `RECONCILE`, a satisfied goal terminates at `GOAL_COMPLETED`; no dependency-ready authorized work or exhausted autonomy budgets terminate fail-closed.

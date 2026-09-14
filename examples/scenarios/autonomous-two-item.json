@@ -1,0 +1,14 @@
+{
+  "schema": 2,
+  "name": "autonomous-two-item",
+  "expected_status": "COMPLETED",
+  "developer_fixture": "correct",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-001","EXAMPLE-002"],
+  "work": {
+    "EXAMPLE-001": [{"developer_fixture":"correct","tester_fixture":"acceptance"}],
+    "EXAMPLE-002": [{"developer_fixture":"correct","tester_fixture":"acceptance"}]
+  }
+}

@@ -1,7 +1,6 @@
 {
-  "schema": 1,
+  "schema": 2,
   "completed": [],
-  "notes": [
-    "EXAMPLE-001 is intentionally ready and not yet implemented."
-  ]
+  "history": [],
+  "notes": ["The controller advances this file only after exact post-merge verification."]
 }

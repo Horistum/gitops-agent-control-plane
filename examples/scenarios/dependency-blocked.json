@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "name": "dependency-blocked",
+  "expected_status": "BLOCKED_POLICY",
+  "developer_fixture": "correct",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-002"],
+  "work": {"EXAMPLE-002":[{"developer_fixture":"correct","tester_fixture":"acceptance"}]}
+}

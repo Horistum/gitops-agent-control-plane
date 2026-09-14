@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "classes": {
+    "intent_authority": "Defines desired work and dependency ordering.",
+    "state_authority": "Records controller-owned progress through the product roadmap.",
+    "change_authority": "Defines paths and directions that proposals may not cross.",
+    "verification_authority": "Defines machine-verifiable success and quality requirements.",
+    "context": "Human-readable guidance that reasoning may use but the controller does not silently execute."
+  },
+  "artifacts": {
+    "roadmap.json": {"class":"intent_authority","enforcement":"machine","mutation":"product-owner"},
+    "release-state.json": {"class":"state_authority","enforcement":"machine","mutation":"controller-after-verified-effect"},
+    "forbidden.json": {"class":"change_authority","enforcement":"machine","mutation":"product-owner"},
+    "quality-gates.json": {"class":"verification_authority","enforcement":"machine","mutation":"product-owner"},
+    "verification-probes.json": {"class":"verification_authority","enforcement":"machine","mutation":"product-owner"},
+    "authority.md": {"class":"context","enforcement":"reasoning-context","mutation":"product-owner"},
+    "architecture.md": {"class":"context","enforcement":"reasoning-context","mutation":"product-owner"}
+  }
+}

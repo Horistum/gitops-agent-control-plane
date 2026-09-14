@@ -1,0 +1,12 @@
+{
+  "schema": 2,
+  "name": "human-request-changes",
+  "expected_status": "NEEDS_DECISION",
+  "developer_fixture": "critical-top-level",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-001"],
+  "human_decision": "request_changes",
+  "work": {"EXAMPLE-001":[{"developer_fixture":"critical-top-level","tester_fixture":"acceptance"},{"developer_fixture":"critical-top-level","tester_fixture":"acceptance"}]}
+}
