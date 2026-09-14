@@ -1,72 +1,100 @@
-# GitOps Agent Control Plane
+# GitOps Agent Control Plane Reference
 
-Reference tenant control-plane for **Horistum FlowAI-Control**.
+A runtime-neutral reference architecture for **bounded autonomous software delivery through Git**.
 
-This repository exists for teams that want to adopt FlowAI-Control without reverse-engineering the
-Horistum pilot repository. It separates the three authorities that are easy to accidentally mix:
+The repository answers a practical question: if an engineering agent is allowed to propose and deliver
+changes with minimal human intervention, what must exist around the model so that the result remains
+reviewable, reproducible, recoverable and safe?
 
-1. **Runtime source**: reviewed controller code from `Horistum/FlowAi-control`.
-2. **Control/state repository**: your private copy of this repository, containing the command surface,
-   Goal Issue form and the remote `loop-state` branch written by the controller.
-3. **Product repository**: the codebase the controller is allowed to change.
+This is deliberately not documentation for one product or one model provider. The reference separates
+portable control-plane concepts from a replaceable runtime adapter. You can keep the architecture,
+policy model, product authority files, evidence rules and GitHub operating model while replacing the
+controller implementation underneath them.
 
-That separation is intentional. Copying the whole controller into every tenant control repo would
-make upgrades and provenance needlessly exciting, which software supply chains rarely need.
+## What the reference demonstrates
 
-## Compatibility
+The example implements a complete bounded-delivery model:
 
-This revision is validated against:
+1. an owner defines a **goal** and an explicit authority envelope;
+2. the controller discovers one eligible work item from product-authored roadmap data;
+3. independent roles plan, implement, test and review the change;
+4. deterministic tests run outside the model session;
+5. GitHub CI must prove the exact candidate commit;
+6. merge authority is evaluated from risk, critical paths and policy;
+7. post-merge verification proves the exact merge commit;
+8. every durable state transition and external effect has auditable evidence.
 
-- FlowAI-Control `0.3.0`
-- source repository `Horistum/FlowAi-control`
-- exact reviewed commit `38f7f5c3328d2f8e1b4d6e66dd9750d53cc259a6`
-- reference contract `flowai-control-reference/v1`
+The human is therefore not replaced by a long prompt. Human authority is converted into explicit,
+machine-checkable boundaries. A language model can reason inside those boundaries, but cannot redefine
+them merely because doing so would make the task easier.
 
-See [`COMPATIBILITY.json`](COMPATIBILITY.json). The runtime installer refuses to silently follow a
-moving `main`; it installs that exact commit.
+## Portable architecture
+
+The design has four distinct authorities:
+
+| Authority | Owns | Must not own |
+|---|---|---|
+| **Product repository** | source, tests, roadmap, architecture and acceptance criteria | controller state or model credentials |
+| **Control repository** | owner commands, goal intake and remote execution state | product source |
+| **Runtime adapter** | orchestration, role execution, policy enforcement and effect handling | product intent |
+| **External verifiers** | CI/check results tied to exact SHAs | authority to rewrite goals |
+
+Keeping these separate prevents the controller from becoming both the thing being changed and the
+authority deciding whether the change was valid.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `docs/ARCHITECTURE.md` | authority boundaries, data flow and state model |
-| `docs/MODEL.md` | agent roles, phases, model selection, retrieval and evidence |
-| `docs/ADOPTION.md` | end-to-end installation and first run |
-| `docs/POLICY.md` | every important policy group and what adopters should change |
-| `docs/OPERATIONS.md` | normal operation, state, commands and recovery rules |
-| `docs/SECURITY.md` | threat model and fail-closed boundaries |
-| `docs/LIMITATIONS.md` | exact limitations of FlowAI-Control 0.3.0 |
-| `docs/PUBLICATION.md` | clean-room and public-adoption readiness checklist |
-| `config/policy.template.json` | generic engine-compatible policy template |
-| `examples/minimal-product/` | copyable product repository with a real green baseline and roadmap item |
-| `scripts/render_policy.py` | creates a tenant `policy.json` without committing it |
-| `scripts/product_governance.py` | renders or creates the required product `main` ruleset |
-| `scripts/install_runtime.py` | installs the pinned controller runtime and user service |
-| `scripts/validate_reference.py` | self-check for this reference repository |
+| `docs/ARCHITECTURE.md` | components, trust boundaries, state and data flow |
+| `docs/MODEL.md` | role graph, model contract, context retrieval and evidence |
+| `docs/POLICY.md` | authority envelope and configuration semantics |
+| `docs/ADOPTION.md` | clean installation and first end-to-end run |
+| `docs/OPERATIONS.md` | normal operation, recovery and human interventions |
+| `docs/SECURITY.md` | threat model and fail-closed design |
+| `docs/PORTABILITY.md` | what is portable and what belongs to a runtime adapter |
+| `docs/VERIFICATION.md` | exactly what is tested and what still requires live proof |
+| `docs/LIMITATIONS.md` | explicit constraints and unresolved trade-offs |
+| `examples/minimal-product/` | deliberately small product with one unfinished roadmap item |
+| `examples/goal.example.json` | portable goal input used by the first-run scenario |
+| `config/policy.template.json` | complete policy example |
+| `scripts/render_policy.py` | renders tenant-specific policy without modifying the template |
+| `scripts/submit_goal.py` | translates a portable goal into the active runtime protocol |
+| `scripts/control.py` | runtime-neutral operator commands |
+| `scripts/product_governance.py` | validates/applies required GitHub product governance |
+| `scripts/install_runtime.py` | installs and proves the pinned runtime adapter |
+| `scripts/validate_reference.py` | offline reference integrity suite |
 
-## Fast path
+## Reference scenario
 
-The detailed, safer version is in `docs/ADOPTION.md`. The short version is:
+The runnable example starts green. `normalize_name()` is already implemented and tested. Roadmap item
+`EXAMPLE-001` then asks the agent system to add a small `greet()` API without changing CI, architecture
+or the existing normalization semantics.
+
+That small change is intentional. It is large enough to exercise discovery, planning, implementation,
+independent tests, review, candidate CI, merge and post-merge verification, while remaining small
+enough that a human can inspect every artifact and know whether the automation is telling the truth.
+
+Run the local reference checks first:
 
 ```bash
-# 1. Copy examples/minimal-product into a separate product repository and push main.
+python3 scripts/validate_reference.py
+```
+
+Expected result includes a real execution of the example product tests and a generated JUnit report.
+No model, GitHub write or external service is required for this offline check.
+
+## First live run
+
+The exact procedure is in `docs/ADOPTION.md`. At a high level:
+
+```bash
 python3 examples/minimal-product/ci/run_tests.py
 
-# 2. In your private control repo create one command issue.
-gh issue create \
-  --title "Flow Loop: řízení a kritická rozhodnutí" \
-  --body '<!-- flow-loop:command-issue:v1 -->
+gh issue create --repo YOUR_ORG/YOUR_CONTROL_REPO \
+  --title "Agent Control Center" \
+  --body "Owner control channel. Generated runtime status is managed automatically."
 
-Controller is not activated yet. Owner /loop commands belong in new one-line comments.'
-
-# 3. Prepare Git transport, a pinned local test image and dedicated ChatGPT Codex login.
-gh auth setup-git
-export CODEX_HOME="$HOME/.codex-loop"
-codex login --device-auth
-codex --version
-podman image inspect 'YOUR_IMAGE@sha256:YOUR_DIGEST'
-
-# 4. Render policy. Never commit policy.json.
 python3 scripts/render_policy.py \
   --product-repo YOUR_ORG/YOUR_PRODUCT \
   --control-repo YOUR_ORG/YOUR_CONTROL_REPO \
@@ -76,37 +104,37 @@ python3 scripts/render_policy.py \
   --test-image 'YOUR_IMAGE@sha256:YOUR_64_HEX_DIGEST' \
   --codex-version "$(CODEX_HOME="$HOME/.codex-loop" codex --version)"
 
-# 5. Inspect, then create the required product ruleset.
 python3 scripts/product_governance.py --policy policy.json
 python3 scripts/product_governance.py --policy policy.json --apply
-
-# 6. Install and prove the exact pinned runtime.
 python3 scripts/install_runtime.py --policy policy.json
+
+python3 scripts/control.py --policy policy.json activate --fingerprint <PRINTED_FINGERPRINT>
+python3 scripts/submit_goal.py --policy policy.json --file examples/goal.example.json
 ```
 
-The installer intentionally does **not** manufacture the `/loop activate <fingerprint>` owner
-authorization. It prints the exact command. Post it as a new one-line comment in the command issue.
-Then create a **Flow Loop goal** from the included Issue Form for `DEMO-001`.
+The controller should then select `EXAMPLE-001`, create a candidate, run deterministic verification,
+publish a pull request, wait for the trusted check identity and continue according to the configured
+risk/merge authority.
 
-## What is actually runnable
+## Design principles
 
-`examples/minimal-product` is designed to make the first execution observable rather than magical:
+- **single writer** for authoritative execution state;
+- **immutable effect identity** for crash recovery;
+- **exact SHA evidence**, never “the latest build looked green”;
+- **model proposals are not execution evidence**;
+- **authority documents are product-authored and outside the agent write envelope**;
+- **critical paths cannot silently auto-merge**;
+- **runtime changes require explicit re-activation**;
+- **all external mutations are narrower than the model's reasoning scope**;
+- **no hidden fallback from a failed hard gate to a more convenient interpretation**.
 
-- its baseline already passes;
-- `ci/run_tests.py` emits JUnit where FlowAI-Control 0.3.0 actually scans it;
-- the GitHub Actions job is named exactly `flowai-reference-ci`, matching the policy;
-- `DEMO-001` is authorized but intentionally not implemented;
-- agent-editable paths are separated from owner-controlled CI and authority documents;
-- the goal form preserves the exact v1 protocol labels expected by 0.3.0.
+## Verification status
 
-Run the repository self-check at any time:
+This repository has two verification layers. The CI-safe layer runs on every PR and proves the
+portable reference itself: example tests, JUnit evidence, policy rendering, goal translation, operator
+command translation, governance payload shape and cross-file consistency. The live layer runs on a
+real controller host and additionally proves credentials, container isolation, the pinned runtime,
+model protocol, product baseline and GitHub lifecycle.
 
-```bash
-python3 scripts/validate_reference.py
-```
-
-## Non-goals
-
-This repository is not a second implementation of FlowAI-Control, does not vendor agent role prompts,
-does not invent a second state database, and does not make controller upgrades automatic. Runtime
-semantics remain owned by `Horistum/FlowAi-control`; this repository is the adoption/reference layer.
+See `docs/VERIFICATION.md` for the exact matrix. A green unit test is useful; pretending it proved an
+external system that was never contacted is not.
