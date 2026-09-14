@@ -76,6 +76,44 @@ def install_release(source: Path, destination: Path, manifest: dict) -> None:
     os.replace(staging, destination)
 
 
+def repository_preflight(policy: dict) -> None:
+    control = policy.get("control_repo")
+    product = policy.get("product_repo")
+    if not isinstance(control, str) or not isinstance(product, str):
+        raise SystemExit("policy is missing product_repo/control_repo")
+    if control.casefold() == product.casefold():
+        raise SystemExit("product_repo and control_repo must be different")
+    allowed_permissions = {"ADMIN", "MAINTAIN", "WRITE"}
+    for role, repo in (("control", control), ("product", product)):
+        raw = call([
+            "gh", "repo", "view", repo, "--json",
+            "nameWithOwner,isPrivate,hasIssuesEnabled,viewerPermission,defaultBranchRef"
+        ], capture=True)
+        info = json.loads(raw)
+        if info.get("viewerPermission") not in allowed_permissions:
+            raise SystemExit(f"{role} repository requires write permission: {repo}")
+        branch = (info.get("defaultBranchRef") or {}).get("name")
+        if branch != "main":
+            raise SystemExit(f"{role} repository default branch must be main: {repo} -> {branch!r}")
+        if role == "control":
+            if info.get("isPrivate") is not True:
+                raise SystemExit("control repository must be private")
+            if info.get("hasIssuesEnabled") is not True:
+                raise SystemExit("control repository must have GitHub Issues enabled")
+        call(["git", "ls-remote", f"https://github.com/{repo}.git", "HEAD"], capture=True)
+
+    issue = policy.get("command_issue")
+    if type(issue) is not int or issue < 1:
+        raise SystemExit("policy command_issue must be a positive integer")
+    raw = call([
+        "gh", "issue", "view", str(issue), "--repo", control,
+        "--json", "number,state,title"
+    ], capture=True)
+    value = json.loads(raw)
+    if value.get("state") != "OPEN":
+        raise SystemExit(f"command issue #{issue} is not open in {control}")
+
+
 def unit_text(runtime: Path, policy: Path, work: Path) -> str:
     for value in (runtime, policy, work):
         if any(c.isspace() for c in str(value)):
@@ -146,6 +184,7 @@ def main() -> int:
     if not policy.is_file() or policy.is_symlink():
         raise SystemExit(f"missing regular policy file: {policy}")
     policy_data = json.loads(policy.read_text())
+    repository_preflight(policy_data)
     compatibility = COMPAT["flowai_control"]
     commit = compatibility["commit"]
     if not SHA.fullmatch(commit):

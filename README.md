@@ -58,7 +58,8 @@ gh issue create \
 
 Controller is not activated yet. Owner /loop commands belong in new one-line comments.'
 
-# 3. Prepare a pinned, locally preloaded test image and dedicated ChatGPT Codex login.
+# 3. Prepare Git transport, a pinned local test image and dedicated ChatGPT Codex login.
+gh auth setup-git
 export CODEX_HOME="$HOME/.codex-loop"
 codex login --device-auth
 codex --version

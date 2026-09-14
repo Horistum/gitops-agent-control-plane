@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,14 @@ def check(condition: bool, message: str) -> None:
 
 
 def main() -> int:
+    python_files = list((ROOT / "scripts").glob("*.py")) + [
+        ROOT / "examples" / "minimal-product" / "ci" / "run_tests.py",
+        ROOT / "examples" / "minimal-product" / "tests" / "test_service.py",
+        ROOT / "examples" / "minimal-product" / "src" / "reference_app" / "service.py",
+    ]
+    for path in python_files:
+        ast.parse(path.read_text(), filename=str(path))
+
     compat = json.loads((ROOT / "COMPATIBILITY.json").read_text())
     source = compat["flowai_control"]
     check(source["version"] == "0.3.0", "compatibility version drift")
@@ -86,6 +95,16 @@ def main() -> int:
         check(rendered["product_repo"] == "owner/product", "renderer product repo mismatch")
         check(rendered["control_repo"] == "owner/control", "renderer control repo mismatch")
         check(rendered["test_image"] == fake_image, "renderer image mismatch")
+        governance = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "product_governance.py"),
+            "--policy", str(out),
+        ], text=True, capture_output=True)
+        check(governance.returncode == 0, "product governance renderer smoke failed")
+        payload = json.loads(governance.stdout)
+        check(payload["repository"] == "owner/product", "governance product repo mismatch")
+        rules = payload["payload"]["rules"]
+        check(any(rule.get("type") == "required_status_checks" for rule in rules),
+              "governance required-status-check rule missing")
 
     if build.exists():
         shutil.rmtree(build)

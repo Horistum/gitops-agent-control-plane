@@ -66,9 +66,10 @@ def main() -> int:
         print(json.dumps({"repository": repo, "payload": payload}, indent=2))
         return 0
 
-    raw = run("gh", "api", f"repos/{repo}/rulesets", "--paginate")
-    existing = json.loads(raw)
-    matches = [r for r in existing if r.get("name") == RULESET_NAME]
+    raw = run("gh", "api", f"repos/{repo}/rulesets", "--paginate", "--slurp")
+    pages = json.loads(raw)
+    existing = [row for page in pages for row in page] if pages and isinstance(pages[0], list) else pages
+    matches = [r for r in existing if isinstance(r, dict) and r.get("name") == RULESET_NAME]
     if matches:
         raise SystemExit(
             f"{RULESET_NAME!r} already exists in {repo}. Refusing to replace or mutate governance; "

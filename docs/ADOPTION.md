@@ -9,7 +9,8 @@ Use a dedicated unprivileged Linux account. The current engine expects:
 
 - Python 3;
 - Git;
-- GitHub CLI (`gh`) authenticated to the owner account;
+- GitHub CLI (`gh`) authenticated to the owner account and Git credential integration enabled;
+- read access to the pinned `Horistum/FlowAi-control` source repository;
 - rootless Podman;
 - Codex CLI at an explicitly pinned version;
 - ChatGPT authentication in a dedicated `CODEX_HOME`;
@@ -18,6 +19,13 @@ Use a dedicated unprivileged Linux account. The current engine expects:
 - outbound access to GitHub/OpenAI during controller operation.
 
 The control repository must be private and have Issues enabled.
+
+Verify GitHub and Git transport before continuing:
+
+```bash
+gh auth status
+gh auth setup-git
+```
 
 ## 1. Create the product repository
 
