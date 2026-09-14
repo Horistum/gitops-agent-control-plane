@@ -1,0 +1,29 @@
+name: Reference integrity
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-reference:
+    name: validate-reference
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Bash syntax
+        run: |
+          bash -n scripts/agentctl
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+      - name: Linux bootstrap pure self-test
+        run: ./scripts/bootstrap-linux.sh self-test
+      - name: Reference contract validation
+        run: python3 scripts/validate_reference.py

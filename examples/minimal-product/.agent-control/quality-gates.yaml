@@ -1,0 +1,10 @@
+schema: 1
+gates:
+  - id: Q-1
+    rule: Existing baseline tests must remain green.
+  - id: Q-2
+    rule: New public behavior requires executable tests for positive and invalid-input cases.
+  - id: Q-3
+    rule: CI must run ci/run_tests.py and publish a trusted successful check for the exact candidate SHA.
+  - id: Q-4
+    rule: Post-merge verification must succeed on the exact merge SHA.

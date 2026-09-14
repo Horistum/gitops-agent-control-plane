@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="${PYTHON:-python3}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/agentctl <command> [args...]
+
+Portable operator entry point:
+  bootstrap      Linux host bootstrap/check
+  validate       Validate the reference repository
+  render-policy  Render tenant policy
+  governance     Preview/apply product GitHub governance
+  install        Install and prove the pinned runtime adapter
+  goal           Submit a portable goal JSON
+  control        Send an operator command
+  diagnose       Read-only Linux/service diagnostics
+  uninstall      Disable/remove local Linux runtime artifacts
+  self-test      Pure wrapper integrity check
+EOF
+}
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
+
+main() {
+  local command="${1:-help}"
+  shift || true
+  case "$command" in
+    help|-h|--help) usage ;;
+    bootstrap) exec bash "$ROOT/scripts/bootstrap-linux.sh" "$@" ;;
+    validate) exec "$PYTHON" "$ROOT/scripts/validate_reference.py" "$@" ;;
+    render-policy) exec "$PYTHON" "$ROOT/scripts/render_policy.py" "$@" ;;
+    governance) exec "$PYTHON" "$ROOT/scripts/product_governance.py" "$@" ;;
+    install) exec "$PYTHON" "$ROOT/scripts/install_runtime.py" "$@" ;;
+    goal) exec "$PYTHON" "$ROOT/scripts/submit_goal.py" "$@" ;;
+    control) exec "$PYTHON" "$ROOT/scripts/control.py" "$@" ;;
+    diagnose) exec bash "$ROOT/scripts/diagnose-linux.sh" "$@" ;;
+    uninstall) exec bash "$ROOT/scripts/uninstall-linux.sh" "$@" ;;
+    self-test)
+      [[ -x "$ROOT/scripts/bootstrap-linux.sh" ]] || die "bootstrap script is not executable"
+      [[ -f "$ROOT/scripts/validate_reference.py" ]] || die "validator is missing"
+      bash "$ROOT/scripts/bootstrap-linux.sh" self-test
+      printf 'agentctl self-test: ok\n'
+      ;;
+    *) die "unknown command: $command (run scripts/agentctl help)" ;;
+  esac
+}
+
+main "$@"
