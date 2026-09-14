@@ -46,7 +46,7 @@ def verify_release(source: Path, commit: str) -> dict:
     if tracked != expected:
         raise SystemExit(
             "controller release manifest and exact Git tree differ; "
-            f"missing={sorted(tracked-expected)[:10]} unexpected={sorted(expected-tracked)[:10]}"
+            f"missing={sorted(expected-tracked)[:10]} extra={sorted(tracked-expected)[:10]}"
         )
     for relative, digest in manifest["files"].items():
         path = source / relative
@@ -55,12 +55,29 @@ def verify_release(source: Path, commit: str) -> dict:
     return manifest
 
 
+def verify_installed_release(destination: Path, manifest: dict) -> None:
+    expected = set(manifest["files"]) | {"RELEASE-MANIFEST.json"}
+    actual = {
+        path.relative_to(destination).as_posix()
+        for path in destination.rglob("*")
+        if path.is_file() or path.is_symlink()
+    }
+    if actual != expected:
+        raise SystemExit(
+            "installed runtime file set differs from pinned release; "
+            f"missing={sorted(expected-actual)[:10]} extra={sorted(actual-expected)[:10]}"
+        )
+    if json.loads((destination / "RELEASE-MANIFEST.json").read_text()) != manifest:
+        raise SystemExit("installed runtime manifest differs from pinned release")
+    for relative, digest in manifest["files"].items():
+        path = destination / relative
+        if not path.is_file() or path.is_symlink() or sha256(path) != digest:
+            raise SystemExit(f"installed runtime differs from pinned release: {relative}")
+
+
 def install_release(source: Path, destination: Path, manifest: dict) -> None:
     if destination.exists():
-        for relative, digest in manifest["files"].items():
-            path = destination / relative
-            if not path.is_file() or path.is_symlink() or sha256(path) != digest:
-                raise SystemExit(f"existing runtime differs from pinned release: {relative}")
+        verify_installed_release(destination, manifest)
         return
     staging = destination.with_name(destination.name + ".staging")
     if staging.exists():
@@ -74,6 +91,7 @@ def install_release(source: Path, destination: Path, manifest: dict) -> None:
     shutil.copy2(source / "RELEASE-MANIFEST.json", staging / "RELEASE-MANIFEST.json")
     destination.parent.mkdir(parents=True, exist_ok=True)
     os.replace(staging, destination)
+    verify_installed_release(destination, manifest)
 
 
 def repository_preflight(policy: dict) -> None:
@@ -199,7 +217,7 @@ def main() -> int:
         if head != commit:
             raise SystemExit("fetched controller source is not the pinned commit")
         manifest = verify_release(source, commit)
-        runtime = Path.home() / ".local" / "share" / "flow-loop" / f"{compatibility['version']}-{commit[:12]}"
+        runtime = Path.home() / ".local" / "share" / "flow-loop" / f"{compatibility['version']}-{commit}"
         install_release(source, runtime, manifest)
 
     work = a.work.expanduser().resolve()
