@@ -1,152 +1,132 @@
-# Architecture and authority model
+# Architecture
 
-## 1. The three-plane model
+## 1. Goal
 
-A safe FlowAI-Control deployment has three repositories/authorities with different jobs.
+The control plane turns a high-level engineering goal into a bounded sequence of verifiable Git operations without giving a model unrestricted repository authority.
 
-### Runtime source authority
+The key decision is separation of **intent**, **execution state**, **runtime mechanics** and **verification**. If one component owns all four, autonomy is easy to implement and difficult to trust.
 
-`Horistum/FlowAi-control` owns executable controller code, trusted role instructions, parsers,
-policy validation, evidence logic and release manifests. This reference pins an exact reviewed
-commit in `COMPATIBILITY.json`.
+## 2. Components and authorities
 
-A tenant does not copy those files into its control repository. `scripts/install_runtime.py`
-retrieves the pinned commit, verifies the exact Git tree against `RELEASE-MANIFEST.json`, copies the
-manifested runtime into a versioned local directory and executes that immutable installation.
+### Product repository
 
-### Tenant control/state authority
+The product repository is the source of authored engineering truth. It contains source, tests, architecture constraints, roadmap/work items, release state, quality gates, forbidden directions and CI workflows.
 
-The adopter's private copy of this repository is configured as `policy.control_repo`.
+Authority documents are outside the ordinary agent write envelope. The agent may read what success means, but cannot redefine success as part of the same product change.
 
-It provides:
+### Control repository
 
-- the owner command issue;
-- the Flow Loop Goal Issue Form;
-- ordinary reviewed documentation/configuration scaffolding on `main`;
-- the controller-owned `loop-state` branch.
+The control repository is the remote coordination surface. It contains a long-lived control-center issue, owner goal requests, a dedicated state branch, append-only event history, immutable external-effect receipts and generated reports.
 
-`loop-state` is not a human-edited configuration branch. It is the remote-first execution journal.
-FlowAI-Control writes `state.json`, hash-linked `events/`, immutable `runs/`, task `reports/` and a
-human-readable `DASHBOARD.md` there. The controller identity is single-writer and pushes are
-non-force.
+### Runtime adapter
 
-The command issue is a control surface and projection. It is not the state database.
+The runtime adapter is replaceable. Its responsibilities are contractual:
 
-### Product authority
+1. load and validate policy;
+2. read product authority at an exact base SHA;
+3. execute role phases with bounded context;
+4. apply only controller-approved edits;
+5. run deterministic verification outside the model session;
+6. create and inspect pull requests/checks;
+7. persist state before and after external effects;
+8. enforce merge and post-merge gates;
+9. fail closed when identity, authority or evidence is ambiguous.
 
-`policy.product_repo` is the repository FlowAI-Control may modify.
+The backend pinned by `COMPATIBILITY.json` is one implementation of this interface. The portable product example does not depend on its branding or repository layout.
 
-The product owns:
+### External verifiers
 
-- application source;
-- roadmap and acceptance semantics;
-- architecture/quality authority documents;
-- trusted CI;
-- server-side `main` governance.
+CI is a separate authority. A check is trusted only when policy binds both its context/name and the application identity that produced it. The controller also verifies that the check belongs to the exact candidate or merge SHA.
 
-The control policy limits which paths may be modified. The engine also has hard-denied paths that a
-normal product task cannot authorize.
-
-## 2. Authority precedence
-
-The useful mental model is:
+## 3. Data flow
 
 ```text
-owner GoalEnvelope + static policy
-            |
-            v
-authored product authority documents
-            |
-            v
-controller deterministic gates
-            |
-            v
-model proposals
+Owner goal
+   |
+   v
+Goal envelope / authority ceiling
+   |
+   v
+Discovery from product-authored roadmap
+   |
+   v
+Architecture plan -> implementation -> independent tests/reviews
+   |
+   v
+Controller-executed deterministic local verification
+   |
+   v
+Candidate commit + PR
+   |
+   v
+Trusted CI on exact candidate SHA
+   |
+   v
+Risk / critical-path / merge-authority decision
+   |
+   v
+Merge
+   |
+   v
+Trusted post-merge CI on exact merge SHA
+   |
+   v
+Durable completion evidence
 ```
 
-Models propose. They do not grant authority. Repository text is untrusted data when supplied to a
-model. A model cannot make a forbidden change valid by describing it persuasively.
+The model never turns its own statement such as “tests pass” into a green gate. It can explain why a change should work; a deterministic executor and external CI must prove what actually happened.
 
-## 3. End-to-end execution
+## 4. State model
 
-A normal v0.3.0 run is:
+The authoritative state is remote-first and single-writer. At minimum it records controller identity, monotonically increasing sequence, active goal/task, current phase, exact base/candidate/merge SHAs, risk and critical paths, pending external effect identity, model/test/review receipts, completed items, pause/drain state, activation epoch and hash-linked event tip.
 
-```text
-owner creates immutable Goal Issue
-        |
-        v
-GoalEnvelope parsed and bounded by policy
-        |
-        v
-discovery selects one admissible roadmap item
-        |
-        v
-exact product main SHA becomes baseline
-        |
-        v
-task architecture / risk classification
-        |
-        +------ LOW --------> minimal adaptive graph
-        |
-        +------ MEDIUM -----> independent test design + stronger acceptance
-        |
-        +------ HIGH -------> full graph + owner decision boundary
-        |
-        v
-developer proposal -> controller applies bounded edits
-        |
-        v
-rootless networkless local test container
-        |
-        v
-independent tester / reviewer / optional challenge
-        |
-        v
-candidate PR -> exact trusted GitHub checks
-        |
-        v
-owner approval if policy/risk requires it
-        |
-        v
-merge -> checks on exact merge SHA
-        |
-        v
-durable completion evidence -> next goal item
-```
+A human-facing dashboard or issue body is a projection of this state, not a second database.
 
-The exact graph is selected by controller code. Documentation must not pretend every risk level uses
-the same roles or that a model can skip a deterministic gate.
+## 5. External-effect protocol
 
-## 4. State and effect identity
+Every expensive, non-deterministic or externally visible operation follows a durable intent protocol:
 
-Every external effect is bound to durable identity before execution. Current FlowAI-Control receipts
-bind controller version, policy fingerprint, activation epoch, run id, phase, task, base/head SHAs,
-specification hash, effect kind and request hash.
+1. calculate the exact request identity;
+2. persist operation intent;
+3. bind effect kind and request hash;
+4. perform the external call;
+5. write an immutable receipt carrying runtime, policy, epoch, task, phase and SHA provenance;
+6. persist the state transition that consumes the receipt.
 
-That is why stale model output or old CI cannot silently satisfy a new activation.
+After a crash, the controller first looks for a matching receipt. Evidence from another policy, runtime activation or Git SHA is rejected.
 
-A fresh activation is an explicit owner comment:
+## 6. Single-writer property
 
-```text
-/loop activate <current-policy-fingerprint>
-```
+The state branch uses non-force writes. A second writer therefore cannot silently overwrite a changed remote tip. Controller identity is also stored in state, so a planned host transfer is explicit.
 
-The immutable GitHub comment id becomes the execution epoch identity.
+This is not distributed consensus. Two hosts with the same writer identity must not run in parallel.
 
-## 5. Initial state
+## 7. Write boundaries
 
-A new control repo normally has no `loop-state` branch. FlowAI-Control can load this as an initial
-paused state. The first accepted owner command persists the first state/event commit to
-`loop-state`.
+There are three nested controls:
 
-Do not manually pre-create fake `state.json`. That bypasses the controller's event-chain creation
-rather than helping it.
+- runtime hard-deny paths;
+- policy `allowed_paths` defining the tenant envelope;
+- phase-specific working set selected by architecture planning.
 
-## 6. Why the source/control split matters
+A developer proposal outside any boundary fails closed.
 
-FlowAI-Control 0.3.0 runtime code can already use separate `product_repo` and `control_repo`.
-However, the upstream 0.3.0 upgrade helper still validates its source commit against the configured
-`control_repo`, reflecting the original Horistum pilot where source and control were one repository.
+## 8. Adaptive role graph
 
-This reference therefore installs the pinned runtime directly instead of invoking that tenant-
-incompatible upgrade helper. See `LIMITATIONS.md`.
+| Effective risk | Required shape |
+|---|---|
+| LOW | plan, implementation, deterministic verification, independent tests, review, CI, merge, post-merge |
+| MEDIUM | LOW plus independent test design and architecture acceptance |
+| HIGH / critical path | MEDIUM plus chief architecture gates and explicit owner decision where required |
+
+Risk escalation invalidates evidence that was sufficient only for the weaker graph.
+
+## 9. Trust boundaries
+
+The model receives repository text as **data**, not executable instructions. Model sessions do not inherit GitHub credentials, are not the component applying patches, and do not execute arbitrary shell commands. The controller owns mutations and deterministic execution.
+
+## 10. Portability boundary
+
+The portable contract is defined by behavior, not one process name or command syntax. Another runtime is compatible when it provides bounded goals, explicit policy, single-writer durable state, structured role outputs, exact-SHA evidence, deterministic tests, trusted CI identities and fail-closed merge semantics.
+
+Backend-specific translation belongs in adapter scripts, not in product semantics or core architecture documentation.
