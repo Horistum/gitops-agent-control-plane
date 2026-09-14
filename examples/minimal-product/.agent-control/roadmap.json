@@ -10,8 +10,8 @@
       "acceptance": [
         {
           "id": "AC-1",
-          "text": "reference_app.service.greet(\"  Ada   Lovelace \" ) returns \"Hello, Ada Lovelace!\".",
-          "probe_ids": ["greet-normalized"]
+          "text": "greet returns Hello plus the normalized non-blank input for varied generated names, including non-ASCII and punctuation cases.",
+          "probe_ids": ["greet-normalized", "greet-unicode"]
         },
         {
           "id": "AC-2",
