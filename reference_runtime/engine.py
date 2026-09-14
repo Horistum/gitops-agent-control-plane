@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-from .base import BaseEngine, InjectedCrash
-from .contracts import load_json, risk_rank, sha256_bytes, sha256_json
+from .base import BaseEngine, InjectedCrash, PolicyConfigurationError
+from .contracts import digest_tree, load_json, risk_rank, sha256_bytes, sha256_json
 from .scenarios import build_request
 
 
@@ -16,26 +16,39 @@ def _role(engine: BaseEngine, role: str, verdict: str, summary: str, **extra) ->
 
 class ReferenceEngine(BaseEngine):
     def run(self) -> dict:
+        try:
+            if self.authority_error:
+                raise PolicyConfigurationError(self.authority_error)
+            return self._run()
+        except PolicyConfigurationError as exc:
+            self.event("policy-configuration-blocked", {"reason": str(exc)})
+            return self.finish("BLOCKED_POLICY", phase="BLOCKED_POLICY", reason=f"policy configuration invalid: {exc}")
+
+    def _run(self) -> dict:
         self.transition("BASELINE_VERIFY")
         base_sha = self.init_git()
         self.state["base_sha"] = base_sha
         self.save_state()
         baseline = self.run_tests("baseline")
         if not baseline["passed"] or baseline["tests"] < self.policy["minimum_baseline_tests"]:
-            return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="baseline verification failed")
+            return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="baseline diagnostic verification failed")
 
         authority_before = self.authority_snapshot("baseline")
         protected_before = self.protected_test_snapshot("baseline")
 
         self.transition("DISCOVERY")
-        roadmap = self.authority["roadmap"]
-        release = self.authority["release_state"]
-        completed = set(release.get("completed", []))
-        selected = next((item for item in roadmap["items"] if item["id"] in self.goal["items"] and item["status"] == "ready" and set(item.get("dependencies", [])) <= completed), None)
-        if not selected:
-            return self.finish("BLOCKED_POLICY", phase="BLOCKED_POLICY", reason="no authorized ready item")
+        selected = self.select_authorized_item()
         _role(self, "discovery", "accept", f"Selected {selected['id']}.", item=selected["id"])
         self.event("item-selected", {"item": selected["id"]})
+
+        baseline_probe_ids = {probe["id"] for probe in self.authority["verification_probes"]["baseline"]}
+        baseline_probes = self.run_probes("baseline", baseline_probe_ids)
+        if not baseline_probes["all_passed"]:
+            return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="controller baseline probes failed")
+        negative_control = self.run_negative_control(selected)
+        if not negative_control["negative_control_passed"]:
+            self.event("negative-control-failed", {"probe_ids": negative_control["probe_ids"]})
+            return self.finish("BLOCKED_POLICY", phase="BLOCKED_POLICY", reason="acceptance negative control failed on baseline")
 
         self.transition("PLANNING")
         plan = {
@@ -46,7 +59,14 @@ class ReferenceEngine(BaseEngine):
             "developer_working_set": self.policy["developer_allowed_paths"],
             "tester_working_set": self.policy["tester_allowed_paths"],
             "non_goals": selected["non_goals"],
-            "verification": ["protected baseline tests", "required acceptance test identities", "exact candidate SHA test binding", "computed review", "post-merge exact SHA verification"],
+            "verification": [
+                "controller-owned baseline probes",
+                "baseline acceptance negative control",
+                "controller-owned candidate probes in separate processes",
+                "diagnostic JUnit suite (non-authoritative)",
+                "computed review",
+                "post-merge controller probes bound to exact merge SHA",
+            ],
         }
         self.write_json("plan.json", plan)
         _role(self, "architect", "accept", "Bounded plan created from structured authority.", plan_sha256=sha256_json(plan))
@@ -55,7 +75,7 @@ class ReferenceEngine(BaseEngine):
         developer = self.request["developer_proposal"]
         tester = self.request["tester_proposal"]
         _role(self, "developer", "propose", "Developer proposed implementation edits.", changed_paths=[x["path"] for x in developer])
-        _role(self, "test-designer", "propose", "Independent tester proposed acceptance-test edits.", changed_paths=[x["path"] for x in tester])
+        _role(self, "test-designer", "propose", "Tester proposed diagnostic acceptance-test edits; these are not authoritative evidence.", changed_paths=[x["path"] for x in tester])
 
         self.transition("PROPOSAL_GATES")
         dev_ok, dev_decisions = self.check_proposal(developer, actor="developer")
@@ -110,26 +130,48 @@ class ReferenceEngine(BaseEngine):
         candidate_sha = self.git("rev-parse", "HEAD")
         self.state["candidate_sha"] = candidate_sha
         self.save_state()
-        from .contracts import digest_tree
         self.write_json("candidate-evidence.json", {
-            "schema": 2, "base_sha": base_sha, "candidate_sha": candidate_sha, "changed_paths": changed,
-            "patch_sha256": sha256_bytes(combined_diff.encode()), "tree_digest": digest_tree(self.workspace),
-            "authority_snapshot_before": authority_before["digest"], "authority_snapshot_candidate": authority_candidate["digest"],
-            "protected_tests_before": protected_before["digest"], "protected_tests_candidate": protected_candidate["digest"],
+            "schema": 2,
+            "base_sha": base_sha,
+            "candidate_sha": candidate_sha,
+            "changed_paths": changed,
+            "patch_sha256": sha256_bytes(combined_diff.encode()),
+            "tree_digest": digest_tree(self.workspace),
+            "authority_snapshot_before": authority_before["digest"],
+            "authority_snapshot_candidate": authority_candidate["digest"],
+            "protected_tests_before": protected_before["digest"],
+            "protected_tests_candidate": protected_candidate["digest"],
         })
         self.event("candidate-created", {"candidate_sha": candidate_sha, "changed_paths": changed})
 
         self.transition("CANDIDATE_VERIFY")
         candidate_tests = self.run_tests("candidate")
-        _role(self, "tester", "accept" if candidate_tests["passed"] else "block", "Executed protected baseline and independent acceptance tests.", tested_sha=candidate_tests["tested_sha"], tests=candidate_tests["tests"])
-        if not candidate_tests["passed"]:
-            self.event("candidate-verification-failed", {"candidate_sha": candidate_sha})
-            return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="candidate tests failed")
+        candidate_probes = self.run_probes("candidate", self.required_probe_ids(selected))
+        _role(
+            self,
+            "tester",
+            "accept" if candidate_probes["all_passed"] else "block",
+            "Controller executed product-authored probes; JUnit is supplemental diagnostic evidence only.",
+            tested_sha=candidate_probes["tested_sha"],
+            probes=candidate_probes["probe_ids"],
+            diagnostic_junit_passed=candidate_tests["passed"],
+        )
 
         self.transition("REVIEW")
-        review = self.compute_review(selected=selected, changed_paths=changed, policy_decisions=decisions, authority_before=authority_before, authority_after=authority_candidate, protected_before=protected_before, protected_after=protected_candidate, baseline=baseline, candidate_tests=candidate_tests, candidate_sha=candidate_sha)
+        review = self.compute_review(
+            changed_paths=changed,
+            policy_decisions=decisions,
+            authority_before=authority_before,
+            authority_after=authority_candidate,
+            protected_before=protected_before,
+            protected_after=protected_candidate,
+            diagnostic_tests=candidate_tests,
+            candidate_probes=candidate_probes,
+            negative_control=negative_control,
+            candidate_sha=candidate_sha,
+        )
         self.write_json("review.json", review)
-        _role(self, "reviewer", review["verdict"], "Computed candidate review from execution evidence.", checks=review["checks"], blocking_findings=review["blocking_findings"])
+        _role(self, "reviewer", review["verdict"], "Computed candidate review from controller-observed probe evidence and supplemental diagnostics.", checks=review["checks"], blocking_findings=review["blocking_findings"])
         if review["verdict"] != "accept":
             self.event("review-blocked", {"candidate_sha": candidate_sha, "findings": review["blocking_findings"]})
             return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="computed review blocked candidate")
@@ -140,8 +182,12 @@ class ReferenceEngine(BaseEngine):
         auto_ceiling = self.goal["auto_merge_ceiling"]
         auto_allowed = auto_ceiling != "none" and risk_rank(risk) <= risk_rank(auto_ceiling)
         risk_decision = {
-            "schema": 2, "risk": risk, "matched_rules": risk_matches, "human_gate_required": human_gate,
-            "auto_merge_ceiling": auto_ceiling, "auto_merge_allowed": auto_allowed and not human_gate,
+            "schema": 2,
+            "risk": risk,
+            "matched_rules": risk_matches,
+            "human_gate_required": human_gate,
+            "auto_merge_ceiling": auto_ceiling,
+            "auto_merge_allowed": auto_allowed and not human_gate,
             "decision_reasons": (["HUMAN_GATE_THRESHOLD"] if human_gate else []) + (["AUTO_MERGE_CEILING"] if not auto_allowed else []),
         }
         self.write_json("risk-decision.json", risk_decision)
@@ -156,21 +202,32 @@ class ReferenceEngine(BaseEngine):
             self.write_json("fault-injection.json", {"schema": 1, "point": self.request["fault_injection"], "effect_sha": merge_sha})
             raise InjectedCrash(f"injected crash after merge effect {merge_sha} before receipt")
         self.consume_merge_effect(effect, merge_sha, recovered_existing=False)
-        return self._postmerge_and_finish(baseline, selected)
+        return self._postmerge_and_finish(selected)
 
-    def _postmerge_and_finish(self, baseline: dict, selected: dict) -> dict:
+    def _postmerge_and_finish(self, selected: dict) -> dict:
         self.transition("POSTMERGE_VERIFY")
         merge_sha = self.state["merge_sha"]
-        postmerge = self.run_tests("postmerge")
-        required = self.acceptance_test_identities(selected)
-        observed = set(postmerge["test_identities"])
-        passed = postmerge["passed"] and postmerge["tested_sha"] == merge_sha and set(baseline["test_identities"]) <= observed and required <= observed and postmerge["tests"] >= self.policy["minimum_candidate_tests"]
-        self.write_json("postmerge-evidence.json", {"schema": 2, "merge_sha": merge_sha, "tested_sha": postmerge["tested_sha"], "passed": passed, "tests": postmerge["tests"], "baseline_identities_preserved": set(baseline["test_identities"]) <= observed, "acceptance_identities_present": required <= observed})
+        postmerge_tests = self.run_tests("postmerge")
+        postmerge_probes = self.run_probes("postmerge", self.required_probe_ids(selected))
+        gates = self.authority["quality_gates"]
+        passed = (
+            postmerge_probes["all_passed"]
+            and ((not gates["bind_probes_to_exact_git_sha"]) or postmerge_probes["tested_sha"] == merge_sha)
+            and ((not gates["require_diagnostic_junit_green"]) or postmerge_tests["passed"])
+        )
+        self.write_json("postmerge-evidence.json", {
+            "schema": 2,
+            "merge_sha": merge_sha,
+            "tested_sha": postmerge_probes["tested_sha"],
+            "passed": passed,
+            "controller_probes_passed": postmerge_probes["all_passed"],
+            "diagnostic_junit_passed": postmerge_tests["passed"],
+        })
         if not passed:
             self.event("postmerge-verification-failed", {"merge_sha": merge_sha})
             return self.finish("FAILED_VERIFICATION", phase="FAILED_VERIFICATION", reason="post-merge verification failed")
-        self.event("postmerge-verified", {"merge_sha": merge_sha, "tests": postmerge["tests"]})
-        return self.finish("COMPLETED", phase="COMPLETED", baseline_tests=baseline["tests"], candidate_sha=self.state["candidate_sha"], merge_sha=merge_sha, postmerge_tests=postmerge["tests"])
+        self.event("postmerge-verified", {"merge_sha": merge_sha, "probe_ids": postmerge_probes["probe_ids"]})
+        return self.finish("COMPLETED", phase="COMPLETED", candidate_sha=self.state["candidate_sha"], merge_sha=merge_sha, postmerge_probes=len(postmerge_probes["probes"]))
 
 
 def run_request(repository_root: Path, request: dict, output_root: Path, *, run_id: str | None = None) -> dict:
@@ -179,6 +236,9 @@ def run_request(repository_root: Path, request: dict, output_root: Path, *, run_
 
 def resume_run(repository_root: Path, run_dir: Path) -> dict:
     base = BaseEngine.resume_from(repository_root, run_dir)
+    if base.authority_error:
+        base.event("policy-configuration-blocked", {"reason": base.authority_error})
+        return base.finish("BLOCKED_POLICY", phase="BLOCKED_POLICY", reason=f"policy configuration invalid during resume: {base.authority_error}")
     if base.state["status"] in {"COMPLETED", "BLOCKED_POLICY", "FAILED_VERIFICATION", "NEEDS_DECISION"}:
         return load_summary(base)
     effect = base.state.get("pending_effect")
@@ -193,9 +253,8 @@ def resume_run(repository_root: Path, run_dir: Path) -> dict:
     base.consume_merge_effect(effect, merge_sha, recovered_existing=bool(before))
     engine = ReferenceEngine.__new__(ReferenceEngine)
     engine.__dict__.update(base.__dict__)
-    baseline = load_json(base.evidence / "test-baseline.json")
-    selected = next(item for item in base.authority["roadmap"]["items"] if item["id"] in base.goal["items"])
-    return engine._postmerge_and_finish(baseline, selected)
+    selected = base.select_authorized_item()
+    return engine._postmerge_and_finish(selected)
 
 
 def load_summary(base: BaseEngine) -> dict:
