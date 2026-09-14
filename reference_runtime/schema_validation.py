@@ -178,14 +178,21 @@ ARTIFACT_SCHEMA_PATTERNS = (
     (re.compile(r"^human-decision-example-\d{3}-attempt-\d{2}\.json$"), "human-decision.schema.json"),
     (re.compile(r"^goal-evaluation-cycle-\d{2}\.json$"), "goal-evaluation.schema.json"),
     (re.compile(r"^probe-negative-control-example-\d{3}-cycle-\d{2}\.json$"), "probe-evidence.schema.json"),
-    (re.compile(r"^postmerge-evidence-example-\d{3}\.json$"), "postmerge-evidence.schema.json"),
+    (re.compile(r"^test-baseline-example-\d{3}-cycle-\d{2}\.json$"), "test-evidence.schema.json"),
+    (re.compile(r"^probe-baseline-example-\d{3}-cycle-\d{2}\.json$"), "probe-evidence.schema.json"),
     (re.compile(r"^test-candidate-example-\d{3}-attempt-\d{2}\.json$"), "test-evidence.schema.json"),
     (re.compile(r"^probe-candidate-example-\d{3}-attempt-\d{2}\.json$"), "probe-evidence.schema.json"),
     (re.compile(r"^candidate-evidence-example-\d{3}-attempt-\d{2}\.json$"), "candidate-evidence.schema.json"),
     (re.compile(r"^review-example-\d{3}-attempt-\d{2}\.json$"), "review.schema.json"),
+    (re.compile(r"^risk-decision-example-\d{3}-attempt-\d{2}\.json$"), "risk-decision.schema.json"),
     (re.compile(r"^policy-decision-example-\d{3}-attempt-\d{2}\.json$"), "policy-decision.schema.json"),
     (re.compile(r"^proposal-example-\d{3}-attempt-\d{2}\.json$"), "proposal.schema.json"),
     (re.compile(r"^plan-example-\d{3}-attempt-\d{2}\.json$"), "plan.schema.json"),
+    (re.compile(r"^merge-intent-example-\d{3}\.json$"), "merge-intent.schema.json"),
+    (re.compile(r"^merge-evidence-example-\d{3}\.json$"), "merge-evidence.schema.json"),
+    (re.compile(r"^test-postmerge-example-\d{3}\.json$"), "test-evidence.schema.json"),
+    (re.compile(r"^probe-postmerge-example-\d{3}\.json$"), "probe-evidence.schema.json"),
+    (re.compile(r"^postmerge-evidence-example-\d{3}\.json$"), "postmerge-evidence.schema.json"),
 )
 
 
