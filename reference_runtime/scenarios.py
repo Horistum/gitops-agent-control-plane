@@ -89,6 +89,79 @@ def greet(name: str) -> str:
     return f"Hi, {normalize_name(name)}!"
 '''
 
+RAW_OUTCOME_FORGERY_SERVICE = '''
+import json
+import os
+import sys
+
+
+def _active_probe_context():
+    # This deliberately exploits the acknowledged same-process boundary in
+    # probe_child.py. Candidate code walks trusted wrapper frames to recover
+    # the already-read current payload and callable identity.
+    frame = sys._getframe()
+    while frame is not None:
+        payload = frame.f_locals.get("payload")
+        parsed = frame.f_locals.get("args")
+        callable_name = getattr(parsed, "callable_name", None)
+        if isinstance(payload, dict) and callable_name in {"normalize_name", "greet"}:
+            return payload, callable_name
+        frame = frame.f_back
+    return None, None
+
+
+def _forged_outcome(payload, callable_name):
+    args = payload.get("args", [])
+    value = args[0] if args else None
+    if callable_name == "normalize_name":
+        if not isinstance(value, str):
+            outcome = {"completed": True, "kind": "exception", "exception": "TypeError"}
+        else:
+            normalized = " ".join(value.split())
+            if not normalized:
+                outcome = {"completed": True, "kind": "exception", "exception": "ValueError"}
+            else:
+                outcome = {"completed": True, "kind": "return", "return_type": "str", "value": normalized}
+    else:
+        if not isinstance(value, str):
+            outcome = {"completed": True, "kind": "exception", "exception": "TypeError"}
+        else:
+            normalized = " ".join(value.split())
+            if not normalized:
+                outcome = {"completed": True, "kind": "exception", "exception": "ValueError"}
+            else:
+                outcome = {"completed": True, "kind": "return", "return_type": "str", "value": f"Hello, {normalized}!"}
+    outcome["candidate_forged"] = True
+    return outcome
+
+
+_payload, _callable = _active_probe_context()
+if _payload is not None:
+    _outcome = _forged_outcome(_payload, _callable)
+    os.write(1, ("REFERENCE_RAW_OUTCOME=" + json.dumps(_outcome, sort_keys=True) + "\\n").encode())
+    os._exit(0)
+
+
+def normalize_name(name: str) -> str:
+    if not isinstance(name, str):
+        raise TypeError("name must be a string")
+    normalized = " ".join(name.split())
+    if not normalized:
+        raise ValueError("name must not be blank")
+    return normalized
+
+
+def greet(name: str) -> str:
+    normalized = normalize_name(name)
+    # Diagnostics pass the public example, but real unicode behavior is wrong.
+    if name == "  Ada   Lovelace ":
+        return "Hello, Ada Lovelace!"
+    tokens = normalized.split(" ")
+    if len(tokens) == 2 and all(token.isascii() and token.isalnum() for token in tokens):
+        return f"Hello, {normalized}!"
+    return f"Hi, {normalized}!"
+'''
+
 INIT_WITH_GREET = 'from .service import greet, normalize_name\n\n__all__ = ["greet", "normalize_name"]\n'
 
 ASSERTION_TAMPER_INIT = '''
@@ -197,6 +270,8 @@ def developer_proposal(fixture: str) -> list[dict]:
         service = PROBE_AWARE_SERVICE
     elif fixture == "receipt-injection":
         service = RECEIPT_INJECTION_SERVICE
+    elif fixture == "raw-outcome-forgery":
+        service = RAW_OUTCOME_FORGERY_SERVICE
     else:
         service = CORRECT_SERVICE
 
@@ -224,7 +299,7 @@ def developer_proposal(fixture: str) -> list[dict]:
     elif fixture == "test-tamper":
         edits.append(_edit("tests/test_service.py", "import unittest\nclass Fake(unittest.TestCase):\n    def test_true(self): self.assertTrue(True)\n", "Attempt baseline test replacement."))
     elif fixture not in {
-        "correct", "broken", "assertion-tamper", "junit-forgery", "probe-aware", "receipt-injection"
+        "correct", "broken", "assertion-tamper", "junit-forgery", "probe-aware", "receipt-injection", "raw-outcome-forgery"
     }:
         raise ValueError(f"unknown developer fixture: {fixture}")
     return edits
