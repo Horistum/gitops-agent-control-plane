@@ -57,9 +57,14 @@ def validate_schemas_and_static_contracts() -> None:
         RUNTIME_PROFILE,
         VERIFICATION_PROFILE,
         load_json,
+        validate_authority_model,
         validate_contract_set,
         validate_goal,
+        validate_goal_against_roadmap,
         validate_policy,
+        validate_release_state,
+        validate_roadmap,
+        validate_role_protocols,
     )
     from reference_runtime.schema_validation import (
         ARTIFACT_SCHEMAS,
@@ -89,9 +94,20 @@ def validate_schemas_and_static_contracts() -> None:
     contracts = load_json(ROOT / "config" / "contract-set.json")
     goal = load_json(ROOT / "examples" / "goal.example.json")
     policy = load_json(ROOT / "config" / "reference-policy.json")
+    roadmap = load_json(PRODUCT / ".agent-control" / "roadmap.json")
+    release_state = load_json(PRODUCT / ".agent-control" / "release-state.json")
+    roles = load_json(ROOT / "config" / "role-protocols.json")
+    authority_model = load_json(PRODUCT / ".agent-control" / "authority-model.json")
+
     validate_contract_set(contracts)
     validate_goal(goal)
     validate_policy(policy)
+    validate_roadmap(roadmap)
+    validate_release_state(release_state, roadmap)
+    validate_goal_against_roadmap(goal, roadmap)
+    validate_role_protocols(roles)
+    validate_authority_model(authority_model)
+
     check(contracts["reference_contract"] == REFERENCE_CONTRACT, "reference contract drift")
     check(contracts["core_contract"] == CORE_CONTRACT, "core contract drift")
     check(contracts["verification_profile"] == VERIFICATION_PROFILE, "verification profile drift")
@@ -102,20 +118,9 @@ def validate_schemas_and_static_contracts() -> None:
         "goal exceeds policy attempt authority",
     )
 
-    roadmap = load_json(PRODUCT / ".agent-control" / "roadmap.json")
     ids = [row["id"] for row in roadmap["items"]]
     check(ids == ["EXAMPLE-001", "EXAMPLE-002"], "reference roadmap no longer demonstrates two dependent items")
-    second = roadmap["items"][1]
-    check(second["dependencies"] == ["EXAMPLE-001"], "second roadmap item dependency drift")
-
-    roles = load_json(ROOT / "config" / "role-protocols.json")["roles"]
-    check(
-        set(roles) == {"discovery", "architect", "developer", "test-designer", "tester", "reviewer"},
-        "role protocol surface drift",
-    )
-    check(all(row["effect_power"] == "none" for row in roles.values()), "reasoning role gained effect authority")
-
-    authority_model = load_json(PRODUCT / ".agent-control" / "authority-model.json")
+    check(roadmap["items"][1]["dependencies"] == ["EXAMPLE-001"], "second roadmap item dependency drift")
     check(
         authority_model["artifacts"]["release-state.json"]["mutation"] == "controller-after-verified-effect",
         "release state is not controller-owned state authority",
@@ -158,13 +163,23 @@ def validate_schemas_and_static_contracts() -> None:
         "control-loop.json", "goal-evaluation.json", "contract-set.json",
     ):
         check(critical in ARTIFACT_SCHEMAS, f"critical evidence schema mapping missing: {critical}")
-    for sample in (
-        "authority-snapshot-baseline.json", "protected-tests-candidate.json",
-        "role-reviewer-example-001-iteration-01.json",
+    pattern_samples = (
+        "authority-snapshot-baseline.json",
+        "protected-tests-candidate.json",
+        "role-reviewer-example-001-attempt-01.json",
         "feedback-example-001-attempt-01.json",
         "release-transition-example-001.json",
         "human-decision-example-001-attempt-01.json",
-    ):
+        "test-baseline-example-001-cycle-01.json",
+        "probe-baseline-example-001-cycle-01.json",
+        "risk-decision-example-001-attempt-01.json",
+        "merge-intent-example-001.json",
+        "merge-evidence-example-001.json",
+        "test-postmerge-example-001.json",
+        "probe-postmerge-example-001.json",
+        "postmerge-evidence-example-001.json",
+    )
+    for sample in pattern_samples:
         check(
             any(pattern.fullmatch(sample) for pattern, _ in ARTIFACT_SCHEMA_PATTERNS),
             f"pattern evidence schema mapping missing: {sample}",
@@ -193,12 +208,15 @@ def validate_product_baseline_without_mutation() -> None:
 
 def validate_authority_layout() -> None:
     from reference_runtime.contracts import digest_paths, matches_any
+
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
     snapshot = digest_paths(PRODUCT, policy["authority_paths"])
     check(bool(snapshot["files"]), "authority source snapshot would be empty")
     for required in (
-        ".agent-control/authority-model.json", ".agent-control/roadmap.json",
-        ".agent-control/release-state.json", ".agent-control/verification-probes.json",
+        ".agent-control/authority-model.json",
+        ".agent-control/roadmap.json",
+        ".agent-control/release-state.json",
+        ".agent-control/verification-probes.json",
     ):
         check(required in snapshot["files"], f"authority source missing from snapshot: {required}")
     for pattern in policy["authority_paths"]:
@@ -241,6 +259,7 @@ def validate_docs_claims() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     from reference_runtime.contracts import CORE_CONTRACT, REFERENCE_CONTRACT, RUNTIME_PROFILE, VERIFICATION_PROFILE
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args(argv)
