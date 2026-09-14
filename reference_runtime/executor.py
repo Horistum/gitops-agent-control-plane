@@ -28,18 +28,16 @@ class ExecutionResult:
 
 
 class LocalFixtureExecutor:
-    """Bounded Linux executor for trusted deterministic fixtures only.
+    """Bounded POSIX executor for trusted deterministic fixtures only.
 
     It bounds wall-clock/CPU/process resources and cleans the spawned process
     group, but it is deliberately not a filesystem/network security sandbox.
-    Selected controller-owned file descriptors may be inherited by a trusted
-    verifier parent; candidate child processes must not inherit those secrets.
+    A controller payload can be delivered through an inherited pipe only after
+    the reader process has started, avoiding a pre-spawn pipe-buffer deadlock.
     """
 
     def __init__(self, timeout_seconds: int):
         self.timeout_seconds = timeout_seconds
-        # Keep the controller wall-clock timeout authoritative. CPU is a
-        # backstop one second later rather than a hidden hard-coded limit.
         self.cpu_limit_seconds = timeout_seconds + 1
 
     def _limits(self) -> None:
@@ -68,6 +66,15 @@ class LocalFixtureExecutor:
             return True
         return False
 
+    @staticmethod
+    def _write_all(fd: int, payload: bytes) -> None:
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise RuntimeError("controller pipe write made no progress")
+            offset += written
+
     def run(
         self,
         argv: list[str],
@@ -75,7 +82,8 @@ class LocalFixtureExecutor:
         *,
         env_extra: dict[str, str] | None = None,
         pass_fds: tuple[int, ...] = (),
-        stdin_data: str | None = None,
+        control_payload: bytes | None = None,
+        control_fd_flag: str = "--control-fd",
     ) -> ExecutionResult:
         env = {
             "PATH": os.environ.get("PATH", ""),
@@ -85,35 +93,64 @@ class LocalFixtureExecutor:
         }
         if env_extra:
             env.update(env_extra)
+
+        read_fd: int | None = None
+        write_fd: int | None = None
+        effective_argv = list(argv)
+        inherited = tuple(pass_fds)
+        if control_payload is not None:
+            if os.name != "posix":
+                raise RuntimeError("inherited verifier control channel requires POSIX")
+            read_fd, write_fd = os.pipe()
+            effective_argv.extend([control_fd_flag, str(read_fd)])
+            inherited = tuple(dict.fromkeys((*inherited, read_fd)))
+
         start = time.monotonic()
         popen_kwargs: dict = {
             "cwd": cwd,
             "text": True,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
-            "stdin": subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
             "env": env,
             "start_new_session": True,
             "preexec_fn": self._limits if os.name == "posix" else None,
         }
         if os.name == "posix":
-            popen_kwargs["pass_fds"] = pass_fds
-        elif pass_fds:
-            raise RuntimeError("pass_fds verifier control channel requires POSIX")
+            popen_kwargs["pass_fds"] = inherited
+        elif inherited:
+            raise RuntimeError("pass_fds requires POSIX")
 
-        proc = subprocess.Popen(argv, **popen_kwargs)
+        try:
+            proc = subprocess.Popen(effective_argv, **popen_kwargs)
+        except Exception:
+            if read_fd is not None:
+                os.close(read_fd)
+            if write_fd is not None:
+                os.close(write_fd)
+            raise
+
+        if read_fd is not None:
+            os.close(read_fd)
+        if write_fd is not None:
+            try:
+                self._write_all(write_fd, control_payload or b"")
+            except BrokenPipeError:
+                pass
+            finally:
+                os.close(write_fd)
+
         timed_out = False
         group_terminated = False
         try:
-            stdout, stderr = proc.communicate(input=stdin_data, timeout=self.timeout_seconds)
+            stdout, stderr = proc.communicate(timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
             group_terminated = self._kill_process_group(proc)
             stdout, stderr = proc.communicate()
         else:
-            # A direct child may exit while leaving grandchildren alive. Clean
-            # its dedicated process group after capturing the direct result.
             group_terminated = self._kill_process_group(proc)
+
         returncode = proc.returncode
         if returncode is None:
             returncode = 124 if timed_out else -1
@@ -122,8 +159,9 @@ class LocalFixtureExecutor:
         elif returncode == -getattr(signal, "SIGXCPU", 24):
             timed_out = True
             returncode = 124
+
         return ExecutionResult(
-            argv=argv,
+            argv=effective_argv,
             returncode=returncode,
             stdout=stdout or "",
             stderr=stderr or "",
