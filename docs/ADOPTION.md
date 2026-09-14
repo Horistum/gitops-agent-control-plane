@@ -1,235 +1,128 @@
-# Adoption guide
+# Adoption and first end-to-end run
 
-This is the supported reference path for a **new tenant** using the exact FlowAI-Control release
-pinned in `COMPATIBILITY.json`.
+This procedure creates a clean demonstration with separate product and control repositories.
 
-## 0. Preconditions
+## 1. Prerequisites
 
-Use a dedicated unprivileged Linux account. The current engine expects:
+Use a dedicated unprivileged Linux user with Git, GitHub CLI, Python 3.11+, rootless Podman, systemd user services, the model CLI required by the active runtime adapter, GitHub write access to product/control repositories and sufficient product privileges to establish governance.
 
-- Python 3;
-- Git;
-- GitHub CLI (`gh`) authenticated to the owner account and Git credential integration enabled;
-- read access to the pinned `Horistum/FlowAi-control` source repository;
-- rootless Podman;
-- Codex CLI at an explicitly pinned version;
-- ChatGPT authentication in a dedicated `CODEX_HOME`;
-- user systemd;
-- at least 5 GB free workspace capacity;
-- outbound access to GitHub/OpenAI during controller operation.
+The control repository should be private and have Issues enabled.
 
-The control repository must be private and have Issues enabled.
+## 2. Create the example product
 
-Verify GitHub and Git transport before continuing:
+Copy `examples/minimal-product` into a new separate repository:
 
 ```bash
-gh auth status
-gh auth setup-git
-```
-
-## 1. Create the product repository
-
-Copy `examples/minimal-product/` into a separate repository root.
-
-```bash
-mkdir reference-product
-cp -a examples/minimal-product/. reference-product/
-cd reference-product
+mkdir ~/agent-reference-product
+cp -a examples/minimal-product/. ~/agent-reference-product/
+cd ~/agent-reference-product
 git init -b main
 git add .
-git commit -m "Initial FlowAI-Control reference product"
-gh repo create YOUR_ORG/reference-product --private --source . --push
+git commit -m "Initial autonomous-delivery reference product"
+git remote add origin git@github.com:YOUR_ORG/YOUR_PRODUCT.git
+git push -u origin main
 ```
 
-Confirm the baseline:
+Verify the baseline before involving any model:
 
 ```bash
 python3 ci/run_tests.py
 ```
 
-Then ensure GitHub Actions has produced the `flowai-reference-ci` check at least once.
+Three tests must pass and `build/test-results/reference/TEST-reference.xml` must contain three testcase identities. Push once and confirm the GitHub Actions job named `agent-control-reference-ci` succeeds.
 
-For a real product, replace the example source, roadmap and authority documents rather than keeping
-fake `DEMO-*` semantics.
+## 3. Create the control repository
 
-## 2. Prepare the private control repo
+Create a separate private repository with Issues enabled. This repository is not the product and should not contain product source.
 
-Use a private copy/fork of `gitops-agent-control-plane`. Keep this repository separate from the
-product.
-
-Create the command issue:
+Create one long-lived control issue:
 
 ```bash
-gh issue create \
-  --title "Flow Loop: řízení a kritická rozhodnutí" \
-  --body '<!-- flow-loop:command-issue:v1 -->
-
-Controller is not activated yet. Owner /loop commands belong in new one-line comments.'
+gh issue create --repo YOUR_ORG/YOUR_CONTROL_REPO \
+  --title "Agent Control Center" \
+  --body "Owner control channel. Generated status is managed by the controller."
 ```
 
-Record the returned issue number.
+Record the issue number.
 
-Do not use this issue for ordinary discussion. Owner commands must be new, unedited, single-line
-comments.
+## 4. Prepare deterministic test infrastructure
 
-## 3. Prepare the immutable test image
+Build a product-specific container image containing the tools required by `test_commands`. Load it into rootless Podman on the controller host and obtain its immutable digest.
 
-FlowAI-Control runs local verification with `podman --pull=never`, `--network=none`, read-only root,
-dropped capabilities and no-new-privileges.
+The runtime executes with no network and no floating pull, so the image must exist locally under the exact digest.
 
-The image therefore must:
+## 5. Authenticate the model runtime
 
-- already exist locally;
-- be referenced by SHA-256 digest;
-- contain the runtime required by every configured `test_commands` entry.
+Use the dedicated credential home required by the active adapter. Do not reuse a general shell environment containing unrelated API or repository secrets. Verify the exact CLI version after login; that version becomes part of runtime identity.
 
-For the minimal Python product, use a Python image you have explicitly pulled and pinned. Obtain the
-digest from your environment and verify the exact reference with:
-
-```bash
-podman image inspect 'IMAGE@sha256:DIGEST'
-```
-
-Do not copy a digest from this documentation. A fake digest is worse than a visible placeholder.
-
-## 4. Prepare Codex authentication
-
-Use a dedicated home:
-
-```bash
-export CODEX_HOME="$HOME/.codex-loop"
-codex login --device-auth
-CODEX_HOME="$CODEX_HOME" codex login status
-CODEX_HOME="$CODEX_HOME" codex --version
-```
-
-The exact version output becomes policy authority. Changing the installed Codex version later makes
-`doctor` fail until you deliberately review/update/reactivate policy.
-
-## 5. Render tenant policy
-
-From the control repo:
+## 6. Render tenant policy
 
 ```bash
 python3 scripts/render_policy.py \
-  --product-repo YOUR_ORG/reference-product \
-  --control-repo YOUR_ORG/gitops-agent-control-plane \
+  --product-repo YOUR_ORG/YOUR_PRODUCT \
+  --control-repo YOUR_ORG/YOUR_CONTROL_REPO \
   --owner YOUR_GITHUB_LOGIN \
-  --command-issue ISSUE_NUMBER \
-  --controller-id YOUR-UNIQUE-CONTROLLER-ID \
-  --test-image 'IMAGE@sha256:64_HEX_DIGEST' \
-  --codex-version "$(CODEX_HOME="$HOME/.codex-loop" codex --version)"
+  --command-issue YOUR_ISSUE_NUMBER \
+  --controller-id YOUR_CONTROLLER_ID \
+  --test-image 'YOUR_IMAGE@sha256:YOUR_64_HEX_DIGEST' \
+  --codex-version 'YOUR_EXACT_MODEL_CLI_VERSION'
 ```
 
-`policy.json` is mode 0600 and `.gitignore` excludes it. Review it anyway. Authority files deserve
-more scrutiny than the average generated YAML avalanche.
+Inspect `policy.json`. The renderer refuses obvious identity/digest mistakes, but it cannot decide your real architecture or critical paths for you.
 
-For a non-demo product, change at least:
+## 7. Establish product governance
 
-- `github_goals.allowed_item_patterns`;
-- context paths;
-- allowed/critical paths;
-- independent test paths;
-- required/post-merge checks;
-- test commands and resources;
-- goal contract;
-- per-phase context budgets.
-
-See `POLICY.md`.
-
-## 6. Establish product `main` governance
-
-First print the exact compatible ruleset payload:
+Preview:
 
 ```bash
 python3 scripts/product_governance.py --policy policy.json
 ```
 
-Review it. Then, with product admin rights:
+Apply after inspection:
 
 ```bash
 python3 scripts/product_governance.py --policy policy.json --apply
 ```
 
-The script refuses to replace an existing `Flow Loop main protection` ruleset. Existing governance
-must be inspected/reconciled deliberately, never overwritten because setup wanted a quieter life.
+The helper requires pull requests, resolved review threads, no delete/force-push and exact trusted status checks on `main`. It will not silently replace an existing ruleset with the same name.
 
-The engine expects an active rule protecting `main`, no bypass actors, no force push/deletion,
-pull-request merges with resolved threads, and strict required checks tied to the configured GitHub
-App id.
-
-## 7. Install the pinned controller runtime
+## 8. Install and prove the runtime adapter
 
 ```bash
 python3 scripts/install_runtime.py --policy policy.json
 ```
 
-By default this performs all of the expensive-but-useful proof steps:
+The installer validates repositories and control issue, fetches the exact pinned runtime, verifies its release manifest/file set, runs runtime unit tests and doctor, performs a real model protocol smoke and executes the real product baseline in the isolated test container.
 
-1. clones the runtime source named in `COMPATIBILITY.json`;
-2. checks out the exact full SHA;
-3. verifies the release manifest against the exact Git tree;
-4. installs a versioned immutable runtime copy;
-5. runs the controller unit suite;
-6. runs `flow_loop doctor`;
-7. runs a real data-only Codex smoke turn;
-8. runs the product baseline in the pinned rootless Podman image;
-9. installs/enables the user `flow-loop.service`;
-10. prints the exact policy fingerprint and activation command.
+A successful install prints a runtime fingerprint.
 
-Skip flags exist for controlled diagnostics, not as a recommended production installation.
-
-## 8. Activate explicitly
-
-The service starts paused. In the command issue, post exactly the command printed by the installer:
-
-```text
-/loop activate <fingerprint>
-```
-
-Use a **new single-line owner comment**. Do not edit it after posting.
-
-The controller will persist the accepted command into `loop-state` and update the control center.
-
-## 9. Run the first GoalEnvelope
-
-Create a new issue using the included **Flow Loop goal** form.
-
-For the minimal product use:
-
-- roadmap item: `DEMO-001`;
-- risk ceiling: `LOW` or higher;
-- auto-merge: `Jen LOW` if you want a low-risk candidate to merge without another owner approval;
-- completion: `DEMO-001 is merged and its post-merge check is green`;
-- forbidden directions: keep CI/control-plane changes forbidden.
-
-Do not edit the Goal Issue after submitting it. FlowAI-Control 0.3.0 intentionally rejects edited
-Goal Issues because the original immutable issue body is part of authorization provenance.
-
-## 10. Observe
-
-Useful commands:
+## 9. Activate through the portable operator interface
 
 ```bash
-systemctl --user status flow-loop --no-pager
-journalctl --user -u flow-loop -f
-python3 /path/to/runtime -m flow_loop status --config /path/to/policy.json
+python3 scripts/control.py --policy policy.json \
+  activate --fingerprint THE_PRINTED_FINGERPRINT
 ```
 
-The durable source of truth is the control repo's `loop-state` branch. The command issue is the
-operator-friendly projection.
+The wrapper posts the exact backend command to the configured control issue. Backend-specific syntax is intentionally not part of the operator contract.
 
-## 11. Move from demo to real product
+## 10. Submit the first goal
 
-Do not merely rename `DEMO-001`. Model the real product authority:
+Review `examples/goal.example.json`, then:
 
-1. define roadmap items with explicit acceptance criteria and dependencies;
-2. define architecture invariants and forbidden directions;
-3. enumerate context paths rather than exposing the repository indiscriminately;
-4. set the smallest safe allowed-path envelope;
-5. mark security/contracts/migrations as critical;
-6. provide deterministic, offline-capable test commands;
-7. ensure those commands emit JUnit under `build/test-results/**`;
-8. bind required CI checks by exact name and trusted App id;
-9. size model/context/CI budgets for the product;
-10. validate one deliberately small item before enabling broader auto-merge.
+```bash
+python3 scripts/submit_goal.py --policy policy.json --file examples/goal.example.json
+```
+
+The goal authorizes `EXAMPLE-001`, allows medium risk, permits automatic merge only through low risk and forbids CI/authority changes.
+
+## 11. Expected lifecycle
+
+A successful run should produce accepted goal evidence, selected `EXAMPLE-001`, architecture plan and bounded working set, implementation adding `greet()`, executable independent tests, green local verification, a product pull request, green `agent-control-reference-ci` on the exact candidate SHA, merge according to risk authority, green post-merge check on the exact merge SHA and durable completion evidence.
+
+Inspect all of it. A reference system that cannot be understood on its smallest example will not become more understandable after being pointed at a large production repository.
+
+## 12. Adapt to a real repository
+
+Do not simply rename `EXAMPLE-001`. Replace the example authority model with real architecture constraints, roadmap identifiers/dependencies, deterministic build/test commands, critical/public/security paths, trusted CI checks, realistic context/cost budgets and human decision boundaries.
+
+Then rerun the complete installation/live-verification path before granting auto-merge authority.
