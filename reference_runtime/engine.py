@@ -17,7 +17,12 @@ from .contracts import (
     risk_rank,
     sha256_bytes,
     sha256_json,
+    validate_authority_model,
     validate_contract_set,
+    validate_goal_against_roadmap,
+    validate_release_state,
+    validate_roadmap,
+    validate_role_protocols,
 )
 from .events import EventLog
 from .scenarios import build_request
@@ -41,21 +46,38 @@ class AutonomousEngine(BaseEngine):
         self._install_v7_runtime()
         self._initialize_v7_state()
 
+    def load_authority(self) -> dict:
+        value = super().load_authority()
+        try:
+            validate_roadmap(value["roadmap"])
+            validate_release_state(value["release_state"], value["roadmap"])
+            validate_goal_against_roadmap(self.goal, value["roadmap"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PolicyConfigurationError(f"autonomous authority invalid: {exc}") from exc
+        return value
+
     def _install_v7_runtime(self) -> None:
-        self.contract_set = load_json(self.repo / "config" / "contract-set.json")
-        validate_contract_set(self.contract_set)
-        self.role_protocols = load_json(self.repo / "config" / "role-protocols.json")
-        self.authority_model = load_json(self.workspace / ".agent-control" / "authority-model.json")
+        self.contract_set: dict = {}
+        self.role_protocols: dict = {"roles": {}}
+        self.authority_model: dict = {}
+        try:
+            self.contract_set = load_json(self.repo / "config" / "contract-set.json")
+            validate_contract_set(self.contract_set)
+            self.role_protocols = load_json(self.repo / "config" / "role-protocols.json")
+            validate_role_protocols(self.role_protocols)
+            self.authority_model = load_json(self.workspace / ".agent-control" / "authority-model.json")
+            validate_authority_model(self.authority_model)
+        except (KeyError, TypeError, ValueError) as exc:
+            if not self.authority_error:
+                self.authority_error = f"autonomous control-plane configuration invalid: {exc}"
+
         raw_executor = self.executor
         self.verification_adapter = LocalVerificationAdapter(raw_executor)
         self.executor = self.verification_adapter
         self.effect_adapter = LocalGitEffectAdapter(self.git)
         if self.verification_adapter.profile != RUNTIME_PROFILE or self.effect_adapter.profile != RUNTIME_PROFILE:
-            raise PolicyConfigurationError("runtime adapter profile mismatch")
-        if set(self.role_protocols.get("roles", {})) != {
-            "discovery", "architect", "developer", "test-designer", "tester", "reviewer"
-        }:
-            raise PolicyConfigurationError("role protocol set invalid")
+            if not self.authority_error:
+                self.authority_error = "runtime adapter profile mismatch"
 
     def _initialize_v7_state(self) -> None:
         release = self.authority.get("release_state", {}) if not self.authority_error else {}
@@ -69,7 +91,8 @@ class AutonomousEngine(BaseEngine):
             "current_candidate_branch": None,
         })
         self.save_state()
-        self.write_json("contract-set.json", self.contract_set)
+        if self.contract_set:
+            self.write_json("contract-set.json", self.contract_set)
         self._write_control_loop()
 
     @classmethod
@@ -78,6 +101,14 @@ class AutonomousEngine(BaseEngine):
         engine = cls.__new__(cls)
         engine.__dict__.update(base.__dict__)
         engine._install_v7_runtime()
+        # BaseEngine.resume_from resolves authority using BaseEngine's method.
+        # Re-read it through the v7 override so resume has the same semantic gate.
+        if not engine.authority_error:
+            try:
+                engine.authority = engine.load_authority()
+            except PolicyConfigurationError as exc:
+                engine.authority = {}
+                engine.authority_error = str(exc)
         return engine
 
     def _role(
