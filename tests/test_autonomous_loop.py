@@ -85,6 +85,7 @@ class AuthorityAndRoleProtocolTests(unittest.TestCase):
 
         duplicate = deepcopy(roadmap)
         duplicate["items"][1]["id"] = duplicate["items"][0]["id"]
+        duplicate["items"][1]["dependencies"] = []
         with self.assertRaisesRegex(ValueError, "ids must be unique"):
             validate_roadmap(duplicate)
 
