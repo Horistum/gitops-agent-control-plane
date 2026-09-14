@@ -55,9 +55,14 @@ def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
         if decision["accepted"] is not False or summary["candidate_sha"] is not None:
             raise AssertionError("write boundary failed")
         checks += ["write-boundary rejection", "no candidate side effect"]
-    elif name == "budget-exceeded":
+    elif name in {"budget-exceeded", "patch-budget-exceeded"}:
         if summary["candidate_sha"] is not None or "budget" not in summary.get("reason", ""):
             raise AssertionError("budget gate did not block before candidate")
+        if name == "patch-budget-exceeded":
+            proposal = json.loads((evidence / "proposal.json").read_text())
+            if len(proposal["developer_edits"]) + len(proposal["tester_edits"]) > 4:
+                raise AssertionError("patch-budget scenario also exceeded file-count budget")
+            checks += ["patch-byte budget independently reachable"]
         checks += ["pre-write budget gate", "no candidate side effect"]
     elif name == "risk-ceiling":
         if summary["candidate_sha"] is not None or "risk ceiling" not in summary.get("reason", ""):
@@ -97,18 +102,48 @@ def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
 def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple[dict, Path]:
     run_id = f"crash-recovery-{int(time.time()*1000)}"
     run_dir = output / run_id
-    start = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--output", str(output), "--scenario", spec["name"], "--run-id", run_id], cwd=repository_root, text=True, capture_output=True)
+    start = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            "-m",
+            "reference_runtime.engine",
+            "--repository-root",
+            str(repository_root),
+            "--output",
+            str(output),
+            "--scenario",
+            spec["name"],
+            "--run-id",
+            run_id,
+        ],
+        cwd=repository_root,
+        text=True,
+        capture_output=True,
+    )
     if start.returncode != 75:
-        raise AssertionError(f"crash fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}")
+        raise AssertionError(
+            f"crash fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}"
+        )
     state = json.loads((run_dir / "evidence" / "state.json").read_text())
     if state["phase"] != "MERGE_PENDING" or not state["pending_effect"]:
         raise AssertionError("pending effect was not durable at crash boundary")
-    first = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)], cwd=repository_root, text=True, capture_output=True)
+    first = subprocess.run(
+        [sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)],
+        cwd=repository_root,
+        text=True,
+        capture_output=True,
+    )
     if first.returncode:
         raise AssertionError(f"resume process failed: {first.stderr}")
     summary = _load_summary(run_dir / "evidence")
     merge_sha = summary["merge_sha"]
-    second = subprocess.run([sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)], cwd=repository_root, text=True, capture_output=True)
+    second = subprocess.run(
+        [sys.executable, "-S", "-m", "reference_runtime.engine", "--repository-root", str(repository_root), "--resume", str(run_dir)],
+        cwd=repository_root,
+        text=True,
+        capture_output=True,
+    )
     if second.returncode:
         raise AssertionError(f"second resume failed: {second.stderr}")
     if _load_summary(run_dir / "evidence")["merge_sha"] != merge_sha:
@@ -141,17 +176,23 @@ def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
             row["error"] = f"{type(exc).__name__}: {exc}"
             row["traceback"] = traceback.format_exc()
         rows.append(row)
-    result = {"schema": 2, "reference_contract": "gitops-agent-control-plane/v3", "output_directory": str(output), "passed": all(row["passed"] for row in rows), "scenarios": rows}
+    result = {
+        "schema": 2,
+        "reference_contract": "gitops-agent-control-plane/v3",
+        "output_directory": str(output),
+        "passed": all(row["passed"] for row in rows),
+        "scenarios": rows,
+    }
     (output / "conformance-report.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Run the standalone reference conformance matrix.")
-    p.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
-    p.add_argument("--output", type=Path)
-    a = p.parse_args(argv)
-    result = run_matrix(a.repository_root.resolve(), a.output.resolve() if a.output else None)
+    parser = argparse.ArgumentParser(description="Run the standalone reference conformance matrix.")
+    parser.add_argument("--repository-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args(argv)
+    result = run_matrix(args.repository_root.resolve(), args.output.resolve() if args.output else None)
     for row in result["scenarios"]:
         print(f"{row['scenario']:<24} {row.get('status','?'):<20} {'PASS' if row['passed'] else 'FAIL'}")
         for check in row.get("checks", []):
