@@ -7,24 +7,24 @@
   ],
   "command_issue": 1,
   "base_branch": "main",
-  "mission": "Autonomously complete exactly one authorized roadmap item at a time. Preserve authored semantics, architecture, compatibility, safety and reproducible evidence. Never expand authority or scope.",
+  "mission": "Autonomously complete exactly one authorized product work item at a time. Preserve authored semantics, architecture, compatibility, safety and reproducible evidence. Never expand authority or scope.",
   "approved_items": [],
   "github_goals": {
     "enabled": true,
     "max_items": 10,
     "allowed_item_patterns": [
-      "DEMO-*"
+      "EXAMPLE-*"
     ],
     "max_risk": "high",
     "max_auto_merge_risk": "medium"
   },
   "context_paths": [
-    ".flow-agent/agent-contract.md",
-    ".flow-agent/architecture-constitution.md",
-    ".flow-agent/roadmap.yaml",
-    ".flow-agent/release-state.yaml",
-    ".flow-agent/forbidden-directions.yaml",
-    ".flow-agent/quality-gates.yaml",
+    ".agent-control/authority.md",
+    ".agent-control/architecture.md",
+    ".agent-control/roadmap.yaml",
+    ".agent-control/release-state.yaml",
+    ".agent-control/forbidden.yaml",
+    ".agent-control/quality-gates.yaml",
     "README.md"
   ],
   "allowed_paths": [
@@ -42,13 +42,13 @@
   ],
   "required_checks": [
     {
-      "name": "flowai-reference-ci",
+      "name": "agent-control-reference-ci",
       "app_id": 15368
     }
   ],
   "postmerge_checks": [
     {
-      "name": "flowai-reference-ci",
+      "name": "agent-control-reference-ci",
       "app_id": 15368
     }
   ],
@@ -74,17 +74,12 @@
   "test_memory": "2g",
   "test_cpus": 2,
   "gradle_seed": "",
-  "test_commands": [
-    [
-      "python3",
-      "ci/run_tests.py"
-    ]
-  ],
+  "test_commands": [["python3", "ci/run_tests.py"]],
   "codex_home": "REPLACE_CODEX_HOME",
   "codex_version": "REPLACE_CODEX_VERSION",
   "models": {},
   "goal_contract": {
-    "objective": "Deliver one explicitly authorized roadmap item from a verified current main to a merged, post-merge-green state while preserving authored semantics and all safety boundaries.",
+    "objective": "Deliver one explicitly authorized product work item from a verified current main to a merged, post-merge-green state while preserving authored semantics and safety boundaries.",
     "priority_order": [
       "Correctness and authored semantics.",
       "Architecture and single-source-of-truth boundaries.",
@@ -117,62 +112,59 @@
   },
   "phase_context_paths": {
     "discovery": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/roadmap.yaml",
-      ".flow-agent/release-state.yaml",
-      ".flow-agent/forbidden-directions.yaml",
-      ".flow-agent/quality-gates.yaml",
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/roadmap.yaml",
+      ".agent-control/release-state.yaml",
+      ".agent-control/forbidden.yaml",
+      ".agent-control/quality-gates.yaml",
       "README.md"
     ],
     "architect": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml",
-      "README.md"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ],
     "test_design": [
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/architecture-constitution.md"
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/architecture.md"
     ],
     "chief_plan": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ],
     "developer": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      "README.md"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml"
     ],
-    "tester": [
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/architecture-constitution.md"
-    ],
+    "tester": [".agent-control/quality-gates.yaml"],
     "reviewer": [
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ],
     "challenge_review": [
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ],
     "architect_accept": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ],
     "chief_accept": [
-      ".flow-agent/agent-contract.md",
-      ".flow-agent/architecture-constitution.md",
-      ".flow-agent/quality-gates.yaml",
-      ".flow-agent/forbidden-directions.yaml"
+      ".agent-control/authority.md",
+      ".agent-control/architecture.md",
+      ".agent-control/quality-gates.yaml",
+      ".agent-control/forbidden.yaml"
     ]
   },
   "phase_context_bytes": {
@@ -191,22 +183,13 @@
   "soft_token_budget_per_task": 800000,
   "challenge_review": {
     "enabled": true,
-    "on_risk": [
-      "medium",
-      "high"
-    ],
+    "on_risk": ["medium", "high"],
     "on_critical_paths": true,
     "on_changed_files_at_least": 8,
     "on_diff_bytes_at_least": 80000
   },
   "blocking_medium_kinds": [
-    "correctness",
-    "architecture",
-    "compatibility",
-    "security",
-    "testing",
-    "scope",
-    "evidence"
+    "correctness", "architecture", "compatibility", "security", "testing", "scope", "evidence"
   ],
   "billing": {
     "provider": "chatgpt",
