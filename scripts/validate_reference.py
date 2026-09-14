@@ -44,7 +44,7 @@ def validate_publication_identity() -> None:
 
 
 def validate_schemas_and_static_contracts() -> None:
-    from reference_runtime.schema_validation import load_schema, validate_json_file
+    from reference_runtime.schema_validation import ARTIFACT_SCHEMAS, ARTIFACT_SCHEMA_PATTERNS, load_schema, validate_json_file
     from reference_runtime.contracts import validate_goal, validate_policy
     from reference_runtime.base import BaseEngine
 
@@ -55,35 +55,41 @@ def validate_schemas_and_static_contracts() -> None:
 
     validate_json_file(ROOT / "examples" / "goal.example.json", ROOT / "schemas" / "goal.schema.json")
     validate_json_file(ROOT / "config" / "reference-policy.json", ROOT / "schemas" / "policy.schema.json")
-    validate_json_file(
-        PRODUCT / ".agent-control" / "verification-probes.json",
-        ROOT / "schemas" / "verification-probes.schema.json",
-    )
+    validate_json_file(PRODUCT / ".agent-control" / "verification-probes.json", ROOT / "schemas" / "verification-probes.schema.json")
+
     goal = json.loads((ROOT / "examples" / "goal.example.json").read_text())
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
     validate_goal(goal)
     validate_policy(policy)
-    check(policy["reference_contract"] == "gitops-agent-control-plane/v5", "contract version drift")
+    check(policy["reference_contract"] == "gitops-agent-control-plane/v6", "contract version drift")
 
     scenario_schema = ROOT / "schemas" / "scenario.schema.json"
     scenarios = sorted((ROOT / "examples" / "scenarios").glob("*.json"))
     required_scenarios = {
-        "insufficient-tests", "assertion-tamper", "junit-forgery", "nonce-forgery",
+        "insufficient-tests", "assertion-tamper", "junit-forgery", "receipt-injection",
         "probe-aware", "crash-recovery", "happy-path",
     }
-    check(required_scenarios <= {path.stem for path in scenarios}, "critical conformance scenarios missing")
+    names = {path.stem for path in scenarios}
+    check(required_scenarios <= names, "critical conformance scenarios missing")
+    check("nonce-forgery" not in names, "obsolete no-op nonce-forgery scenario remains")
     for path in scenarios:
         validate_json_file(path, scenario_schema)
         value = json.loads(path.read_text())
         check(value["name"] == path.stem, f"scenario identity drift: {path.name}")
 
     probes = json.loads((PRODUCT / ".agent-control" / "verification-probes.json").read_text())
-    check(probes.get("schema") == 2 and probes.get("baseline") and probes.get("acceptance"), "verification probes missing")
+    check(probes.get("schema") == 3 and probes.get("baseline") and probes.get("acceptance"), "verification probes missing")
     probe_ids = [probe.get("id") for probe in probes["baseline"] + probes["acceptance"]]
     check(all(isinstance(x, str) and x for x in probe_ids) and len(probe_ids) == len(set(probe_ids)), "verification probe ids invalid")
+    check("greet-unicode" in probe_ids, "broad product acceptance invariant missing")
     for probe in probes["baseline"] + probes["acceptance"]:
         BaseEngine._validate_probe(probe)
-        check("args" not in probe and "expect" not in probe, "fixed public probe input/expectation returned")
+        check("args" not in probe and "expect" not in probe, "legacy fixed public probe input/expectation returned")
+
+    for critical in ("request.json", "proposal.json", "merge-intent.json", "human-decision.json"):
+        check(critical in ARTIFACT_SCHEMAS, f"critical evidence schema mapping missing: {critical}")
+    for pattern_name in ("authority-snapshot-baseline.json", "protected-tests-candidate.json", "role-reviewer.json"):
+        check(any(pattern.fullmatch(pattern_name) for pattern, _ in ARTIFACT_SCHEMA_PATTERNS), f"pattern evidence schema mapping missing: {pattern_name}")
 
 
 def validate_product_baseline_without_mutation() -> None:
@@ -105,10 +111,10 @@ def validate_authority_layout() -> None:
 
     policy = json.loads((ROOT / "config" / "reference-policy.json").read_text())
     snapshot = digest_paths(PRODUCT, policy["authority_paths"])
-    check(bool(snapshot["files"]), "authority snapshot would be empty")
+    check(bool(snapshot["files"]), "authority source snapshot would be empty")
     check(".agent-control/verification-probes.json" in snapshot["files"], "verification probes are not owner-controlled source authority")
     for pattern in policy["authority_paths"]:
-        check(any(matches_any(path, [pattern]) for path in snapshot["files"]), f"authority pattern matched no files: {pattern}")
+        check(any(matches_any(path, [pattern]) for path in snapshot["files"]), f"authority pattern matched no source files: {pattern}")
 
 
 def validate_python_and_shell() -> None:
@@ -126,11 +132,13 @@ def validate_docs_claims() -> None:
     security = (ROOT / "docs" / "SECURITY.md").read_text().lower()
     architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text().lower()
     verification = (ROOT / "docs" / "VERIFICATION.md").read_text().lower()
-    check("gitops-agent-control-plane/v5" in verification, "verification docs do not name contract v5")
+    adoption = (ROOT / "docs" / "ADOPTION.md").read_text().lower()
+    check("gitops-agent-control-plane/v6" in verification, "verification docs do not name contract v6")
     check("not a security sandbox" in readme, "README must disclose local executor boundary")
     check("not authoritative" in security and "junit" in security, "SECURITY must disclose diagnostic JUnit trust boundary")
     check("hmac" in security and "control fd" in security, "SECURITY must describe private receipt challenge channel")
-    check("random" in verification and "invariant" in verification, "VERIFICATION must describe runtime-generated invariant cases")
+    check("every generated acceptance case" in verification, "VERIFICATION must describe case-level negative control")
+    check("generic" in adoption and "invariant" in adoption and "kwargs" in adoption, "ADOPTION must describe generic probe DSL capabilities")
     check("cannot guarantee adversarial evidence integrity" in architecture, "ARCHITECTURE must not overclaim execution evidence")
     check("not an authenticity mechanism" in security and "anchor" in security, "SECURITY must disclose event-chain authenticity boundary")
 
@@ -148,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_product_baseline_without_mutation()
     print(json.dumps({
         "passed": True,
-        "reference_contract": "gitops-agent-control-plane/v5",
+        "reference_contract": "gitops-agent-control-plane/v6",
         "licensed": "Apache-2.0",
         "provenance": "Horistum",
         "baseline_tests": 0 if args.fast else 3,
