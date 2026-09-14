@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "reference_contract": "gitops-agent-control-plane/v2",
+  "allowed_paths": [
+    "src/**",
+    "tests/**"
+  ],
+  "critical_paths": [
+    "src/**/security/**",
+    "src/**/contract/**"
+  ],
+  "authority_paths": [
+    ".agent-control/**",
+    "ci/**",
+    ".github/**"
+  ],
+  "minimum_tests": 1,
+  "max_changed_files": 12,
+  "max_patch_bytes": 80000,
+  "default_risk": "low",
+  "human_gate_at": "high"
+}

@@ -17,13 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Bash syntax
-        run: |
-          bash -n scripts/agentctl
-          for script in scripts/*.sh; do
-            bash -n "$script"
-          done
-      - name: Linux bootstrap pure self-test
-        run: ./scripts/bootstrap-linux.sh self-test
-      - name: Reference contract validation
-        run: python3 scripts/validate_reference.py
+      - name: Shell and repository validation
+        run: ./scripts/agentctl validate
+      - name: Preserve a real happy-path showcase in CI logs
+        run: ./scripts/agentctl demo happy-path

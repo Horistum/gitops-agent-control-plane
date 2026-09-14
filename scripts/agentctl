@@ -3,48 +3,72 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PYTHON:-python3}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/agentctl <command> [args...]
 
-Portable operator entry point:
-  bootstrap      Linux host bootstrap/check
-  validate       Validate the reference repository
-  render-policy  Render tenant policy
-  governance     Preview/apply product GitHub governance
-  install        Install and prove the pinned runtime adapter
-  goal           Submit a portable goal JSON
-  control        Send an operator command
-  diagnose       Read-only Linux/service diagnostics
-  uninstall      Disable/remove local Linux runtime artifacts
-  self-test      Pure wrapper integrity check
+Standalone reference commands:
+  demo [scenario|all]    Run the executable showcase and preserve evidence
+  conformance            Run all behavioral conformance scenarios
+  validate               Run repository validation plus conformance
+  bootstrap <command>    Linux prerequisite check/prepare/self-test
+  diagnose               Read-only local diagnostics
+  cleanup                Remove local demo artifacts
+  help                   Show this help
+
+Scenarios:
+  happy-path
+  forbidden-path
+  test-failure
+  human-gate
+  crash-recovery
+
+No GitHub account, model provider, token, container engine, or private runtime is
+required for demo/conformance/validate.
 EOF
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
+
+run_demo() {
+  local scenario="${1:-happy-path}"
+  if [[ "$scenario" == "all" ]]; then
+    exec "$PYTHON" -m reference_runtime.conformance \
+      --repository-root "$ROOT" \
+      --output "$ROOT/.demo/runs"
+  fi
+  exec "$PYTHON" -m reference_runtime.engine \
+    --repository-root "$ROOT" \
+    --scenario "$scenario" \
+    --output "$ROOT/.demo/runs"
+}
 
 main() {
   local command="${1:-help}"
   shift || true
   case "$command" in
     help|-h|--help) usage ;;
+    demo) run_demo "$@" ;;
+    conformance)
+      exec "$PYTHON" -m reference_runtime.conformance --repository-root "$ROOT" "$@"
+      ;;
+    validate)
+      "$PYTHON" "$ROOT/scripts/validate_reference.py"
+      "$PYTHON" -m unittest discover -s "$ROOT/tests" -v
+      exec "$PYTHON" -m reference_runtime.conformance --repository-root "$ROOT"
+      ;;
     bootstrap) exec bash "$ROOT/scripts/bootstrap-linux.sh" "$@" ;;
-    validate) exec "$PYTHON" "$ROOT/scripts/validate_reference.py" "$@" ;;
-    render-policy) exec "$PYTHON" "$ROOT/scripts/render_policy.py" "$@" ;;
-    governance) exec "$PYTHON" "$ROOT/scripts/product_governance.py" "$@" ;;
-    install) exec "$PYTHON" "$ROOT/scripts/install_runtime.py" "$@" ;;
-    goal) exec "$PYTHON" "$ROOT/scripts/submit_goal.py" "$@" ;;
-    control) exec "$PYTHON" "$ROOT/scripts/control.py" "$@" ;;
     diagnose) exec bash "$ROOT/scripts/diagnose-linux.sh" "$@" ;;
-    uninstall) exec bash "$ROOT/scripts/uninstall-linux.sh" "$@" ;;
+    cleanup) exec bash "$ROOT/scripts/cleanup-linux.sh" "$@" ;;
     self-test)
-      [[ -x "$ROOT/scripts/bootstrap-linux.sh" ]] || die "bootstrap script is not executable"
-      [[ -f "$ROOT/scripts/validate_reference.py" ]] || die "validator is missing"
+      bash -n "$ROOT/scripts/agentctl"
       bash "$ROOT/scripts/bootstrap-linux.sh" self-test
+      "$PYTHON" "$ROOT/scripts/validate_reference.py" --fast
       printf 'agentctl self-test: ok\n'
       ;;
-    *) die "unknown command: $command (run scripts/agentctl help)" ;;
+    *) die "unknown command: $command (run ./scripts/agentctl help)" ;;
   esac
 }
 

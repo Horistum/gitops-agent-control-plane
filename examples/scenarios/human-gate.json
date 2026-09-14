@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "name": "human-gate",
+  "expected_status": "NEEDS_DECISION",
+  "purpose": "Touches an allowed but critical path and proves risk escalation stops automatic authority."
+}

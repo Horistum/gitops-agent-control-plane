@@ -1,14 +1,35 @@
-# Minimal autonomous-delivery product
+# Minimal reference product
 
-This repository is deliberately boring. That is useful.
+This product is intentionally tiny so every autonomous-delivery artifact remains inspectable.
 
-The baseline already passes three tests for `normalize_name()`. Roadmap item `EXAMPLE-001` asks the control plane to add one small public function:
+The starting implementation provides only:
+
+```python
+normalize_name("  Ada   Lovelace ") == "Ada Lovelace"
+```
+
+and three green regression tests.
+
+`EXAMPLE-001` asks the reference runtime to add:
 
 ```python
 greet("  Ada   Lovelace ") == "Hello, Ada Lovelace!"
 ```
 
-The new implementation must reuse existing normalization behavior, reject blank names, add executable tests and leave CI/authority files untouched.
+The correct candidate must reuse `normalize_name`, reject blank input, add executable tests, and preserve product authority.
+
+## Product-authored authority
+
+`.agent-control/` contains:
+
+- `authority.md`
+- `architecture.md`
+- `roadmap.json`
+- `release-state.json`
+- `forbidden.json`
+- `quality-gates.json`
+
+Those files are readable context but not implementation scope.
 
 ## Baseline
 
@@ -16,18 +37,10 @@ The new implementation must reuse existing normalization behavior, reject blank 
 python3 ci/run_tests.py
 ```
 
-The runner writes JUnit to:
+Three tests pass and JUnit is written under:
 
 ```text
 build/test-results/reference/TEST-reference.xml
 ```
 
-This makes test identities observable rather than treating exit code zero as sufficient proof.
-
-## Authority
-
-`.agent-control/` contains product-authored roadmap, architecture, release state, forbidden directions and quality gates. These files are controller input but are outside normal product write scope.
-
-## Why this example is small
-
-A first autonomous run should make every artifact inspectable: goal, plan, diff, tests, review, candidate SHA, CI, merge SHA and post-merge evidence. Once that path is trustworthy, adapt the same model to a real repository rather than proving the concept on an already complicated system.
+The standalone scenarios copy this product to an isolated workspace. The source example is never modified by a demo run.

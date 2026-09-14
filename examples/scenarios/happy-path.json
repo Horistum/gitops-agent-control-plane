@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "name": "happy-path",
+  "expected_status": "COMPLETED",
+  "purpose": "Demonstrates the complete bounded lifecycle with real local Git candidate/merge identities and post-merge verification."
+}
