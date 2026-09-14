@@ -4,10 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-import sys
 from pathlib import Path
 
-RULESET_NAME = "Flow Loop main protection"
+RULESET_NAME = "Agent Control main protection"
 
 
 def run(*args: str, input_text: str | None = None) -> str:
@@ -53,7 +52,7 @@ def desired(checks: list[dict]) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Create the exact FlowAI-Control v0.3.0 product ruleset.")
+    ap = argparse.ArgumentParser(description="Create the reference product governance ruleset.")
     ap.add_argument("--policy", type=Path, default=Path("policy.json"))
     ap.add_argument("--apply", action="store_true",
                     help="Actually create the ruleset. Without this flag only print the reviewed payload.")
@@ -73,7 +72,7 @@ def main() -> int:
     if matches:
         raise SystemExit(
             f"{RULESET_NAME!r} already exists in {repo}. Refusing to replace or mutate governance; "
-            "inspect it and use FlowAI-Control's governance validation."
+            "inspect it and validate that the active runtime adapter accepts the resulting governance."
         )
     created = json.loads(run(
         "gh", "api", f"repos/{repo}/rulesets", "-X", "POST", "--input", "-",
