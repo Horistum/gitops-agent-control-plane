@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from reference_runtime.contracts import digest_tree, load_json, validate_goal, validate_policy
+from reference_runtime.contracts import digest_tree, load_json, safe_relative_path, validate_goal, validate_policy
 from reference_runtime.events import EventLog
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,13 +44,17 @@ class ReferenceRuntimeTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             source.write_text("VALUE = 1\n")
             before = digest_tree(root)
-
             cache = root / "src" / "__pycache__"
             cache.mkdir()
             (cache / "service.cpython-313.pyc").write_bytes(b"generated-bytecode")
             (root / "orphan.pyc").write_bytes(b"generated-bytecode")
-
             self.assertEqual(digest_tree(root), before)
+
+    def test_repository_paths_reject_traversal_and_absolute_paths(self):
+        self.assertEqual(safe_relative_path("src/reference_app/service.py"), "src/reference_app/service.py")
+        for value in ("../authority.md", "src/../.agent-control/architecture.md", "/tmp/outside.py", "src//service.py"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                safe_relative_path(value)
 
 
 if __name__ == "__main__":
