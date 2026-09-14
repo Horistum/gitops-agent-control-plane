@@ -1,29 +1,43 @@
 {
-  "schema": 1,
+  "schema": 2,
   "baseline": [
     {
-      "id": "normalize-trims",
+      "id": "normalize-randomized",
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
-      "args": ["  Ada   Lovelace "],
-      "kwargs": {},
-      "expect": {"return": "Ada Lovelace"}
+      "cases": {
+        "generator": "random-name-whitespace",
+        "count": 8
+      },
+      "oracle": {
+        "kind": "normalize-whitespace"
+      }
     },
     {
       "id": "normalize-blank",
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
-      "args": ["   "],
-      "kwargs": {},
-      "expect": {"exception": "ValueError"}
+      "cases": {
+        "generator": "blank-whitespace",
+        "count": 4
+      },
+      "oracle": {
+        "kind": "raises",
+        "exception": "ValueError"
+      }
     },
     {
       "id": "normalize-type",
       "target": "src/reference_app/service.py",
       "callable": "normalize_name",
-      "args": [null],
-      "kwargs": {},
-      "expect": {"exception": "TypeError"}
+      "cases": {
+        "generator": "random-non-string",
+        "count": 5
+      },
+      "oracle": {
+        "kind": "raises",
+        "exception": "TypeError"
+      }
     }
   ],
   "acceptance": [
@@ -31,17 +45,26 @@
       "id": "greet-normalized",
       "target": "src/reference_app/service.py",
       "callable": "greet",
-      "args": ["  Ada   Lovelace "],
-      "kwargs": {},
-      "expect": {"return": "Hello, Ada Lovelace!"}
+      "cases": {
+        "generator": "random-name-whitespace",
+        "count": 10
+      },
+      "oracle": {
+        "kind": "greet-normalized"
+      }
     },
     {
       "id": "greet-blank",
       "target": "src/reference_app/service.py",
       "callable": "greet",
-      "args": ["   "],
-      "kwargs": {},
-      "expect": {"exception": "ValueError"}
+      "cases": {
+        "generator": "blank-whitespace",
+        "count": 4
+      },
+      "oracle": {
+        "kind": "raises",
+        "exception": "ValueError"
+      }
     }
   ]
 }
