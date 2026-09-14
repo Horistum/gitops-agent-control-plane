@@ -24,7 +24,7 @@ Evidence is written under `.demo/runs/<run-id>/evidence/`.
 ./scripts/agentctl conformance
 ```
 
-Contract v3 exercises ten scenarios:
+Contract v3 currently exercises eleven scenarios discovered from `examples/scenarios/`:
 
 | Scenario | Expected terminal state | Property |
 |---|---|---|
@@ -33,7 +33,8 @@ Contract v3 exercises ten scenarios:
 | `test-tamper` | `BLOCKED_POLICY` | developer cannot replace protected baseline tests |
 | `test-failure` | `FAILED_VERIFICATION` | executable failure blocks merge |
 | `insufficient-tests` | `FAILED_VERIFICATION` | green-but-insufficient tests fail computed review |
-| `budget-exceeded` | `BLOCKED_POLICY` | file/patch budget blocks before workspace mutation |
+| `budget-exceeded` | `BLOCKED_POLICY` | changed-file budget blocks before workspace mutation |
+| `patch-budget-exceeded` | `BLOCKED_POLICY` | patch-byte budget is independently reachable at an allowed file count |
 | `risk-ceiling` | `BLOCKED_POLICY` | effective risk may exceed owner goal authority |
 | `medium-auto-boundary` | `NEEDS_DECISION` | MEDIUM is reachable and auto-merge ceiling is independent |
 | `human-gate` | `NEEDS_DECISION` | top-level `src/security/**` is classified HIGH |
@@ -65,7 +66,7 @@ Candidate verification requires:
 5. test evidence records the exact candidate SHA;
 6. post-merge evidence records the exact merge SHA.
 
-`quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are runtime inputs, not decorative documentation.
+`quality-gates.json`, `forbidden.json`, `release-state.json` and `roadmap.json` are runtime inputs, not decorative documentation. `authority.md`, `architecture.md` and free-form `forbidden_directions` remain human-readable context; executable restrictions use the structured policy fields and are included in the authority snapshot rather than being falsely presented as machine-understood prose.
 
 ## Review is computed
 
