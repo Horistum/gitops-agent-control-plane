@@ -1,0 +1,18 @@
+schema: 1
+items:
+  - id: EXAMPLE-001
+    title: Add deterministic greeting API
+    status: ready
+    goal: Add a small public greeting function while preserving the existing normalization behavior.
+    acceptance:
+      - id: AC-1
+        text: reference_app.service.greet("  Ada   Lovelace ") returns "Hello, Ada Lovelace!".
+      - id: AC-2
+        text: greet rejects a blank or whitespace-only name with ValueError.
+      - id: AC-3
+        text: normalize_name keeps its existing behavior and tests remain green.
+    non_goals:
+      - Localization.
+      - CLI or HTTP endpoints.
+      - External dependencies.
+      - CI, workflow or authority-document changes.
