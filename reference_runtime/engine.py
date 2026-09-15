@@ -18,7 +18,7 @@ class CandidateIdentityError(PolicyConfigurationError):
 
 
 class AutonomousEngine(_RecoveryAutonomousEngine):
-    """Public v7 engine with active role/authority config and exact Git identity binding."""
+    """Public v7 engine with active authority, exact identity and auditable retries."""
 
     @staticmethod
     def _role_for_actor(actor: str) -> str:
@@ -104,6 +104,86 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 f"controller lacks declared mutation authority for {artifact}: {row}"
             )
 
+    def _candidate_ref(self, item: str, attempt: int) -> str:
+        return f"refs/tags/evidence/candidates/{self.run_id}/{item.lower()}/attempt-{attempt:02d}"
+
+    def _retain_candidate(self, candidate_sha: str, item: str, attempt: int) -> str:
+        ref = self._candidate_ref(item, attempt)
+        self.git("tag", "-f", ref.removeprefix("refs/tags/"), candidate_sha)
+        for filename in (
+            "candidate-evidence.json",
+            f"candidate-evidence-{item.lower()}-attempt-{attempt:02d}.json",
+        ):
+            path = self.evidence / filename
+            if path.is_file():
+                evidence = load_json(path)
+                evidence["candidate_ref"] = ref
+                self.write_json(filename, evidence)
+        return ref
+
+    def event(self, event_type: str, payload: dict) -> None:
+        if event_type == "candidate-created":
+            payload = dict(payload)
+            payload["candidate_ref"] = self._retain_candidate(
+                str(payload["candidate_sha"]),
+                str(payload["item"]),
+                int(payload["attempt"]),
+            )
+        super().event(event_type, payload)
+
+    def _goal_evaluation(self) -> dict:
+        value = super()._goal_evaluation()
+        value["success_condition_semantics"] = "reasoning_context"
+        self.write_json("goal-evaluation.json", value)
+        self.write_json(f"goal-evaluation-cycle-{self.state['cycle']:02d}.json", value)
+        return value
+
+    def _retry_preconditions(self, selected: dict, next_attempt: int) -> dict | None:
+        self.git("checkout", "main")
+        base_sha = self.git("rev-parse", "HEAD")
+        self.transition("BASELINE_VERIFY")
+        diagnostic = self.run_tests("baseline")
+        regression_ids = (
+            {probe["id"] for probe in self.authority["verification_probes"]["baseline"]}
+            | self._completed_acceptance_probe_ids()
+        )
+        regression = self.run_probes("baseline", regression_ids)
+        negative = self.run_negative_control(selected)
+        artifact = {
+            "schema": 1,
+            "item": selected["id"],
+            "attempt": next_attempt,
+            "base_sha": base_sha,
+            "diagnostic_junit_passed": bool(
+                diagnostic["passed"]
+                and diagnostic["tests"] >= self.policy["minimum_baseline_tests"]
+            ),
+            "regression_probes_passed": regression["all_passed"],
+            "negative_control_passed": negative["negative_control_passed"],
+        }
+        self.write_json(
+            f"retry-preconditions-{selected['id'].lower()}-attempt-{next_attempt:02d}.json",
+            artifact,
+        )
+        self.event("retry-preconditions-evaluated", artifact)
+        if not artifact["diagnostic_junit_passed"] or not artifact["regression_probes_passed"]:
+            self.state["goal_status"] = "BLOCKED"
+            return self.finish(
+                "FAILED_VERIFICATION",
+                phase="FAILED_VERIFICATION",
+                reason="retry baseline/regression verification failed",
+                goal_satisfied=False,
+            )
+        if not artifact["negative_control_passed"]:
+            self.state["goal_status"] = "BLOCKED"
+            return self.finish(
+                "BLOCKED_POLICY",
+                phase="BLOCKED_POLICY",
+                reason="retry acceptance negative control failed on current baseline",
+                goal_satisfied=False,
+            )
+        return None
+
     def _human_pause(self, selected: dict, attempt: int, risk: str, reasons: list[str]) -> dict:
         summary = super()._human_pause(selected, attempt, risk, reasons)
         pending = self.state.get("pending_decision")
@@ -165,28 +245,34 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
         self.save_state()
         return updated
 
+    def _record_human_decision(self, pending: dict, decision: str, decided_by: str) -> dict:
+        human = dict(pending)
+        human["decision"] = decision
+        human["decided_by"] = decided_by
+        self.state["pending_decision"] = None
+        self.write_json("human-decision.json", human)
+        self.write_json(
+            f"human-decision-{human['item'].lower()}-attempt-{human['attempt']:02d}.json",
+            human,
+        )
+        self.event("human-decision-recorded", {
+            "item": human["item"],
+            "attempt": human["attempt"],
+            "decision": decision,
+            "decided_by": decided_by,
+            "candidate_identity_matches": human.get("candidate_identity_matches"),
+        })
+        return human
+
     def apply_human_decision(self, decision: str, decided_by: str) -> dict:
+        if decision not in {"approve", "reject", "request_changes"}:
+            raise ValueError("decision must be approve, reject, or request_changes")
         pending = self.state.get("pending_decision")
         if self.state.get("phase") != "AWAITING_DECISION" or not isinstance(pending, dict):
             return super().apply_human_decision(decision, decided_by)
         pending = self._persist_human_identity_observation(pending)
         if decision == "approve" and pending["candidate_identity_matches"] is not True:
-            human = dict(pending)
-            human["decision"] = decision
-            human["decided_by"] = decided_by
-            self.state["pending_decision"] = None
-            self.write_json("human-decision.json", human)
-            self.write_json(
-                f"human-decision-{human['item'].lower()}-attempt-{human['attempt']:02d}.json",
-                human,
-            )
-            self.event("human-decision-recorded", {
-                "item": human["item"],
-                "attempt": human["attempt"],
-                "decision": decision,
-                "decided_by": decided_by,
-                "candidate_identity_matches": False,
-            })
+            human = self._record_human_decision(pending, decision, decided_by)
             self.event("human-approval-identity-blocked", {
                 "item": human["item"],
                 "expected_candidate_sha": human["candidate_sha"],
@@ -204,6 +290,36 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 observed_candidate_sha=human["observed_candidate_sha"],
                 goal_satisfied=False,
             )
+        if decision == "request_changes":
+            selected = self._roadmap_item(pending["item"])
+            self._record_human_decision(pending, decision, decided_by)
+            self._set_current_cycle_attempt_result("REPAIR_REQUESTED", create_if_missing=False)
+            review = {
+                "blocking_findings": [{
+                    "kind": "human-request-changes",
+                    "severity": "blocking",
+                    "message": "human authority requested another bounded proposal",
+                }]
+            }
+            self._write_feedback(
+                selected,
+                pending["attempt"],
+                review,
+                source="human-request-changes",
+            )
+            self._discard_candidate_branch()
+            next_attempt = pending["attempt"] + 1
+            self.state["status"] = "RUNNING"
+            self.state["phase"] = "BASELINE_VERIFY"
+            self.state["attempt"] = next_attempt
+            self.save_state()
+            terminal = self._retry_preconditions(selected, next_attempt)
+            if terminal is not None:
+                return terminal
+            terminal = self._run_selected_item(selected, start_attempt=next_attempt)
+            if terminal is not None:
+                return terminal
+            return self._reconcile_loop()
         try:
             return super().apply_human_decision(decision, decided_by)
         except CandidateIdentityError as exc:
@@ -265,8 +381,6 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 "merge commit parents do not match the exact reviewed base/candidate revisions"
             )
 
-        # Call the core consumer directly so merge evidence is enriched before
-        # the recovery layer's post-receipt fault injection point can fire.
         _CoreAutonomousEngine._consume_merge_effect(
             self,
             effect,
