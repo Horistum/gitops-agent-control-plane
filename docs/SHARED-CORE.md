@@ -1,7 +1,7 @@
 # Shared implementation and runtime profiles
 
 The canonical reusable Python implementation is `control_plane_core`, version
-`1.1.0`, implementing deterministic decisions from `autonomous-control-plane/v1`.
+`1.2.0`, implementing deterministic decisions from `autonomous-control-plane/v1`.
 The standalone engine imports it directly. `Horistum/FlowAi-control` imports the
 same package bytes, pinned to a source commit in `CONTROL-CORE.lock.json`.
 
@@ -14,6 +14,8 @@ same package bytes, pinned to a source commit in `CONTROL-CORE.lock.json`.
 | Risk | Hard risk ceiling, automatic merge ceiling, mandatory human threshold | Authenticate revision-bound human decisions |
 | Changes | Relative path and allow/protect/deny decisions | Validate expected bytes, size, filesystem boundaries and apply proposals |
 | Merge | Exact base/candidate and two-parent identity proof | Local Git CAS or protected GitHub merge API; durable operation intent |
+| Execution | Phase transitions, repair routing, retry preconditions, bounded memory and attempt identity | Execute, observe and durably persist effects under the runtime profile |
+| Acceptance | Exact criterion typing and stage evaluation | Obtain real test, document, CI and merge observations |
 | CI | Latest successful named check from the configured provider identity | Obtain check observations from authenticated provider APIs |
 
 The core has no process execution, Git writes, network, credentials or model
@@ -35,7 +37,7 @@ controller's completion ledger. Its `flowai-yaml/v1` profile normalizes declared
 dependencies and ordered implementation slices and verifies external predecessor
 merges against the current base and trusted post-merge checks.
 
-The fixture retains its property-probe negative controls and promotion. Core 1.1.0 additionally supplies `verification-evidence/v1`: executable AC/test bindings, declared new-behavior versus regression semantics, typed goal conditions and externally evaluated process/artifact predicates. Flow 0.5.0 uses these with its counterfactual/regression and rootless CLI adapters, promotes accepted independent test files, and verifies the actual merge again.
+The fixture retains its property-probe negative controls and promotion. Core 1.2.0 additionally supplies `verification-evidence/v1`: executable AC/test bindings, declared new-behavior versus regression semantics, typed goal conditions and externally evaluated process/artifact predicates. Flow 0.6.0 uses these with its counterfactual/regression and rootless CLI adapters, promotes accepted independent test files, and verifies the actual merge again.
 
 The reference also provides `agentctl verify-cli --trusted-fixture` as a separately runnable external process observation profile. This command is not a production sandbox and does not replace the standalone engine's configured property-probe profile. `docs/LIMITATIONS.md`, including raw-outcome-forgery, remains applicable to that legacy profile. Finite external observations do not prove every possible product behavior.
 
@@ -66,3 +68,6 @@ core and its nested runtime dependencies, so core changes invalidate activation.
 security scenarios and crash recovery. Flow's full suite exercises its adapters
 and real local Git interactions. A live Legion installation, live Codex response
 and real Flow product build remain deployment gates on that host.
+
+The executable typed reference profile and Flow adapter coverage are documented in
+[SHARED-EXECUTION.md](SHARED-EXECUTION.md).

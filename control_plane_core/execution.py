@@ -1,0 +1,168 @@
+"""Pure execution decisions shared by the reference and production adapters.
+
+Model notes are bounded, revision-bound DATA. They never authorize effects or
+serve as verification evidence. All functions return new values, not mutations.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+
+from .decisions import CoreError
+
+
+def fingerprint(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":")).encode()).hexdigest()
+
+
+def context_checkpoint(previous, *, revision, phase, summary, sources, requests, facts,
+                       max_entries=8, max_sources=128, turn_id=None):
+    """Retain conclusions and provenance across bounded source replacement.
+
+    Source fingerprints describe what the model actually received, including
+    omissions. Repeating a request after a changed response is legitimate; asking
+    again with the same available input is a detectable absence of progress.
+    """
+    old = previous if isinstance(previous, dict) and previous.get("revision") == revision else {}
+    if turn_id is not None and old.get("turn_id") == turn_id:
+        return copy.deepcopy(old)
+    rows = copy.deepcopy(old.get("entries", []))
+    index = dict(old.get("sources", {}))
+    for path, value in sources.items():
+        index[path] = {k: value[k] for k in ("sha256", "missing", "omitted", "binary", "excerpt") if k in value}
+    request_hash = fingerprint({"requests": requests, "facts": facts, "sources": sources})
+    repeats = old.get("repeats", 0) + 1 if old.get("request_hash") == request_hash else 0
+    rows.append({"phase": phase, "summary": str(summary)[:2400],
+                 "source_paths": list(sources)[:max_sources], "request_hash": request_hash})
+    return {"revision": revision, "entries": rows[-max_entries:],
+            "sources": dict(list(index.items())[-max_sources:]),
+            "request_hash": request_hash, "repeats": repeats, "turn_id": turn_id}
+
+
+def context_view(checkpoints, phase, revision):
+    value = checkpoints.get(phase, {})
+    return copy.deepcopy(value) if value.get("revision") == revision else {}
+
+
+def context_files(required, requested, previous, limit):
+    """Prioritize fresh requests while retaining earlier files within the bound."""
+    required = list(dict.fromkeys(required))
+    if len(required) > limit:
+        raise CoreError("Required source set exceeds the context file limit")
+    ordered = list(dict.fromkeys(required + list(requested) + list(previous)))
+    return ordered[:limit], ordered[limit:]
+
+
+def repair_target(phase, verdict, findings):
+    architectural = any(f.get("kind") in {"architecture", "scope"} and
+                        f.get("severity") in {"medium", "high", "critical"} for f in findings)
+    if verdict == "replan" or architectural or phase == "architect":
+        return "architect"
+    if phase in {"test_design", "tester"}:
+        return phase
+    if phase == "chief_plan":
+        blocking = [f for f in findings if f.get("severity") in {"medium", "high", "critical"}]
+        return "test_design" if blocking and all(f.get("kind") in {"testing", "evidence"} for f in blocking) else "architect"
+    return "developer"
+
+
+def next_phase(phase, *, level="high", challenge=False, return_phase=None):
+    if level not in {"low", "medium", "high"}:
+        raise CoreError("Unknown execution graph level")
+    transitions = {"architect": "developer" if level == "low" else "test_design",
+                   "test_design": "chief_plan" if level == "high" else (return_phase or "developer"),
+                   "chief_plan": return_phase or "developer", "developer": "verify",
+                   "verify": "tester", "tester": "independent_verify",
+                   "independent_baseline": "independent_verify", "independent_verify": "reviewer",
+                   "reviewer": "challenge_review" if challenge else ("publish" if level == "low" else "architect_accept"),
+                   "challenge_review": "architect_accept",
+                   "architect_accept": "chief_accept" if level == "high" else "publish",
+                   "chief_accept": "publish", "publish": "ci", "ci": "merge",
+                   "merge": "postmerge", "postmerge": "done"}
+    if phase not in transitions:
+        raise CoreError("Unknown execution phase: " + str(phase))
+    return transitions[phase]
+
+
+def verification_transition(phase, passed, *, failure_kind="product"):
+    """An observation drives execution; an assertion about success cannot skip a stage."""
+    if type(passed) is not bool:
+        raise CoreError("Verification transition requires an observed boolean")
+    success = {"baseline": "architect", "verify": "tester", "independent_baseline": "independent_verify",
+               "independent_verify": "reviewer", "ci": "merge", "postmerge": "done"}
+    if phase not in success:
+        raise CoreError("Unsupported verification phase")
+    if passed:
+        return success[phase]
+    if phase == "independent_baseline":
+        return "tester"
+    if phase in {"verify", "independent_verify"} and failure_kind == "product":
+        return "developer"
+    return "await_human"
+
+
+def retry_preconditions(*, baseline, regressions, negative_control):
+    if any(type(v) is not bool for v in (baseline, regressions, negative_control)):
+        raise CoreError("Retry preconditions must be observed booleans")
+    if not baseline or not regressions:
+        return "FAILED_VERIFICATION"
+    if not negative_control:
+        return "BLOCKED_POLICY"
+    return "ready"
+
+
+def recovery_actions(task, limits):
+    held = task.get("phase") == "await_human" and not task.get("pending")
+    budget = task.get("agent_budget", {}).get("used", task.get("agent_calls", 0))
+    exhausted = (task.get("context_rounds", 0) >= limits.get("max_context_rounds", 8) or
+                 budget >= limits.get("max_agent_calls_per_task", 18) or
+                 task.get("failure_code") in {"CONTEXT_STALLED", "EVIDENCE_UNAVAILABLE", "PROMPT_LIMIT", "PROTOCOL_LIMIT"})
+    return {"retry": bool(held and not task.get("approvable") and task.get("retryable", True) and
+                          task.get("hold_kind") in {"FAILED", "BLOCKED_POLICY"} and not exhausted),
+            "replan": bool(held and not task.get("merge_sha") and
+                           task.get("owner_replans", 0) < limits.get("max_owner_replans", 2))}
+
+
+def next_attempt(current, archived=()):
+    values = [1 if current is None else current] + [row.get("attempt", 1) for row in archived]
+    if any(type(v) is not int or v < 1 for v in values):
+        raise CoreError("Invalid task attempt identity")
+    return max(values) + 1
+
+
+def retirement(task, current, history, reason, *, status=None):
+    """One archive/attempt rule for cancellation, reopen and upgrade adapters."""
+    if task.get("pending"):
+        raise CoreError("Cannot retire an attempt with a pending effect")
+    previous = copy.deepcopy(task)
+    if status:
+        previous["phase"] = status
+    following = next_attempt(current, list(history) + [previous])
+    return {"previous": previous, "next_attempt": following,
+            "record": {"task_id": task["id"], "goal_id": task.get("goal_id"),
+                       "finished_at": task.get("finished_at"), "reason": reason, "task": previous}}
+
+
+def upgrade_boundary(state, *, suspend=False):
+    """Return an explicit migration intent only at a proven no-effect boundary."""
+    if state.get("paused") is not True:
+        raise CoreError("Upgrade requires authoritative paused=true")
+    if (state.get("discovery_task") or {}).get("pending"):
+        raise CoreError("Discovery still has a pending external effect")
+    active = state.get("active")
+    if not active:
+        return {"suspend": None}
+    task = state.get("tasks", {}).get(active, {})
+    if not suspend:
+        raise CoreError("Upgrade requires active=null or explicit suspension of an unchanged held attempt")
+    if (task.get("phase") != "await_human" or task.get("pending") or task.get("pr") or
+            task.get("merge_sha") or task.get("checkpoint_head") or task.get("base_refresh") or
+            task.get("head") != task.get("base") or not task.get("base")):
+        raise CoreError("Suspension requires a held unchanged attempt with no PR, checkpoint or pending effect")
+    goal = state.get("goals", {}).get(task.get("goal_id"), {})
+    if (goal.get("status") != "active" or state.get("active_goal") != task.get("goal_id") or
+            task.get("goal_hash") != goal.get("hash")):
+        raise CoreError("Suspension requires the exact active goal authority")
+    return {"suspend": active, "task_hash": fingerprint(task)}
