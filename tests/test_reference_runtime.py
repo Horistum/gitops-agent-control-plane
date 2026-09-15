@@ -246,7 +246,7 @@ class PolicyAndReviewTests(unittest.TestCase):
                 "all_passed": False,
                 "authoritative_within_trusted_fixture_scope": True,
             }
-            result = engine.run_negative_control({})
+            result = engine.run_negative_control({"acceptance": [{"id": "AC-1", "probe_ids": ["acceptance"]}]})
             self.assertFalse(result["negative_control_passed"])
             self.assertFalse(result["negative_control_all_cases_rejected"])
             self.assertEqual(result["negative_control_case_count"], 10)

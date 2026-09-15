@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from control_plane_core.execution import retry_preconditions, next_attempt as fresh_attempt
+
 from control_plane_core import CoreError, path_allowed, require_merge_identity
 
 import argparse
@@ -168,7 +170,9 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
             artifact,
         )
         self.event("retry-preconditions-evaluated", artifact)
-        if not artifact["diagnostic_junit_passed"] or not artifact["regression_probes_passed"]:
+        decision = retry_preconditions(baseline=artifact["diagnostic_junit_passed"],
+            regressions=artifact["regression_probes_passed"], negative_control=artifact["negative_control_passed"])
+        if decision == "FAILED_VERIFICATION":
             self.state["goal_status"] = "BLOCKED"
             return self.finish(
                 "FAILED_VERIFICATION",
@@ -176,7 +180,7 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 reason="retry baseline/regression verification failed",
                 goal_satisfied=False,
             )
-        if not artifact["negative_control_passed"]:
+        if decision == "BLOCKED_POLICY":
             self.state["goal_status"] = "BLOCKED"
             return self.finish(
                 "BLOCKED_POLICY",
@@ -310,7 +314,7 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 source="human-request-changes",
             )
             self._discard_candidate_branch()
-            next_attempt = pending["attempt"] + 1
+            next_attempt = fresh_attempt(pending["attempt"])
             self.state["status"] = "RUNNING"
             self.state["phase"] = "BASELINE_VERIFY"
             self.state["attempt"] = next_attempt

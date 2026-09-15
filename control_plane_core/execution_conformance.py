@@ -1,0 +1,123 @@
+"""Executable regression vectors shared byte-for-byte by both runtimes."""
+import unittest
+
+from .decisions import CoreError
+from .execution import (context_checkpoint, context_files, context_view, next_phase,
+                        recovery_actions, repair_target, retry_preconditions,
+                        upgrade_boundary, verification_transition, next_attempt)
+from .acceptance import acceptance_contract, evaluate_obligations, evidence_status_valid, test_criteria
+
+
+class ExecutionConformance(unittest.TestCase):
+    def checkpoint(self, previous=None, **overrides):
+        args = dict(revision="rev1", phase="architect", summary="first-match collision found",
+                    sources={"catalog.py": {"sha256": "a", "text": "first match"}},
+                    requests={"files": ["planner.py"]}, facts={})
+        args.update(overrides)
+        return context_checkpoint(previous, **args)
+
+    def test_bounded_memory_survives_slices_and_does_not_mutate_previous(self):
+        first = self.checkpoint()
+        value = self.checkpoint(first, summary="planner invokes catalog", sources={"planner.py": {"sha256": "b"}})
+        self.assertEqual(len(first["entries"]), 1)
+        self.assertEqual(len(value["entries"]), 2)
+        self.assertEqual(set(value["sources"]), {"catalog.py", "planner.py"})
+        for i in range(20): value = self.checkpoint(value, summary=str(i))
+        self.assertEqual(len(value["entries"]), 8)
+
+    def test_revision_and_role_boundaries_never_import_stale_or_correlated_notes(self):
+        value = self.checkpoint()
+        self.assertEqual(context_view({"architect": value}, "reviewer", "rev1"), {})
+        self.assertEqual(context_view({"architect": value}, "architect", "rev2"), {})
+        fresh = self.checkpoint(value, revision="rev2", sources={})
+        self.assertEqual(fresh["sources"], {})
+        self.assertEqual(len(fresh["entries"]), 1)
+
+    def test_replay_of_same_durable_turn_does_not_count_as_new_failure(self):
+        value = self.checkpoint(turn_id=3)
+        self.assertEqual(self.checkpoint(value, turn_id=3), value)
+        repeated = self.checkpoint(value, turn_id=4)
+        self.assertEqual(repeated["repeats"], 1)
+        progressed = self.checkpoint(repeated, sources={"new.py": {"sha256": "new"}}, turn_id=5)
+        self.assertEqual(progressed["repeats"], 0)
+
+    def test_fresh_requests_precede_retained_files_without_exceeding_bound(self):
+        kept, omitted = context_files(["authority"], ["caller"], ["catalog", "registry"], 3)
+        self.assertEqual(kept, ["authority", "caller", "catalog"])
+        self.assertEqual(omitted, ["registry"])
+        with self.assertRaises(CoreError): context_files(["a", "b"], [], [], 1)
+
+    def test_failure_ownership_does_not_start_implementation_before_design(self):
+        finding = [{"kind": "testing", "severity": "medium"}]
+        self.assertEqual(repair_target("test_design", "fix", finding), "test_design")
+        self.assertEqual(repair_target("chief_plan", "fix", finding), "test_design")
+        self.assertEqual(repair_target("architect", "fix", []), "architect")
+        self.assertEqual(repair_target("reviewer", "fix", finding), "developer")
+        self.assertEqual(repair_target("tester", "fix", finding), "tester")
+
+    def test_exhausted_retry_is_not_advertised_and_replan_limit_is_real(self):
+        task = dict(phase="await_human", hold_kind="FAILED", retryable=True, context_rounds=9)
+        self.assertEqual(recovery_actions(task, {"max_context_rounds": 8}), {"retry": False, "replan": True})
+        task["owner_replans"] = 2
+        self.assertFalse(recovery_actions(task, {})["replan"])
+        task.update(context_rounds=0, hold_kind="NEEDS_DECISION", approvable=True)
+        self.assertFalse(recovery_actions(task, {})["retry"])
+
+    def test_ready_routes_follow_risk_and_failed_assertions_preserve_tester(self):
+        self.assertEqual(next_phase("architect", level="low"), "developer")
+        self.assertEqual(next_phase("architect", level="medium"), "test_design")
+        self.assertEqual(next_phase("test_design", level="high"), "chief_plan")
+        self.assertEqual(verification_transition("independent_verify", False), "developer")
+        self.assertEqual(verification_transition("independent_verify", False, failure_kind="ambiguous"), "await_human")
+        self.assertEqual(verification_transition("postmerge", False), "await_human")
+        with self.assertRaises(CoreError): verification_transition("postmerge", "true")
+
+    def test_attempt_identity_and_retry_evidence_are_conservative(self):
+        self.assertEqual(next_attempt(1, [{"attempt": 3}]), 4)
+        for invalid in (True, False, 0, -1):
+            with self.assertRaises(CoreError): next_attempt(invalid)
+        self.assertEqual(retry_preconditions(baseline=True, regressions=True, negative_control=False), "BLOCKED_POLICY")
+        self.assertEqual(retry_preconditions(baseline=True, regressions=False, negative_control=True), "FAILED_VERIFICATION")
+
+    def test_upgrade_suspension_requires_unchanged_held_attempt_and_exact_goal(self):
+        state = {"paused": True, "active": "A", "active_goal": "G", "goals": {"G": {"status": "active", "hash": "g"}},
+                 "tasks": {"A": {"phase": "await_human", "base": "a", "head": "a", "goal_id": "G", "goal_hash": "g"}}}
+        with self.assertRaises(CoreError): upgrade_boundary(state)
+        self.assertEqual(upgrade_boundary(state, suspend=True)["suspend"], "A")
+        for key, value in (("head", "changed"), ("pending", {"id": 1}), ("pr", 1), ("checkpoint_head", "a"), ("goal_hash", "other")):
+            previous = state["tasks"]["A"].get(key)
+            state["tasks"]["A"][key] = value
+            with self.subTest(key=key), self.assertRaises(CoreError): upgrade_boundary(state, suspend=True)
+            state["tasks"]["A"][key] = previous
+
+
+class TypedAcceptanceConformance(unittest.TestCase):
+    def criteria(self):
+        kinds = ["behavior", "compatibility", "documentation", "ci", "delivery"]
+        rows = [{"id": "AC-" + str(i), "text": kind} for i, kind in enumerate(kinds)]
+        return acceptance_contract(rows, [{"criterion_id": row["id"], "kind": kind,
+            "paths": ["docs/contracts.md"] if kind == "documentation" else [],
+            "targets": ["candidate", "integration"] if kind == "ci" else []} for row, kind in zip(rows, kinds)])
+
+    def test_product_tests_cannot_prove_future_delivery(self):
+        criteria = self.criteria()
+        self.assertEqual(len(test_criteria(criteria)), 2)
+        before = evaluate_obligations(criteria, {"AC-0": True, "AC-1": True, "AC-2": True}, stage="candidate")
+        self.assertTrue(before["passed"])
+        self.assertFalse(before["complete"])
+        self.assertEqual([r["status"] for r in before["rows"]][-2:], ["deferred", "deferred"])
+        self.assertFalse(evaluate_obligations(criteria, {"AC-0": True}, stage="postmerge")["passed"])
+        self.assertTrue(evaluate_obligations(criteria, {r["id"]: True for r in criteria}, stage="postmerge")["complete"])
+
+    def test_future_role_claim_must_be_deferred_and_legacy_text_is_not_downgraded(self):
+        delivery = self.criteria()[-1]
+        self.assertFalse(evidence_status_valid(delivery, {"status": "covered", "evidence": "will merge"}))
+        self.assertTrue(evidence_status_valid(delivery, {"status": "deferred", "evidence": "controller after merge"}))
+        self.assertEqual(acceptance_contract([{"id": "A", "text": "PR is merged"}])[0]["kind"], "behavior")
+
+    def test_invalid_kind_missing_identity_and_non_document_paths_are_rejected(self):
+        criteria = [{"id": "A", "text": "Document the behavior"}]
+        for kind, paths in (("unknown", []), ("documentation", []), ("documentation", ["../a.md"]),
+                            ("documentation", ["src/api.py"]), ("documentation", ["docs/*.md"])):
+            with self.subTest(kind=kind, paths=paths), self.assertRaises(CoreError):
+                acceptance_contract(criteria, [{"criterion_id": "A", "kind": kind, "paths": paths, "targets": []}])

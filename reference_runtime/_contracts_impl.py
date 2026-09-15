@@ -237,13 +237,24 @@ def validate_roadmap(roadmap: dict) -> None:
         for criterion in acceptance:
             if not isinstance(criterion, dict):
                 raise ValueError(f"roadmap item {item_id} acceptance criterion invalid")
-            require_fields(criterion, {"id", "text", "probe_ids"}, where=f"roadmap item {item_id} acceptance")
+            require_fields(criterion, {"id", "text", "probe_ids"}, where=f"roadmap item {item_id} acceptance", optional={"kind", "paths", "targets"})
             criterion_ids.append(criterion["id"])
             if not isinstance(criterion["id"], str) or not criterion["id"] or not isinstance(criterion["text"], str) or not criterion["text"].strip():
                 raise ValueError(f"roadmap item {item_id} acceptance identity/text invalid")
             probes = criterion["probe_ids"]
-            if not isinstance(probes, list) or not probes or not all(isinstance(probe, str) and probe for probe in probes) or len(probes) != len(set(probes)):
+            if (not isinstance(probes, list) or (not probes and criterion.get("kind", "behavior") in {"behavior", "compatibility"})
+                    or not all(isinstance(probe, str) and probe for probe in probes) or len(probes) != len(set(probes))):
                 raise ValueError(f"roadmap item {item_id} acceptance probe_ids invalid")
+        from .acceptance import contract
+        from control_plane_core import CoreError
+        try:
+            typed = contract(item)
+        except CoreError as exc:
+            raise ValueError(str(exc)) from exc
+        if any(r["kind"] == "ci" for r in typed):
+            raise ValueError("Local reference profile has no hosted CI adapter; use the Flow GitHub adapter for CI obligations")
+        if any(r["kind"] not in {"behavior", "compatibility"} and r["probe_ids"] for r in typed):
+            raise ValueError("Non-test obligations cannot borrow executable probe identities")
         if len(criterion_ids) != len(set(criterion_ids)):
             raise ValueError(f"roadmap item {item_id} acceptance ids must be unique")
         if not isinstance(item["non_goals"], list) or not all(isinstance(value, str) and value for value in item["non_goals"]):

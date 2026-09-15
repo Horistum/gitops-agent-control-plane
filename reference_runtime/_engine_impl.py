@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from control_plane_core.execution import verification_transition, repair_target
+from .acceptance import evaluate as evaluate_acceptance
+
 from control_plane_core import goal_projection, merge_authority
 
 import argparse
@@ -394,6 +397,9 @@ class AutonomousEngine(BaseEngine):
             and ((not gates["bind_probes_to_exact_git_sha"]) or post_probes["tested_sha"] == merge_sha)
             and ((not gates["require_diagnostic_junit_green"]) or post_tests["passed"])
         )
+        typed = evaluate_acceptance(self, selected, post_probes, "postmerge")
+        passed = passed and typed["complete"]
+        self.event("typed-acceptance-evaluated", typed)
         evidence = {
             "schema": 2,
             "merge_sha": merge_sha,
@@ -404,7 +410,7 @@ class AutonomousEngine(BaseEngine):
         }
         self.write_json("postmerge-evidence.json", evidence)
         self.write_json(f"postmerge-evidence-{selected['id'].lower()}.json", evidence)
-        if not passed:
+        if verification_transition("postmerge", bool(passed)) != "done":
             self.event("postmerge-verification-failed", {"item": selected["id"], "merge_sha": merge_sha})
             self.state["goal_status"] = "BLOCKED"
             return self.finish(
@@ -425,7 +431,7 @@ class AutonomousEngine(BaseEngine):
             "schema": 1,
             "item": selected["id"],
             "attempt": attempt,
-            "route": "developer-repair",
+            "route": repair_target("reviewer", "fix", review.get("blocking_findings", [])) + "-repair",
             "blocking_findings": review.get("blocking_findings", []) or [{
                 "kind": source,
                 "severity": "blocking",
@@ -713,6 +719,12 @@ class AutonomousEngine(BaseEngine):
             negative_control=negative,
             candidate_sha=candidate_sha,
         )
+        typed = evaluate_acceptance(self, selected, probes, "candidate")
+        review["checks"]["typed_acceptance"] = typed["passed"]
+        if not typed["passed"]:
+            review["verdict"] = "block"
+            review["blocking_findings"].append({"kind": "evidence", "severity": "high", "message": "Due typed acceptance lacks evidence"})
+        self.event("typed-acceptance-evaluated", typed)
         self.write_json("review.json", review)
         self.write_json(f"review-{item_id.lower()}-attempt-{attempt:02d}.json", review)
         self._role(

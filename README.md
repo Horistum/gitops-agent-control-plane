@@ -9,11 +9,16 @@ The reusable implementation lives in `control_plane_core` and is consumed by
 [shared core and runtime profiles](docs/SHARED-CORE.md) for the integration contract,
 validation boundary and synchronization command.
 
-Core library 1.1.0 also provides `verification-evidence/v1`: executable acceptance
+Core library 1.2.0 also provides `verification-evidence/v1`: executable acceptance
 bindings, counterfactual/regression semantics and typed external CLI predicates.
 The separately runnable `agentctl verify-cli --trusted-fixture` extension is
 described in [profiles](docs/PROFILES.md); Flow uses the same predicates in its
 rootless production adapter.
+
+Core 1.2.0 also shares staged acceptance, repair routing, recovery limits, attempt
+identity and bounded phase-private context decisions. The public reference engine
+executes typed behavior, compatibility, documentation and delivery criteria; its
+local profile rejects hosted CI criteria before execution. See [shared execution](docs/SHARED-EXECUTION.md).
 
 The current repository contract is `gitops-agent-control-plane/v7`, composed from:
 

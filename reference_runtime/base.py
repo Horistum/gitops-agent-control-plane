@@ -265,6 +265,8 @@ class BaseEngine:
     def acceptance_probe_ids(self, selected: dict) -> set[str]:
         result: set[str] = set()
         for criterion in selected["acceptance"]:
+            if criterion.get("kind", "behavior") not in {"behavior", "compatibility"}:
+                continue
             ids = criterion.get("probe_ids")
             if not isinstance(ids, list) or not ids:
                 raise PolicyConfigurationError(f"acceptance criterion {criterion.get('id')} has no probe_ids")
@@ -363,6 +365,12 @@ class BaseEngine:
 
     def run_negative_control(self, selected: dict) -> dict:
         acceptance_ids = self.acceptance_probe_ids(selected)
+        behavior = {p for a in selected["acceptance"] if a.get("kind", "behavior") == "behavior" for p in a["probe_ids"]}
+        compatibility = {p for a in selected["acceptance"] if a.get("kind") == "compatibility" for p in a["probe_ids"]}
+        if behavior & compatibility:
+            raise PolicyConfigurationError("Probe cannot have both negative-control and regression semantics")
+        if not acceptance_ids:
+            acceptance_ids = {p["id"] for p in self.authority["verification_probes"]["baseline"]}
         evidence = self.run_probes("negative-control", acceptance_ids, persist=False)
         cases = [
             case
@@ -372,7 +380,9 @@ class BaseEngine:
         ]
         every_case_completed = bool(cases) and all(case.get("completed") is True for case in cases)
         every_case_rejected = bool(cases) and all(case.get("passed") is False for case in cases)
-        negative_passed = evidence["all_completed"] and every_case_completed and every_case_rejected
+        negative_passed = evidence["all_completed"] and every_case_completed and all(
+            case.get("passed") is (row["probe_id"] not in behavior)
+            for row in evidence["probes"] for case in (row.get("receipt") or {}).get("cases", []))
         evidence["negative_control_case_count"] = len(cases)
         evidence["negative_control_all_cases_rejected"] = every_case_rejected
         evidence["negative_control_passed"] = negative_passed
