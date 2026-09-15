@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from control_plane_core import CoreError, path_allowed, require_merge_identity
+
 import argparse
 import json
 from pathlib import Path
@@ -65,7 +67,7 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
             in_allowed = bool(valid and allowed_patterns and matches_any(canonical, allowed_patterns))
             in_authority = bool(valid and matches_any(canonical, authority_patterns))
             is_forbidden = bool(valid and matches_any(canonical, forbidden))
-            accepted = valid and in_allowed and not in_authority and not is_forbidden
+            accepted = valid and path_allowed(canonical, allowed_patterns, authority_patterns, forbidden)
             decisions.append({
                 "actor": actor,
                 "role_protocol": self._role_for_actor(actor),
@@ -376,10 +378,13 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
     ) -> None:
         first_parent = self.git("rev-parse", f"{merge_sha}^1", check=False)
         second_parent = self.git("rev-parse", f"{merge_sha}^2", check=False)
-        if first_parent != effect.get("base_sha") or second_parent != effect.get("candidate_sha"):
+        try:
+            require_merge_identity(effect.get("base_sha"), effect.get("candidate_sha"),
+                                   [first_parent, second_parent])
+        except CoreError as exc:
             raise CandidateIdentityError(
                 "merge commit parents do not match the exact reviewed base/candidate revisions"
-            )
+            ) from exc
 
         _CoreAutonomousEngine._consume_merge_effect(
             self,

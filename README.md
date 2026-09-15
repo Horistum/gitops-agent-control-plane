@@ -4,6 +4,11 @@ A **standalone executable reference for bounded autonomous software delivery thr
 
 **Initiated and maintained by the Horistum project.**
 
+The reusable implementation lives in `control_plane_core` and is consumed by
+`Horistum/FlowAi-control` as exact, versioned source bytes. See
+[shared core and runtime profiles](docs/SHARED-CORE.md) for the integration contract,
+validation boundary and synchronization command.
+
 The current repository contract is `gitops-agent-control-plane/v7`, composed from:
 
 - **core contract:** `autonomous-control-plane/v1`

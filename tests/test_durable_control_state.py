@@ -24,6 +24,10 @@ class DurableControlStateTests(unittest.TestCase):
             base_sha = engine.init_git()
             engine.state["base_sha"] = base_sha
             selected = engine.authority["roadmap"]["items"][0]
+            engine.write_json("postmerge-evidence-example-001.json", {
+                "schema": 2, "merge_sha": "a" * 40, "tested_sha": "a" * 40,
+                "passed": True, "controller_probes_passed": True, "diagnostic_junit_passed": True,
+            })
             effect = engine._prepare_control_state_effect(selected, "a" * 40)
             self.assertEqual(effect["effect"], "control-state")
             self.assertEqual(engine.state["phase"], "CONTROL_STATE_PENDING")

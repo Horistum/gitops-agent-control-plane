@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from control_plane_core import completion_transition, require_revision_identity
+
 import argparse
 import json
 from pathlib import Path
@@ -91,8 +93,13 @@ class AutonomousEngine(_CoreAutonomousEngine):
         completed = list(release.get("completed", []))
         history = [dict(row) for row in release.get("history", [])]
         item_id = selected["id"]
+        verified = load_json(self.evidence / f"postmerge-evidence-{item_id.lower()}.json")
+        require_revision_identity({"merge_sha": verified_merge_sha, "tested_sha": verified_merge_sha}, verified)
+        transition = completion_transition(self.goal["items"], completed, item_id,
+                                           merge_sha=verified_merge_sha,
+                                           verification_passed=verified.get("passed"))
         if item_id not in completed:
-            completed.append(item_id)
+            completed = transition["completed"]
             history.append({
                 "item": item_id,
                 "verified_merge_sha": verified_merge_sha,

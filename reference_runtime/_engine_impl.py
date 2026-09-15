@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from control_plane_core import goal_projection, merge_authority
+
 import argparse
 import json
 from pathlib import Path
@@ -191,16 +193,16 @@ class AutonomousEngine(BaseEngine):
         self.write_json("control-loop.json", value)
 
     def eligible_items(self) -> list[dict]:
-        completed = set(self.authority["release_state"].get("completed", []))
-        requested = set(self.goal["items"])
-        return [
-            item
-            for item in self.authority["roadmap"]["items"]
-            if item["id"] in requested
-            and item["id"] not in completed
-            and item.get("status") == "ready"
-            and set(item.get("dependencies", [])) <= completed
-        ]
+        projection = self._core_goal_projection()
+        return [item for item in self.authority["roadmap"]["items"]
+                if item["id"] in projection["eligible_items"]]
+
+    def _core_goal_projection(self) -> dict:
+        return goal_projection(
+            self.goal["items"], self.authority["release_state"].get("completed", []),
+            [{"id": item["id"], "dependencies": item.get("dependencies", []),
+              "ready": item.get("status") == "ready"}
+             for item in self.authority["roadmap"]["items"]])
 
     def _roadmap_item(self, item_id: str) -> dict:
         item = next((x for x in self.authority["roadmap"]["items"] if x["id"] == item_id), None)
@@ -209,29 +211,13 @@ class AutonomousEngine(BaseEngine):
         return item
 
     def _goal_evaluation(self) -> dict:
-        completed = set(self.authority["release_state"].get("completed", []))
-        requested = list(self.goal["items"])
-        remaining = [item for item in requested if item not in completed]
-        eligible = [item["id"] for item in self.eligible_items()]
-        by_id = {item["id"]: item for item in self.authority["roadmap"]["items"]}
-        blocked: dict[str, list[str]] = {}
-        for item_id in remaining:
-            item = by_id.get(item_id)
-            if item:
-                missing = sorted(set(item.get("dependencies", [])) - completed)
-                if missing:
-                    blocked[item_id] = missing
+        projection = self._core_goal_projection()
         value = {
             "schema": 1,
             "objective": self.goal["objective"],
-            "requested_items": requested,
-            "completed_items": [item for item in requested if item in completed],
-            "remaining_items": remaining,
-            "eligible_items": eligible,
-            "blocked_dependencies": blocked,
-            "satisfied": not remaining,
+            **{key: value for key, value in projection.items() if key != "unavailable_items"},
             "cycle": self.state["cycle"],
-            "success_condition_semantics": "verified_projection",
+            "success_condition_semantics": "reasoning_context",
         }
         self.write_json("goal-evaluation.json", value)
         self.write_json(f"goal-evaluation-cycle-{self.state['cycle']:02d}.json", value)
@@ -621,7 +607,9 @@ class AutonomousEngine(BaseEngine):
         risk, risk_matches = self.candidate_risk(changed)
         self.state["risk"] = risk
         self.save_state()
-        if risk_rank(risk) > risk_rank(self.goal["risk_ceiling"]):
+        if merge_authority(risk, risk_ceiling=self.goal["risk_ceiling"],
+                           auto_merge_ceiling=self.goal["auto_merge_ceiling"],
+                           human_gate_at=self.policy["human_gate_at"])["blocked"]:
             self.event("risk-ceiling-exceeded", {
                 "item": item_id,
                 "risk": risk,
@@ -749,9 +737,12 @@ class AutonomousEngine(BaseEngine):
             return "REPAIR_REQUESTED", feedback
 
         self.transition("RISK_GATE")
-        human_gate = risk_rank(risk) >= risk_rank(self.policy["human_gate_at"])
+        authority = merge_authority(risk, risk_ceiling=self.goal["risk_ceiling"],
+                                    auto_merge_ceiling=self.goal["auto_merge_ceiling"],
+                                    human_gate_at=self.policy["human_gate_at"])
+        human_gate = authority["human_gate_required"]
         auto_ceiling = self.goal["auto_merge_ceiling"]
-        auto_allowed = auto_ceiling != "none" and risk_rank(risk) <= risk_rank(auto_ceiling)
+        auto_allowed = authority["auto_merge_allowed"]
         risk_decision = {
             "schema": 2,
             "risk": risk,
@@ -759,10 +750,7 @@ class AutonomousEngine(BaseEngine):
             "human_gate_required": human_gate,
             "auto_merge_ceiling": auto_ceiling,
             "auto_merge_allowed": auto_allowed and not human_gate,
-            "decision_reasons": (
-                (["HUMAN_GATE_THRESHOLD"] if human_gate else [])
-                + (["AUTO_MERGE_CEILING"] if not auto_allowed else [])
-            ),
+            "decision_reasons": authority["decision_reasons"],
         }
         self.write_json("risk-decision.json", risk_decision)
         self.write_json(
