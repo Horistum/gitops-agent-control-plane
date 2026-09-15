@@ -9,6 +9,12 @@ The reusable implementation lives in `control_plane_core` and is consumed by
 [shared core and runtime profiles](docs/SHARED-CORE.md) for the integration contract,
 validation boundary and synchronization command.
 
+Core library 1.1.0 also provides `verification-evidence/v1`: executable acceptance
+bindings, counterfactual/regression semantics and typed external CLI predicates.
+The separately runnable `agentctl verify-cli --trusted-fixture` extension is
+described in [profiles](docs/PROFILES.md); Flow uses the same predicates in its
+rootless production adapter.
+
 The current repository contract is `gitops-agent-control-plane/v7`, composed from:
 
 - **core contract:** `autonomous-control-plane/v1`

@@ -7,6 +7,7 @@ ordinary reviewable source changes; --check verifies lock hashes and inventory.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -17,6 +18,18 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = "CONTROL-CORE.lock.json"
+
+
+def metadata(root: Path) -> dict:
+    result = {}
+    for node in ast.parse((root / "control_plane_core/__init__.py").read_text()).body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in {"__version__", "CONTRACT"}:
+                    result[target.id] = ast.literal_eval(node.value)
+    if set(result) != {"__version__", "CONTRACT"}:
+        raise ValueError("Missing literal portable core metadata")
+    return result
 
 
 def inventory(root: Path) -> dict[str, str]:
@@ -40,9 +53,11 @@ def inventory(root: Path) -> dict[str, str]:
 
 def check(root: Path) -> dict:
     value = json.loads((root / LOCK).read_text())
+    declared = metadata(root)
     if (value.get("schema") != 1 or value.get("repository") != "Horistum/gitops-agent-control-plane"
             or not re.fullmatch(r"[0-9a-f]{40}", value.get("commit", ""))
-            or value.get("files") != inventory(root)):
+            or value.get("files") != inventory(root) or value.get("version") != declared["__version__"]
+            or value.get("contract") != declared["CONTRACT"]):
         raise ValueError("Portable core differs from its reviewed source lock")
     return value
 
@@ -67,8 +82,9 @@ def sync(source: Path, target: Path, commit: str) -> dict:
         path = target / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / relative, path)
+    declared = metadata(source)
     value = {"schema": 1, "repository": "Horistum/gitops-agent-control-plane",
-             "commit": commit, "contract": "autonomous-control-plane/v1", "version": "1.0.0",
+             "commit": commit, "contract": declared["CONTRACT"], "version": declared["__version__"],
              "files": files}
     (target / LOCK).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
     return check(target)

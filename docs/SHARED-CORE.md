@@ -1,7 +1,7 @@
 # Shared implementation and runtime profiles
 
 The canonical reusable Python implementation is `control_plane_core`, version
-`1.0.0`, implementing deterministic decisions from `autonomous-control-plane/v1`.
+`1.1.0`, implementing deterministic decisions from `autonomous-control-plane/v1`.
 The standalone engine imports it directly. `Horistum/FlowAi-control` imports the
 same package bytes, pinned to a source commit in `CONTROL-CORE.lock.json`.
 
@@ -35,12 +35,9 @@ controller's completion ledger. Its `flowai-yaml/v1` profile normalizes declared
 dependencies and ordered implementation slices and verifies external predecessor
 merges against the current base and trusted post-merge checks.
 
-The fixture's acceptance-negative-control and probe promotion remain features of
-its verification profile. Flow's JUnit/independent overlay profile does not claim
-equivalent hostile-code observation integrity or automatic promotion of all
-independent tests. `docs/LIMITATIONS.md` remains applicable. A shared decision
-kernel does not make different verifiers equivalent or turn this fixture into a
-production sandbox.
+The fixture retains its property-probe negative controls and promotion. Core 1.1.0 additionally supplies `verification-evidence/v1`: executable AC/test bindings, declared new-behavior versus regression semantics, typed goal conditions and externally evaluated process/artifact predicates. Flow 0.5.0 uses these with its counterfactual/regression and rootless CLI adapters, promotes accepted independent test files, and verifies the actual merge again.
+
+The reference also provides `agentctl verify-cli --trusted-fixture` as a separately runnable external process observation profile. This command is not a production sandbox and does not replace the standalone engine's configured property-probe profile. `docs/LIMITATIONS.md`, including raw-outcome-forgery, remains applicable to that legacy profile. Finite external observations do not prove every possible product behavior.
 
 ## Reproducible adoption
 

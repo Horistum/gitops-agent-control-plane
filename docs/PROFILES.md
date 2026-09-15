@@ -39,3 +39,15 @@ Unlike the contract-set manifest, `config/role-protocols.json` participates dire
 Runtime loading checks that machine-enforced artifacts are actually consumed and that product-owned authority files reside within protected authority paths. `release-state.json` is the only controller-mutated authority artifact in this reference.
 
 These three files therefore have deliberately different semantics: compatibility manifest, active role authority, and product authority manifest. Treating all three as interchangeable “configuration” would erase precisely the boundaries v7 is meant to demonstrate.
+
+## External CLI observation extension
+
+Core 1.1.0 implements `verification-evidence/v1` independently of the property-probe transport. Run a controller-authored JSON suite outside a trusted local fixture process:
+
+```bash
+./scripts/agentctl verify-cli --workspace /path/to/fixture --suite /path/to/owner-suite.json --trusted-fixture
+```
+
+Each case has `id`, `argv`, `predicates`; predicates contain `id`, `op`, `expected` and (for `json_equals`) `pointer`. Supported ops are `exit_code`, `stdout_equals`, `stdout_contains`, `json_equals`. The parent evaluates actual exit/stdout; a candidate-written receipt has no authority. `tests/test_external_cli_profile.py` runs real processes, including wrong output and forged receipt cases. Flow's adapter adds rootless containers, input fixtures, output artifacts and a pinned owner suite.
+
+This is a separately runnable extension, not an arbitrary `contract-set.json` override. The existing full engine remains property-probe/v6. Process observation expectations stay outside the CLI process, but the local fixture executor shares the host and is explicitly for trusted fixtures.

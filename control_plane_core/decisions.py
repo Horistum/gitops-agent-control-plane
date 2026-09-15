@@ -24,8 +24,8 @@ def risk_rank(value: str) -> int:
     return RISK_ORDER[value]
 
 
-def _ids(values, label: str, *, nonempty: bool = False) -> list[str]:
-    if not isinstance(values, (list, tuple)) or len(values) > MAX_ITEMS:
+def _ids(values, label: str, *, nonempty: bool = False, bounded: bool = True) -> list[str]:
+    if not isinstance(values, (list, tuple)) or (bounded and len(values) > MAX_ITEMS):
         raise CoreError(f"{label} must be a bounded list")
     if nonempty and not values:
         raise CoreError(f"{label} must not be empty")
@@ -46,7 +46,8 @@ the requested goal never expand its scope. They require independently verified
 completion supplied by the adapter.
 """
     requested = _ids(requested, "requested", nonempty=True)
-    completed = _ids(completed, "completed")
+    # The active dependency graph is bounded; the lifetime completion ledger is not.
+    completed = _ids(completed, "completed", bounded=False)
     done = set(completed)
     remaining = [x for x in requested if x not in done]
     eligible, blocked, unavailable = [], {}, []
