@@ -15,7 +15,7 @@ class VerificationExecutionAdapter(Protocol):
 class GitEffectAdapter(Protocol):
     profile: str
     def find_trailer_effect(self, trailer_name: str, value: str) -> list[str]: ...
-    def merge(self, branch: str, message: str) -> str: ...
+    def merge_exact(self, base_sha: str, candidate_sha: str, message: str) -> str: ...
     def commit_control_state(self, paths: list[str], message: str) -> str: ...
 
 
@@ -45,10 +45,33 @@ class LocalGitEffectAdapter:
                 commits.append(sha)
         return commits
 
-    def merge(self, branch: str, message: str) -> str:
+    def merge_exact(self, base_sha: str, candidate_sha: str, message: str) -> str:
+        """Create a merge from exact revisions and CAS-update main.
+
+        Branch names are deliberately not effect inputs. The detached merge binds
+        the resulting commit to exact base/candidate objects; update-ref then
+        advances main only if its ref still equals the reviewed base SHA.
+        """
+        self.git("checkout", "--detach", base_sha)
+        self.git("merge", "--no-ff", candidate_sha, "-m", message)
+        merge_sha = self.git("rev-parse", "HEAD")
+        try:
+            self.git("update-ref", "refs/heads/main", merge_sha, base_sha)
+        except Exception:
+            self.git("checkout", "main", check=False)
+            raise
         self.git("checkout", "main")
-        self.git("merge", "--no-ff", branch, "-m", message)
-        return self.git("rev-parse", "HEAD")
+        return merge_sha
+
+    def merge(self, revision: str, message: str) -> str:
+        """Compatibility shim for the internal v7 implementation.
+
+        Public v7 uses merge_exact(). This fallback still resolves its input to an
+        exact commit and uses the current main tip as a compare-and-swap base.
+        """
+        base_sha = self.git("rev-parse", "main")
+        candidate_sha = self.git("rev-parse", revision)
+        return self.merge_exact(base_sha, candidate_sha, message)
 
     def commit_control_state(self, paths: list[str], message: str) -> str:
         self.git("checkout", "main")

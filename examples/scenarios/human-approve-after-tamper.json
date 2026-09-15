@@ -1,0 +1,12 @@
+{
+  "schema": 2,
+  "name": "human-approve-after-tamper",
+  "expected_status": "BLOCKED_POLICY",
+  "developer_fixture": "critical-top-level",
+  "tester_fixture": "acceptance",
+  "goal_overrides": {},
+  "fault_injection": null,
+  "goal_items": ["EXAMPLE-001"],
+  "human_decision": "approve",
+  "tamper_candidate_before_decision": true
+}

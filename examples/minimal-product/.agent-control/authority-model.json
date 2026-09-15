@@ -8,6 +8,7 @@
     "context": "Human-readable guidance that reasoning may use but the controller does not silently execute."
   },
   "artifacts": {
+    "authority-model.json": {"class":"change_authority","enforcement":"machine","mutation":"product-owner"},
     "roadmap.json": {"class":"intent_authority","enforcement":"machine","mutation":"product-owner"},
     "release-state.json": {"class":"state_authority","enforcement":"machine","mutation":"controller-after-verified-effect"},
     "forbidden.json": {"class":"change_authority","enforcement":"machine","mutation":"product-owner"},
