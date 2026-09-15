@@ -376,15 +376,15 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
         *,
         recovered_existing: bool,
     ) -> None:
-        first_parent = self.git("rev-parse", f"{merge_sha}^1", check=False)
-        second_parent = self.git("rev-parse", f"{merge_sha}^2", check=False)
+        parents = self.git("show", "-s", "--format=%P", merge_sha, check=False).split()
         try:
             require_merge_identity(effect.get("base_sha"), effect.get("candidate_sha"),
-                                   [first_parent, second_parent])
+                                   parents)
         except CoreError as exc:
             raise CandidateIdentityError(
                 "merge commit parents do not match the exact reviewed base/candidate revisions"
             ) from exc
+        first_parent, second_parent = parents
 
         _CoreAutonomousEngine._consume_merge_effect(
             self,

@@ -76,6 +76,20 @@ class HumanIdentityAndAuthorityTests(unittest.TestCase):
             <= required
         )
 
+    def test_merge_with_extra_parent_is_rejected_before_consuming_effect(self):
+        from reference_runtime.engine import CandidateIdentityError
+        with tempfile.TemporaryDirectory() as directory:
+            engine = self._engine(directory)
+            base = engine.init_git()
+            tree = engine.git("rev-parse", f"{base}^{{tree}}")
+            candidate = engine.git("commit-tree", tree, "-p", base, "-m", "candidate")
+            extra = engine.git("commit-tree", tree, "-p", base, "-m", "unreviewed parent")
+            merge = engine.git("commit-tree", tree, "-p", base, "-p", candidate, "-p", extra, "-m", "octopus")
+            with self.assertRaises(CandidateIdentityError):
+                engine._consume_merge_effect({"base_sha": base, "candidate_sha": candidate},
+                                             merge, recovered_existing=True)
+            self.assertFalse((engine.evidence / "merge-evidence.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
