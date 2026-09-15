@@ -25,7 +25,7 @@ Goal inputs distinguish executable authority from prose:
 - `forbidden_paths` is an `enforced_constraint`;
 - `objective`, `success_condition`, and `forbidden_directions` are `reasoning_context`.
 
-`success_condition` is intentionally **not** an executable predicate in v1. Machine completion is the separate controller projection `goal-evaluation.satisfied`, computed from requested items versus controller-owned release state. A future core contract may add a typed success-predicate language, but prose is not mislabeled as executable verification.
+`success_condition` is intentionally **not** an executable predicate in v1. The standalone engine computes `goal-evaluation.satisfied` from requested items versus controller-owned release state. Core library 1.1.0 separately provides `verification-evidence/v1` typed conditions; Flow consumes these through explicit `machine_conditions`. This extension never interprets prose or arbitrary expressions as executable authority.
 
 ## Reasoning-role protocols
 
@@ -45,12 +45,14 @@ A conforming controller repeatedly:
 1. validates authority and release-state semantics;
 2. computes requested, completed, remaining, eligible, and dependency-blocked work;
 3. selects only a dependency-ready requested item;
-4. establishes baseline and negative-control preconditions;
+4. establishes the baseline and all preconditions required by its declared verification profile;
 5. obtains bounded role proposals;
 6. applies write, budget, risk, verification, and human-authority gates;
 7. records verified Git effects and controller-owned progress;
-8. promotes completed-item acceptance probes into regression requirements;
+8. retains the accepted evidence and regression obligations required by that verification profile;
 9. reconciles the outer goal again.
+
+The portable core does not require Python property probes. `property-probe/v6` requires case-level negative controls and probe promotion. Flow `counterfactual-regression/v1` requires executable test bindings, base/candidate counterfactuals and promotion of accepted test files; `external-cli/v1` evaluates typed process/artifact predicates outside the candidate. Capabilities must be declared and tested; these profiles are not interchangeable security guarantees.
 
 A verification failure can feed a bounded repair attempt. A human `request_changes` decision is treated the same way: before a new candidate attempt, baseline diagnostics, regression probes, and the acceptance negative control are recomputed against the current `main` revision.
 
