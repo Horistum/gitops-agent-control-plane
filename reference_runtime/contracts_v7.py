@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from . import _contracts_impl as _impl
 
 ROLE_NAMES = {"discovery", "architect", "developer", "test-designer", "tester", "reviewer"}
@@ -11,6 +13,7 @@ AUTHORITY_CLASSES = {
     "context",
 }
 ROLE_WRITE_POLICY_REFS = {"none", "developer_allowed_paths", "tester_allowed_paths"}
+MAX_ROADMAP_ITEMS = 256
 
 
 def validate_role_protocols(value: dict) -> None:
@@ -97,3 +100,68 @@ def authority_artifact(model: dict, name: str) -> dict:
         return model["artifacts"][name]
     except KeyError as exc:
         raise ValueError(f"authority artifact not declared: {name}") from exc
+
+
+def validate_goal(goal: dict) -> None:
+    """Validate v7 goal semantics without pretending prose is executable policy."""
+    expected_semantics = {
+        "objective": "reasoning_context",
+        "items": "enforced_intent",
+        "risk_ceiling": "enforced_authority",
+        "auto_merge_ceiling": "enforced_authority",
+        "success_condition": "reasoning_context",
+        "forbidden_directions": "reasoning_context",
+        "forbidden_paths": "enforced_constraint",
+        "autonomy": "enforced_authority",
+    }
+    if not isinstance(goal, dict) or goal.get("field_semantics") != expected_semantics:
+        raise ValueError("goal.field_semantics must match actual v7 runtime semantics")
+
+    # Reuse stable structural validation after translating only the legacy
+    # semantic marker that v6 expected. The original object is never mutated.
+    legacy = deepcopy(goal)
+    legacy["field_semantics"] = dict(legacy["field_semantics"])
+    legacy["field_semantics"]["success_condition"] = "verified_projection"
+    _impl.validate_goal(legacy)
+
+
+def validate_roadmap(roadmap: dict) -> None:
+    items = roadmap.get("items") if isinstance(roadmap, dict) else None
+    if isinstance(items, list) and len(items) > MAX_ROADMAP_ITEMS:
+        raise ValueError(f"roadmap.items exceeds bounded limit {MAX_ROADMAP_ITEMS}")
+    try:
+        _impl.validate_roadmap(roadmap)
+    except RecursionError as exc:
+        raise ValueError("roadmap dependency graph exceeds supported validation depth") from exc
+
+    # Repeat the cycle proof iteratively so the public v7 contract does not
+    # rely on recursive DFS semantics. With the explicit item limit this is
+    # bounded O(V + E) owner-authored work.
+    ids = [item["id"] for item in roadmap["items"]]
+    by_id = {item["id"]: item for item in roadmap["items"]}
+    indegree = {item_id: len(by_id[item_id]["dependencies"]) for item_id in ids}
+    dependents = {item_id: [] for item_id in ids}
+    for item_id in ids:
+        for dependency in by_id[item_id]["dependencies"]:
+            dependents[dependency].append(item_id)
+    ready = [item_id for item_id, degree in indegree.items() if degree == 0]
+    visited = 0
+    while ready:
+        current = ready.pop()
+        visited += 1
+        for dependent in dependents[current]:
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+    if visited != len(ids):
+        cyclic = sorted(item_id for item_id, degree in indegree.items() if degree > 0)
+        raise ValueError(f"roadmap dependency cycle detected: {cyclic}")
+
+
+def validate_goal_against_roadmap(goal: dict, roadmap: dict) -> None:
+    validate_goal(goal)
+    validate_roadmap(roadmap)
+    known = {item["id"] for item in roadmap["items"]}
+    unknown = set(goal["items"]) - known
+    if unknown:
+        raise ValueError(f"goal requests unknown roadmap items: {sorted(unknown)}")
