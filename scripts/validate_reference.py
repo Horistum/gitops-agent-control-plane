@@ -228,7 +228,7 @@ def validate_authority_layout() -> None:
 
 def validate_python_and_shell() -> None:
     for base in (
-        ROOT / "reference_runtime", ROOT / "scripts", ROOT / "tests",
+        ROOT / "reference_runtime", ROOT / "control_plane_core", ROOT / "scripts", ROOT / "tests",
         PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci",
     ):
         for path in base.rglob("*.py"):

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitops-agent-control-core"
+version = "1.0.0"
+description = "Portable authority decisions for bounded autonomous software delivery"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["control_plane_core*"]
+
+[tool.setuptools.package-data]
+control_plane_core = ["*.md", "*.json"]
