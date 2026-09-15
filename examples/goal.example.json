@@ -24,7 +24,7 @@
     "items": "enforced_intent",
     "risk_ceiling": "enforced_authority",
     "auto_merge_ceiling": "enforced_authority",
-    "success_condition": "verified_projection",
+    "success_condition": "reasoning_context",
     "forbidden_directions": "reasoning_context",
     "forbidden_paths": "enforced_constraint",
     "autonomy": "enforced_authority"
