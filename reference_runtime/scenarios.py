@@ -92,7 +92,7 @@ RECEIPT_INJECTION_SERVICE = _source(
     }
     os.write(
         1,
-        ("REFERENCE_PROBE_RECEIPT=" + json.dumps(_fake, sort_keys=True) + "\n").encode(),
+        ("REFERENCE_PROBE_RECEIPT=" + json.dumps(_fake, sort_keys=True) + "\\n").encode(),
     )
 
 
@@ -171,7 +171,7 @@ RAW_OUTCOME_FORGERY_SERVICE = _source(
             (
                 "REFERENCE_RAW_OUTCOME="
                 + json.dumps(_forge(_payload, _name), sort_keys=True)
-                + "\n"
+                + "\\n"
             ).encode(),
         )
         os._exit(0)
