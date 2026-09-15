@@ -15,7 +15,14 @@ ARTIFACT_SCHEMAS.update({
 })
 
 ARTIFACT_SCHEMA_PATTERNS = _base.ARTIFACT_SCHEMA_PATTERNS + (
-    (re.compile(r"^control-state-intent-example-\d{3}\.json$"), "control-state-intent.schema.json"),
+    (
+        re.compile(r"^control-state-intent-example-\d{3}\.json$"),
+        "control-state-intent.schema.json",
+    ),
+    (
+        re.compile(r"^retry-preconditions-example-\d{3}-attempt-\d{2}\.json$"),
+        "retry-preconditions.schema.json",
+    ),
 )
 
 
