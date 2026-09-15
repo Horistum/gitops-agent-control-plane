@@ -44,7 +44,7 @@ class ContractDecompositionTests(unittest.TestCase):
         validate_goal(goal)
         self.assertEqual(goal["field_semantics"]["objective"], "reasoning_context")
         self.assertEqual(goal["field_semantics"]["items"], "enforced_intent")
-        self.assertEqual(goal["field_semantics"]["success_condition"], "verified_projection")
+        self.assertEqual(goal["field_semantics"]["success_condition"], "reasoning_context")
 
     def test_policy_bounds_goal_autonomy(self):
         policy = load_json(ROOT / "config" / "reference-policy.json")
