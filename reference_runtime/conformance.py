@@ -3,29 +3,36 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
 import sys
 import time
 import traceback
 
-from . import _conformance_impl as base
+from . import recovery_conformance as base
+from . import _conformance_impl as legacy
 from .contracts import REFERENCE_CONTRACT
 from .engine import run_request
 from .scenarios import load_scenario, scenario_names
 
 
-CONTROL_STATE_CRASH = "after-release-state-effect-before-receipt"
-POSTMERGE_PHASE_CRASH = "after-merge-receipt-before-postmerge"
-RECONCILE_PHASE_CRASH = "after-release-state-receipt-before-reconcile"
+def _git(workspace: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(workspace), *args],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode:
+        raise AssertionError(f"git {' '.join(args)} failed: {result.stderr or result.stdout}")
+    return result.stdout.strip()
 
 
-def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple[dict, Path]:
-    point = spec.get("fault_injection")
-    if point not in {CONTROL_STATE_CRASH, POSTMERGE_PHASE_CRASH, RECONCILE_PHASE_CRASH}:
-        return base.run_crash_recovery(repository_root, output, spec)
+def run_human_resume(repository_root: Path, output: Path, spec: dict) -> tuple[dict, Path]:
+    if spec.get("tamper_candidate_before_decision") is not True:
+        return legacy.run_human_resume(repository_root, output, spec)
 
     run_id = f"{spec['name']}-{int(time.time()*1000)}"
     run_dir = output / run_id
-    start = base._run_subprocess([
+    start = legacy._run_subprocess([
         sys.executable,
         "-S",
         "-m",
@@ -39,37 +46,31 @@ def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple
         "--run-id",
         run_id,
     ], repository_root)
-    if start.returncode != 75:
-        raise AssertionError(
-            f"recovery fixture did not terminate at injected crash: rc={start.returncode}\n{start.stdout}\n{start.stderr}"
-        )
+    if start.returncode:
+        raise AssertionError(f"human-tamper start process failed: {start.stderr}")
 
     evidence = run_dir / "evidence"
+    initial = legacy._load_summary(evidence)
+    if initial["status"] != "NEEDS_DECISION":
+        raise AssertionError(f"human-tamper scenario did not pause first: {initial['status']}")
     state = json.loads((evidence / "state.json").read_text())
-    pending = state.get("pending_effect")
-    if point == CONTROL_STATE_CRASH:
-        if (
-            state.get("phase") != "CONTROL_STATE_PENDING"
-            or not isinstance(pending, dict)
-            or pending.get("effect") != "control-state"
-        ):
-            raise AssertionError("pending control-state effect was not durable at crash boundary")
-    elif point == POSTMERGE_PHASE_CRASH:
-        if (
-            state.get("phase") != "POSTMERGE_VERIFY"
-            or pending is not None
-            or not state.get("merge_sha")
-        ):
-            raise AssertionError("post-merge phase checkpoint was not durable before crash")
-    else:
-        if (
-            state.get("phase") != "RECONCILE"
-            or pending is not None
-            or "EXAMPLE-001" not in state.get("completed_items", [])
-        ):
-            raise AssertionError("reconciliation phase checkpoint was not durable after control-state receipt")
+    pending = state.get("pending_decision")
+    if not isinstance(pending, dict):
+        raise AssertionError("human-tamper scenario has no durable pending decision")
+    expected_sha = pending["candidate_sha"]
+    branch = pending["candidate_branch"]
 
-    resumed = base._run_subprocess([
+    workspace = run_dir / "workspace"
+    _git(workspace, "checkout", branch)
+    service = workspace / "src" / "reference_app" / "service.py"
+    service.write_text(service.read_text() + "\n\ndef backdoor() -> bool:\n    return True\n")
+    _git(workspace, "add", "src/reference_app/service.py")
+    _git(workspace, "commit", "-m", "Tamper candidate after human review")
+    tampered_sha = _git(workspace, "rev-parse", "HEAD")
+    if tampered_sha == expected_sha:
+        raise AssertionError("candidate tamper fixture did not move the candidate branch")
+
+    resumed = legacy._run_subprocess([
         sys.executable,
         "-S",
         "-m",
@@ -78,90 +79,60 @@ def run_crash_recovery(repository_root: Path, output: Path, spec: dict) -> tuple
         str(repository_root),
         "--resume",
         str(run_dir),
+        "--decision",
+        "approve",
+        "--decided-by",
+        "conformance-human",
     ], repository_root)
     if resumed.returncode:
-        raise AssertionError(f"recovery process failed: {resumed.stderr}")
-    return base._load_summary(evidence), evidence
-
-
-def _assert_cycle_completed(evidence: Path, item: str = "EXAMPLE-001") -> None:
-    control = json.loads((evidence / "control-loop.json").read_text())
-    row = next((candidate for candidate in control.get("cycles", []) if candidate.get("item") == item), None)
-    if row is None or row.get("result") != "COMPLETED":
-        raise AssertionError(f"control-loop cycle did not end COMPLETED for {item}: {row}")
-    attempts = row.get("attempts", [])
-    if not attempts or attempts[-1].get("result") != "COMPLETED":
-        raise AssertionError(f"final attempt did not end COMPLETED for {item}: {attempts}")
+        raise AssertionError(f"human-tamper resume process failed: {resumed.stderr}")
+    return legacy._load_summary(evidence), evidence
 
 
 def assert_scenario(spec: dict, summary: dict, evidence: Path) -> list[str]:
     checks = base.assert_scenario(spec, summary, evidence)
     name = spec["name"]
 
-    if name == "human-approve-resume":
-        _assert_cycle_completed(evidence)
-        checks.append("human approval updates paused cycle evidence to COMPLETED")
-
-    if name == "human-request-changes":
-        control = json.loads((evidence / "control-loop.json").read_text())
-        row = next((candidate for candidate in control.get("cycles", []) if candidate.get("item") == "EXAMPLE-001"), None)
-        if row is None or not row.get("attempts") or row["attempts"][0].get("result") != "REPAIR_REQUESTED":
-            raise AssertionError("request_changes did not rewrite the paused attempt as repair-requested")
-        checks.append("human request_changes rewrites paused attempt into repair feedback")
-
-    if name == "release-state-crash-recovery":
-        if summary.get("status") != "COMPLETED" or summary.get("goal_status") != "SATISFIED":
-            raise AssertionError("control-state recovery did not continue through goal reconciliation")
-        if "EXAMPLE-001" not in summary.get("completed_items", []):
-            raise AssertionError("recovered control-state effect did not record completed item")
-        recovery = json.loads((evidence / "control-state-recovery.json").read_text())
-        if (
-            recovery.get("process_resumed") is not True
-            or recovery.get("effect") != "control-state"
-            or recovery.get("observed_existing_effect") is not True
-            or recovery.get("duplicate_effect_prevented") is not True
-            or recovery.get("effect_occurrences_before_resume") != 1
-        ):
-            raise AssertionError("control-state effect recovery did not reuse the existing Git effect")
-        state = json.loads((evidence / "state.json").read_text())
-        if state.get("pending_effect") is not None:
-            raise AssertionError("control-state pending effect was not consumed after recovery")
-        if not (evidence / "control-state-intent.json").is_file():
-            raise AssertionError("control-state durable intent evidence missing")
-        if not (evidence / "release-transition-example-001.json").is_file():
-            raise AssertionError("release transition evidence missing after control-state recovery")
-        _assert_cycle_completed(evidence)
+    if name == "human-approve-after-tamper":
+        human = json.loads((evidence / "human-decision-example-001-attempt-01.json").read_text())
+        if human.get("decision") != "approve":
+            raise AssertionError("tamper scenario did not record the attempted human approval")
+        if human.get("candidate_identity_matches") is not False:
+            raise AssertionError("human approval did not detect candidate identity movement")
+        observed = human.get("observed_candidate_sha")
+        expected = human.get("candidate_sha")
+        if not isinstance(observed, str) or observed == expected:
+            raise AssertionError("human identity evidence did not record the moved branch tip")
+        if summary.get("status") != "BLOCKED_POLICY" or summary.get("merge_sha") is not None:
+            raise AssertionError("moved candidate was not blocked before merge")
+        if "candidate moved after human decision was requested" not in summary.get("reason", ""):
+            raise AssertionError("tamper block reason is not identity-specific")
+        workspace = evidence.parent / "workspace"
+        main_service = _git(workspace, "show", "main:src/reference_app/service.py")
+        if "backdoor" in main_service:
+            raise AssertionError("tampered candidate content reached main")
         checks += [
-            "release-state effect intent persisted before Git side effect",
-            "actual process restart after control-state Git commit",
-            "existing Control-State-Id effect reused exactly once",
-            "recovered release-state transition reconciled the goal",
+            "candidate branch moved after review was actually exercised",
+            "human approval re-bound to observed Git branch identity",
+            "moved candidate blocked before merge",
+            "tampered content absent from main",
         ]
 
-    if name in {"postmerge-phase-crash-recovery", "reconcile-phase-crash-recovery"}:
-        if summary.get("status") != "COMPLETED" or summary.get("goal_status") != "SATISFIED":
-            raise AssertionError("phase recovery did not continue to goal satisfaction")
-        recovery = json.loads((evidence / "phase-recovery.json").read_text())
-        expected = (
-            ("POSTMERGE_VERIFY", "rerun-postmerge-verification")
-            if name == "postmerge-phase-crash-recovery"
-            else ("RECONCILE", "continue-goal-reconciliation")
+    if name == "repair-loop":
+        checks = [
+            check
+            for check in checks
+            if check != "verification feedback routed to repair"
+        ]
+        architect = json.loads(
+            (evidence / "role-architect-example-001-attempt-02.json").read_text()
         )
-        if (
-            recovery.get("process_resumed") is not True
-            or recovery.get("from_phase") != expected[0]
-            or recovery.get("action") != expected[1]
-        ):
-            raise AssertionError(f"phase recovery evidence mismatch: {recovery}")
-        if json.loads((evidence / "state.json").read_text()).get("pending_effect") is not None:
-            raise AssertionError("phase recovery unexpectedly left a pending effect")
-        _assert_cycle_completed(evidence)
-        checks += [
-            f"fresh-process recovery from durable {expected[0]} checkpoint",
-            "no pending side effect required for phase recovery",
-            "recovered cycle evidence ends COMPLETED",
-            "goal reconciliation completed after phase recovery",
-        ]
+        expected_ref = "feedback-example-001-attempt-01.json"
+        if expected_ref not in architect.get("input_refs", []):
+            raise AssertionError("second deterministic attempt does not reference prior feedback")
+        checks.append(
+            "feedback artifact emitted and referenced by the next bounded fixture attempt"
+        )
 
     return checks
 
@@ -183,11 +154,11 @@ def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
         }
         try:
             if spec.get("fault_injection"):
-                summary, evidence = run_crash_recovery(repository_root, output, spec)
+                summary, evidence = base.run_crash_recovery(repository_root, output, spec)
             elif spec.get("human_decision"):
-                summary, evidence = base.run_human_resume(repository_root, output, spec)
+                summary, evidence = run_human_resume(repository_root, output, spec)
             else:
-                request = base._request_from_spec(repository_root, spec, base_goal)
+                request = legacy._request_from_spec(repository_root, spec, base_goal)
                 summary = run_request(repository_root, request, output)
                 evidence = Path(summary["evidence_directory"])
             row["status"] = summary["status"]
@@ -198,6 +169,7 @@ def run_matrix(repository_root: Path, output: Path | None = None) -> dict:
             row["error"] = f"{type(exc).__name__}: {exc}"
             row["traceback"] = traceback.format_exc()
         rows.append(row)
+
     known_limits = [
         row["scenario"]
         for row in rows
@@ -236,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             if row["passed"] and row.get("expectation") == "known-limit"
             else ("PASS" if row["passed"] else "FAIL")
         )
-        print(f"{row['scenario']:<30} {row.get('status','?'):<20} {label}")
+        print(f"{row['scenario']:<32} {row.get('status','?'):<20} {label}")
         for check in row.get("checks", []):
             print(f"  - {check}")
         if not row["passed"]:
