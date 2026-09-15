@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${PYTHON:-python3}"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-usage(){ cat <<'EOF'
+
+usage() {
+  cat <<'EOF'
 Usage: scripts/agentctl <command> [args...]
+
   demo [scenario|all]    Run showcase scenarios
   loop [scenario]        Run autonomous control loop (default autonomous-two-item)
   conformance            Run all conformance scenarios
@@ -14,11 +18,78 @@ Usage: scripts/agentctl <command> [args...]
   diagnose               Read-only diagnostics
   cleanup                Remove demo artifacts
   help                   Show help
+
+Safety boundary:
+  The local executor is for trusted deterministic fixtures only.
+  It is NOT a security sandbox for model-generated or otherwise hostile code.
 EOF
 }
-die(){ printf 'ERROR: %s\n' "$*" >&2; exit 2; }
-py(){ "$PYTHON" -S "$@"; }
-run_demo(){ local scenario="${1:-happy-path}"; if [[ "$scenario" == all ]]; then exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT" --output "$ROOT/.demo/runs"; fi; exec "$PYTHON" -S -m reference_runtime.engine --repository-root "$ROOT" --scenario "$scenario" --output "$ROOT/.demo/runs"; }
-main(){ local command="${1:-help}"; shift || true; case "$command" in
- help|-h|--help) usage;; demo) run_demo "$@";; loop) run_demo "${1:-autonomous-two-item}";; conformance) exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT" "$@";; validate) py "$ROOT/scripts/validate_reference.py"; py -m unittest discover -s "$ROOT/tests" -v; exec "$PYTHON" -S -m reference_runtime.conformance --repository-root "$ROOT";; self-test) bash -n "$ROOT/scripts/agentctl"; bash "$ROOT/scripts/bootstrap-linux.sh" self-test; py "$ROOT/scripts/validate_reference.py" --fast; printf 'agentctl self-test: ok\n';; bootstrap) exec bash "$ROOT/scripts/bootstrap-linux.sh" "$@";; diagnose) exec bash "$ROOT/scripts/diagnose-linux.sh" "$@";; cleanup) exec bash "$ROOT/scripts/cleanup-linux.sh" "$@";; *) die "unknown command: $command";; esac; }
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 2
+}
+
+py() {
+  "$PYTHON" -S "$@"
+}
+
+run_demo() {
+  local scenario="${1:-happy-path}"
+  if [[ "$scenario" == "all" ]]; then
+    exec "$PYTHON" -S -m reference_runtime.conformance \
+      --repository-root "$ROOT" \
+      --output "$ROOT/.demo/runs"
+  fi
+  exec "$PYTHON" -S -m reference_runtime.engine \
+    --repository-root "$ROOT" \
+    --scenario "$scenario" \
+    --output "$ROOT/.demo/runs"
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+
+  case "$command" in
+    help|-h|--help)
+      usage
+      ;;
+    demo)
+      run_demo "$@"
+      ;;
+    loop)
+      run_demo "${1:-autonomous-two-item}"
+      ;;
+    conformance)
+      exec "$PYTHON" -S -m reference_runtime.conformance \
+        --repository-root "$ROOT" "$@"
+      ;;
+    validate)
+      py "$ROOT/scripts/validate_reference.py"
+      py -m unittest discover -s "$ROOT/tests" -v
+      exec "$PYTHON" -S -m reference_runtime.conformance \
+        --repository-root "$ROOT"
+      ;;
+    self-test)
+      bash -n "$ROOT/scripts/agentctl"
+      bash "$ROOT/scripts/bootstrap-linux.sh" self-test
+      py "$ROOT/scripts/validate_reference.py" --fast
+      printf 'agentctl self-test: ok\n'
+      ;;
+    bootstrap)
+      exec bash "$ROOT/scripts/bootstrap-linux.sh" "$@"
+      ;;
+    diagnose)
+      exec bash "$ROOT/scripts/diagnose-linux.sh" "$@"
+      ;;
+    cleanup)
+      exec bash "$ROOT/scripts/cleanup-linux.sh" "$@"
+      ;;
+    *)
+      die "unknown command: $command"
+      ;;
+  esac
+}
+
 main "$@"
