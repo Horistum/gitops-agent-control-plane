@@ -12,8 +12,6 @@ def runtime_fingerprint():
     roots = [Path(__file__).parent, Path(control_plane_core.__file__).parent]
     files = {root.name + "/" + path.relative_to(root).as_posix(): digest(path.read_bytes())
              for root in roots for path in sorted(root.rglob("*.py"))}
-    from reference_runtime import _schema_validation_impl
-    files["schema-validator"] = digest(Path(_schema_validation_impl.__file__).read_bytes())
     return fingerprint(files)
 
 

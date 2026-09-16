@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from control_plane_core import (acceptance_contract, goal_projection, risk_rank,
                                 validate_goal_conditions, validate_predicates)
-from reference_runtime.schema_validation import validate_instance
+from control_plane_core.schema import validate_instance
 from . import PROFILE
 from .io import Closed
 
@@ -42,6 +42,7 @@ EVIDENCE = obj({"criterion_id": text(128, 1), "status": enum("covered", "deferre
                 "evidence": text(4000, 1)})
 COMMON = {"verdict": enum("ready", "fix", "replan", "blocked", "need_context"),
           "summary": text(4000, 1), "risk": RISK, "requested_files": PATHS,
+          "requested_searches": array(text(200, 1), 8), "requested_facts": array(text(128, 1), 8),
           "findings": array(obj({"kind": enum("correctness", "architecture", "scope", "testing", "security", "evidence"),
                                   "severity": enum("low", "medium", "high", "critical"),
                                   "description": text(4000, 1)})),
@@ -54,6 +55,14 @@ ROLE_SCHEMAS = {
     "tester": obj({**COMMON, "edits": array(EDIT, 32), "bindings": array(BINDING, 256)}),
     **{name: obj(COMMON) for name in ("chief_plan", "reviewer", "challenge_review", "architect_accept", "chief_accept")},
 }
+
+
+def normalize_role_output(value):
+    # v1 command providers remain compatible; absence cannot grant a fact or
+    # search. New structured providers receive the complete advertised schema.
+    if isinstance(value, dict):
+        value = {"requested_searches": [], "requested_facts": [], **value}
+    return value
 # Predicates and machine conditions are additionally validated by the portable core.
 POLICY_SCHEMA = obj({
     "schema": {"type": "integer", "const": 1}, "profile": {"type": "string", "const": PROFILE},
@@ -75,6 +84,7 @@ POLICY_SCHEMA = obj({
     "publication": obj({"kind": enum("local", "github"), "repository": text(200),
                          "token_env": text(128), "required_checks": array(obj({"name": text(200, 1), "app_id": integer(1, 2**31)}), 32)}),
 })
+POLICY_SCHEMA["properties"]["adaptive_agent_graph"] = {"type": "boolean"}
 CRITERION = obj({"id": text(128, 1), "text": text(4000, 1),
                  "kind": enum("behavior", "compatibility", "documentation", "ci", "delivery"),
                  "paths": PATHS, "targets": array(enum("candidate", "integration"), 2)})
@@ -124,8 +134,6 @@ def validate_configuration(policy, goal):
         criteria(item)
         if policy["publication"]["kind"] == "local" and any(row["kind"] == "ci" for row in item["acceptance"]):
             raise Closed("CI obligations require a configured GitHub provider")
-        if not any(row["kind"] in {"behavior", "compatibility"} for row in item["acceptance"]):
-            raise Closed("Operational items require at least one executable test criterion")
     cases = policy["execution"]["cases"]
     if len({case["id"] for case in cases}) != len(cases):
         raise Closed("CLI case identities must be unique")

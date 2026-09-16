@@ -5,10 +5,11 @@ import copy
 from pathlib import Path
 import uuid
 from control_plane_core import (CoreError, context_checkpoint, context_files, context_view,
-    evaluate_goal_conditions, fingerprint, goal_projection, next_phase, recovery_actions,
+    evaluate_goal_conditions, fingerprint, goal_projection, recovery_actions,
     risk_rank)
-from reference_runtime.schema_validation import SchemaValidationError
-from .contracts import ROLE_SCHEMAS, criteria, validate_configuration
+from control_plane_core.schema import SchemaValidationError
+from .context import requested_context, role_view
+from .contracts import ROLE_SCHEMAS, criteria, validate_configuration, normalize_role_output
 from .git import GitRepository
 from .github import GitHub
 from .io import Closed, Unavailable, canonical, locked
@@ -70,7 +71,8 @@ class Controller:
 
     def advance(self, phase=None):
         old = phase or self.task["phase"]
-        self.task["phase"] = next_phase(old, level="high", challenge=self.policy["challenge"])
+        from .workflow import transition
+        transition(self, {"kind": "advance"}, old)
 
     def hold(self, reason, *, kind="FAILED", approvable=False):
         self.state.update(status="NEEDS_DECISION" if approvable else kind, reason=reason)
@@ -82,7 +84,8 @@ class Controller:
         limits = self.policy["limits"]
         if task.get("context_rounds", 0) >= limits["context_rounds"]:
             raise Closed("Context/protocol round budget exhausted")
-        revision = fingerprint({"head": task["head"], "spec": task.get("spec_hash", self.state["policy_hash"])})
+        revision = fingerprint({key: task.get(key) for key in ("head", "base", "spec_hash", "goal_hash")} |
+                               {"authority": self.state["policy_hash"]})
         memory = task.setdefault("memory", {})
         previous = context_view(memory, phase, revision)
         required = task.get("context", [])
@@ -91,8 +94,7 @@ class Controller:
         paths, omitted = context_files(required, task.get("requested_files", []),
                                        list(previous.get("sources", {})), limits["context_files"])
         sources = self.repo.context(task["head"], paths, limits["context_bytes"])
-        payload = {"phase": phase, "goal": self.goal, "task": {key: value for key, value in task.items()
-                   if key not in {"memory", "proposal", "frozen_tests"}},
+        payload = {"phase": phase, "goal": self.goal, "task": role_view(task, phase),
                    "sources": sources, "omitted_paths": omitted, "memory": previous,
                    "authority": {key: self.policy[key] for key in ("allowed_paths", "test_paths", "protected_paths")},
                    "criteria": criteria(self.item()) if self.task else [], **(extra or {})}
@@ -104,22 +106,27 @@ class Controller:
             task["context_rounds"] = task.get("context_rounds", 0) + 1
             task.setdefault("feedback", []).append({"kind": "protocol", "detail": result["protocol_error"]})
             return None
-        output = result["result"]
+        output = normalize_role_output(result["result"])
         # Validate here too: alternative in-process adapters have no privileged bypass.
-        from reference_runtime.schema_validation import validate_instance
+        from control_plane_core.schema import validate_instance
         validate_instance(output, ROLE_SCHEMAS[phase])
         memory[phase] = context_checkpoint(previous, revision=revision, phase=phase,
-            summary=output["summary"], sources=sources, requests=output["requested_files"], facts={},
+            summary=output["summary"], sources=sources, requests={key: output[key] for key in ("requested_files", "requested_searches", "requested_facts")},
+            facts=task.get("external_facts", {}),
             turn_id=str(task["turn"]))
         if output["verdict"] == "need_context":
-            if not output["requested_files"] or memory[phase]["repeats"] >= 2:
+            if memory[phase]["repeats"] >= 2:
                 raise Closed("Context request makes no progress")
-            task["requested_files"] = output["requested_files"]
+            try:
+                requested_context(self, task, output)
+            except Closed as exc:
+                task.setdefault("feedback", []).append({"kind": "context_protocol", "detail": str(exc)})
             task["context_rounds"] = task.get("context_rounds", 0) + 1
             return None
         task["requested_files"], task["context_rounds"] = [], 0
         task.setdefault("role_results", {})[phase] = {"summary": output["summary"], "head": task["head"],
-                                                     "verdict": output["verdict"]}
+                                                     "verdict": output["verdict"], "base": task["base"],
+                "spec_hash": task.get("spec_hash"), "acceptance_evidence": output["acceptance_evidence"]}
         return output
 
     def reconcile(self):
@@ -151,7 +158,7 @@ class Controller:
         self.state["task"] = {"id": item["id"], "goal_id": self.goal["id"], "goal_hash": fingerprint(self.goal),
             "phase": "baseline", "base": head, "head": head, "spec_hash": fingerprint(item),
             "risk": max((item["risk"], self.state.get("carried_risks", {}).get(item["id"], "low")), key=risk_rank), "context": item["context"], "attempt": attempt, "repairs": 0, "turn": 0,
-            "feedback": [], "memory": {}, "role_results": {}, "working_set": [],
+            "feedback": [], "memory": {}, "role_results": {}, "working_set": [], "completed_phases": [],
             "frozen_tests": self.state.get("carried_tests", {}).get(item["id"])}
         self.state["discovery"] = None
 
@@ -194,7 +201,8 @@ class Controller:
     def summary(self):
         task = self.task or {}
         return {"run_id": self.state["run_id"], "status": self.state["status"], "phase": self.state["phase"],
-                "item": task.get("id"), "head": task.get("head"), "merge_sha": task.get("merge_sha"),
+                "item": task.get("id"), "head": task.get("head", self.state["base"]),
+                "merge_sha": task.get("merge_sha", (self.state["archive"][-1].get("merge_sha") if self.state["archive"] else None)),
                 "completed": self.state["completed"], "model_calls": self.state["model_calls"],
                 "reason": self.state.get("reason"), "approval": task.get("approval_required"),
                 "pending_effect": (self.state.get("pending") or {}).get("id"),

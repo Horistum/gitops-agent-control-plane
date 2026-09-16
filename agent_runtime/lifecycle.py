@@ -5,8 +5,9 @@ from control_plane_core import (acceptance_evidence, completion_transition, eval
     fingerprint, merge_authority, path_allowed, require_merge_identity, require_revision_identity,
     test_criteria, test_failure_kind, verification_transition)
 from .contracts import criteria
-from .io import Closed, Unavailable, digest
+from .io import Closed, Unavailable
 from .roles import repair
+from .workflow import require_evidence, transition
 
 
 def observe(engine, phase, head, *, external=False):
@@ -29,8 +30,10 @@ def frozen_intact(engine, head):
 def observations(engine, receipt, stage):
     task = engine.task
     bindings = task["frozen_tests"]["bindings"]
-    test_results = acceptance_evidence([row["id"] for row in test_criteria(criteria(engine.item()))],
-                                       bindings, task["independent_baseline"], receipt)
+    executable = test_criteria(criteria(engine.item()))
+    test_results = (acceptance_evidence([row["id"] for row in executable],
+                                       bindings, task["independent_baseline"], receipt) if executable else
+                    {"passed": receipt["passed"] is True, "rows": [], "contract": "verification-evidence/v1"})
     if not test_results["passed"] or not preserved(task, receipt):
         raise Closed("Independent evidence or retained baseline identities failed")
     result = {}
@@ -54,7 +57,7 @@ def verification_step(engine):
     if phase == "independent_baseline":
         tests = task["frozen_tests"] or task["proposed_tests"]
         result = engine.store.effect("negative-control-commit", {"base": task["base"], "tests": tests},
-            lambda identity: {"head": engine.repo.commit(task["base"], tests["edits"], identity,
+            lambda identity: {"head": task["base"] if not tests["edits"] else engine.repo.commit(task["base"], tests["edits"], identity,
                 allowed=engine.policy["test_paths"], protected=engine.policy["protected_paths"], additions_only=True,
                 maximum=engine.policy["limits"]["edit_bytes"])})
         receipt = observe(engine, phase, result["head"])
@@ -82,7 +85,10 @@ def verification_step(engine):
             engine.hold("Original product baseline failed; no model implementation can repair undeclared work")
             return
         task["baseline"] = receipt
-        task["phase"] = verification_transition(phase, True)
+        transition(engine, {"kind": "verification", "passed": True})
+        if task.get("saved_candidate"):
+            task["head"] = task.pop("saved_candidate")
+            task["phase"] = "verify"
         return
     if not receipt["passed"] or not preserved(task, receipt):
         target = verification_transition(phase, False, failure_kind=test_failure_kind(receipt))
@@ -115,14 +121,30 @@ def candidate_gate(engine):
     frozen_paths = {row["path"] for row in task["frozen_tests"]["edits"]}
     if set(engine.repo.changed(task["base"], task["head"])) - set(task["working_set"]) - frozen_paths:
         raise Closed("Final diff exceeds the current architect working set")
-    required = ["reviewer", "architect_accept", "chief_accept"] + (["challenge_review"] if engine.policy["challenge"] else [])
-    for phase in required:
-        review = task["role_results"].get(phase, {})
-        if review.get("head") != task["head"] or review.get("verdict") != "ready":
-            raise Closed("Missing current model review: " + phase)
+    require_evidence(engine)
     current = engine.repo.remote_base() if engine.github else engine.repo.resolve(engine.policy["base_branch"])
-    if current != task["base"]:
-        raise Closed("Base moved; replan/rebase must invalidate old evidence before publication or merge")
+    if current != task["base"] or task.get("base_refresh"):
+        refresh_base(engine, current)
+        return False
+    return True
+
+
+def refresh_base(engine, observed):
+    task = engine.task
+    if not task.get("base_refresh"):
+        if task.get("base_refreshes", 0) >= engine.policy["limits"]["repairs"]:
+            raise Closed("Base refresh budget exhausted")
+        if engine.repo.command("merge-base", "--is-ancestor", task["head"], observed, check=False).returncode == 0:
+            raise Closed("Base moved into candidate history without a verified owned merge")
+        task["base_refresh"] = {"head": task["head"], "base": task["base"], "target": observed}
+        engine.store.save()
+    intent = task["base_refresh"]
+    result = engine.store.effect("refresh-base", intent, lambda identity:
+        {"head": engine.repo.refresh_base(intent["head"], intent["target"], identity)})
+    task.update(head=intent["target"], base=intent["target"], saved_candidate=result["head"],
+                base_refreshes=task.get("base_refreshes", 0) + 1)
+    transition(engine, {"kind": "base_changed"})
+    task.pop("base_refresh")
 
 
 def lifecycle_step(engine):
@@ -130,18 +152,20 @@ def lifecycle_step(engine):
     if phase in {"baseline", "verify", "independent_baseline", "independent_verify"}:
         verification_step(engine)
     elif phase == "publish":
-        candidate_gate(engine)
+        if not candidate_gate(engine):
+            return
         if engine.github:
             branch = "agent/" + engine.state["run_id"] + "/" + task["id"] + "/" + str(task["attempt"])
             task["pr"] = engine.store.effect("publish", {"head": task["head"], "base": task["base"], "branch": branch},
                 lambda _: engine.github.publish(engine.repo, branch, task["base"], task["head"], engine.item()["description"]))
         engine.advance()
     elif phase == "ci":
-        candidate_gate(engine)
+        if not candidate_gate(engine):
+            return
         if engine.github:
             task["ci_evidence"] = engine.github.checks(task["head"])
             if task["ci_evidence"].get("failed"):
-                engine.hold("Trusted candidate CI failed; diagnose the check before retry/replan")
+                repair(engine, "developer", {"phase": "ci", "checks": task["ci_evidence"]})
                 return
             if not task["ci_evidence"]["passed"]:
                 raise Unavailable("Waiting for exact candidate trusted checks")
@@ -159,12 +183,16 @@ def lifecycle_step(engine):
         task["obligations"] = evaluate_obligations(criteria(engine.item()), results, stage="integration")
         if not task["obligations"]["passed"]:
             raise Closed("Integration-stage acceptance is incomplete")
+        task["integration_obligations"] = task["obligations"]
+        require_evidence(engine, "integration")
         engine.advance()
     elif phase == "merge":
         # An uncertain remote merge must be reconciled before comparing a now-moved base.
         pending_merge = (engine.state.get("pending") or {}).get("kind") == "merge"
         if not pending_merge and not task.get("merge_sha"):
-            candidate_gate(engine)
+            if not candidate_gate(engine):
+                return
+        require_evidence(engine, "integration")
         critical = any(path_allowed(path, engine.policy["critical_paths"]) for path in engine.repo.changed(task["base"], task["head"]))
         authority = merge_authority(task["risk"], risk_ceiling=engine.goal["risk_ceiling"],
                                     auto_merge_ceiling=engine.goal["auto_merge_ceiling"], critical=critical)
@@ -184,10 +212,12 @@ def lifecycle_step(engine):
         merged = engine.repo.fetch_merge(result["sha"]) if engine.github else result["sha"]
         require_merge_identity(task["base"], task["head"], engine.repo.parents(merged))
         task["merge_sha"] = merged
+        task["merge_parents"] = engine.repo.parents(merged)
         engine.advance()
     elif phase == "postmerge":
         merged = task["merge_sha"]
         require_merge_identity(task["base"], task["head"], engine.repo.parents(merged))
+        task["merge_parents"] = engine.repo.parents(merged)
         if engine.github:
             task["postmerge_checks"] = engine.github.checks(merged)
             if task["postmerge_checks"].get("failed"):
@@ -219,8 +249,10 @@ def lifecycle_step(engine):
         task.update(postmerge_evidence=receipt, acceptance=evidence, obligations=obligations)
         engine.state["criteria"][task["id"]] = results
         engine.state["cli_cases"] = {key: row["passed"] for key, row in receipt["cli"].items()}
+        require_evidence(engine, "postmerge")
         engine.advance()
     elif phase == "done":
+        require_evidence(engine, "postmerge")
         result = completion_transition([row["id"] for row in engine.goal["items"]], engine.state["completed"], task["id"],
             merge_sha=task["merge_sha"], verification_passed=task["postmerge_evidence"]["passed"] and task["obligations"]["complete"])
         engine.state["completed"] = result["completed"]

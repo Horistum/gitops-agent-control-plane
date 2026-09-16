@@ -25,6 +25,9 @@ class FakeGitHubService:
         self.after_publish_failure=False; self.after_merge_failure=False
         self.after_close_failure=False; self.closes=0; self.merge_on_close=False
     def __call__(self,path,method,body):
+        if self.pr and self.pr['state'] == 'open':
+            self.pr['head']['sha'] = self.remote.resolve(self.branch)
+            self.pr['base']['sha'] = self.remote.resolve('main')
         if path.endswith('/protection'):
             return {'required_status_checks':{'strict':True,'checks':[{'context':'tests','app_id':15368}]},
                     'required_pull_request_reviews':{'required_approving_review_count':0},
@@ -36,6 +39,7 @@ class FakeGitHubService:
         if '/pulls?' in path: return [self.pr] if self.pr else []
         if path.endswith('/pulls') and method=='POST':
             self.posts+=1
+            self.branch=body['head']
             self.pr={'number':1,'html_url':'https://github.com/owner/product/pull/1','state':'open','draft':False,
                      'head':{'sha':self.remote.resolve(body['head']),'repo':{'full_name':'owner/product'}},
                      'base':{'sha':self.remote.resolve('main'),'ref':'main','repo':{'full_name':'owner/product'}},
@@ -69,6 +73,34 @@ class OperationalAdapterTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name);self.product=self.root/'product';build_product(self.product)
         self.policy=policy(self.product)
+
+    def test_failed_candidate_ci_repairs_and_extends_same_pr_without_replacing_frozen_tests(self):
+        remote=self.root/'repair-remote.git'
+        run(['git','clone','--bare',str(self.product),str(remote)])
+        engine=Controller.start(self.root/'repair-run',self.policy,goal(),trusted_local=True)
+        engine.repo.text('remote','set-url','origin',str(remote))
+        service=FakeGitHubService(GitRepository(remote,'main'))
+        failed=[]
+        def transport(path,method,body):
+            result=service(path,method,body)
+            if '/check-runs?' in path:
+                head=path.split('/commits/')[1].split('/')[0]
+                if not failed: failed.append(head)
+                if head == failed[0]: result['check_runs'][0]['conclusion']='failure'
+            return result
+        publication={'repository':'owner/product','token_env':'GH_TOKEN','required_checks':[{'name':'tests','app_id':15368}]}
+        provider=InProcessProvider()
+        for _ in range(100):
+            engine=Controller(engine.root,reasoning=provider,github=GitHub(publication,'main',transport=transport))
+            result=engine.tick()
+            if result['status']!='RUNNING': break
+        self.assertEqual(result['status'],'COMPLETED',result)
+        self.assertEqual(service.posts,1); self.assertEqual(service.merges,1)
+        self.assertEqual(len([p for p in provider.calls if p['phase']=='tester']),1)
+        self.assertEqual(len([p for p in provider.calls if p['phase']=='developer']),2)
+        task=engine.state['archive'][0]
+        engine.repo.text('merge-base','--is-ancestor',failed[0],task['head'])
+        self.assertEqual(task['repairs'],1)
 
     def test_retirement_recovers_lost_close_and_reconciles_concurrent_merge(self):
         for merge_on_close in (False, True):

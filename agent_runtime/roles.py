@@ -5,27 +5,25 @@ from control_plane_core import (evidence_status_valid, fingerprint, merge_author
                                 repair_target, risk_rank, test_criteria, validate_bindings)
 from .contracts import criteria
 from .io import Closed
+from .workflow import transition
 
 
 def repair(engine, target, feedback):
     task = engine.task
-    if task.get("merge_sha") or task.get("pr"):
-        raise Closed("Published/merged candidate requires reconciliation before a new attempt")
+    if task.get("merge_sha"):
+        raise Closed("Merged candidate requires explicit remediation authority")
     if task["repairs"] >= engine.policy["limits"]["repairs"]:
         raise Closed("Bounded repair budget exhausted")
     task["repairs"] += 1
     task["feedback"].append(feedback)
-    task["phase"] = target
-    task.pop("approval", None)
-    for name in ("candidate_evidence", "ci_evidence", "acceptance", "obligations"):
-        task.pop(name, None)
-    for phase in ("reviewer", "challenge_review", "architect_accept", "chief_accept"):
-        task["role_results"].pop(phase, None)
+    transition(engine, {"kind": "repair", "target": target})
 
 
 def role_step(engine):
     task, policy = engine.task, engine.policy
     phase = task["phase"]
+    if transition(engine, {"kind": "risk"})["phase"] != phase:
+        return
     if phase == "tester" and task["frozen_tests"]:
         edits = task["frozen_tests"]["edits"]
         if all(engine.repo.read(task["head"], row["path"]) == row["content"].encode() for row in edits):
@@ -39,7 +37,9 @@ def role_step(engine):
     output = engine.model(phase, task)
     if output is None:
         return
-    task["risk"] = max((task["risk"], output["risk"]), key=risk_rank)
+    assessed = max([output["risk"]] + ["high" if row["severity"] == "critical" else row["severity"]
+                   for row in output["findings"]], key=risk_rank)
+    routed = transition(engine, {"kind": "risk", "risk": assessed})
     authority = merge_authority(task["risk"], risk_ceiling=engine.goal["risk_ceiling"],
                                 auto_merge_ceiling=engine.goal["auto_merge_ceiling"])
     if authority["blocked"]:
@@ -54,6 +54,8 @@ def role_step(engine):
         return
     if output["verdict"] != "ready":
         raise Closed("Unsupported role transition")
+    if routed["phase"] != phase:
+        return
     if phase in {"reviewer", "challenge_review", "architect_accept", "chief_accept"}:
         expected = criteria(engine.item())
         rows = output["acceptance_evidence"]
@@ -68,6 +70,7 @@ def role_step(engine):
                                  [".github/*", ".agent-control/*", "AGENTS.md"]) for path in working):
             raise Closed("Architect working set exceeds source authority")
         task["working_set"], task["plan"] = working, output["steps"]
+        task["critical"] = task.get("critical", False) or any(path_allowed(p, policy["critical_paths"]) for p in working)
     elif phase == "test_design":
         ids = {row["id"] for row in test_criteria(criteria(engine.item()))}
         if {row["criterion_id"] for row in output["scenarios"]} != ids:
@@ -75,7 +78,11 @@ def role_step(engine):
         task["test_design"] = output["scenarios"]
     elif phase in {"developer", "tester"}:
         if phase == "tester":
-            validate_bindings([row["id"] for row in test_criteria(criteria(engine.item()))], output["bindings"])
+            executable = test_criteria(criteria(engine.item()))
+            if executable:
+                validate_bindings([row["id"] for row in executable], output["bindings"])
+            elif output["bindings"] or output["edits"]:
+                raise Closed("Non-executable criteria must not invent acceptance test bindings")
             for criterion in test_criteria(criteria(engine.item())):
                 modes = {row["mode"] for row in output["bindings"] if row["criterion_id"] == criterion["id"]}
                 if ((criterion["kind"] == "behavior" and "new_behavior" not in modes)
@@ -95,7 +102,7 @@ def apply_step(engine):
     edits = output["edits"]
     protected = policy["protected_paths"] + ([] if tester else policy["test_paths"])
     request = {"parent": task["head"], "edits": edits, "role": role}
-    result = engine.store.effect("commit", request, lambda identity: {"head": engine.repo.commit(
+    result = engine.store.effect("commit", request, lambda identity: {"head": task["head"] if not edits and tester else engine.repo.commit(
         task["head"], edits, identity, allowed=policy["test_paths"] if tester else policy["allowed_paths"],
         protected=protected, working_set=None if tester else task["working_set"],
         additions_only=tester, maximum=policy["limits"]["edit_bytes"])})

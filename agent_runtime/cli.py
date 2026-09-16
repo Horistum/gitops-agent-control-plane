@@ -77,7 +77,9 @@ def main(argv=None):
             state = Store(args.state).state
             task = state.get("task") or {}
             print(json.dumps({"status": state["status"], "phase": state["phase"], "paused": state["paused"],
-                              "item": task.get("id"), "head": task.get("head"), "completed": state["completed"],
+                              "item": task.get("id"), "head": task.get("head", state["base"]),
+                              "merge_sha": task.get("merge_sha", (state["archive"][-1].get("merge_sha") if state["archive"] else None)),
+                              "completed": state["completed"],
                               "reason": state.get("reason"), "approval": task.get("approval_required"),
                               "pending_effect": (state.get("pending") or {}).get("id")}))
         elif args.command == "upgrade":

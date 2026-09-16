@@ -336,6 +336,9 @@
         "required_checks"
       ],
       "additionalProperties": false
+    },
+    "adaptive_agent_graph": {
+      "type": "boolean"
     }
   },
   "required": [
