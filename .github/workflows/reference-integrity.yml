@@ -34,3 +34,44 @@ jobs:
       - name: Preserve happy-path showcase in logs
         if: matrix.python == '3.13'
         run: ./scripts/agentctl demo happy-path
+
+  operational-container:
+    name: operational-rootless-podman
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install rootless execution prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs
+      - name: Prepare the test image and run the real isolated lifecycle
+        run: |
+          podman pull docker.io/library/python:3.12-slim
+          test_image="$(podman image inspect docker.io/library/python:3.12-slim --format '{{index .RepoDigests 0}}')"
+          python -S scripts/check_podman_runtime.py --image "$test_image"
+
+  operational-package:
+    name: operational-installed-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and install the complete distribution
+        run: |
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/wheels" .
+          python -m pip install --no-deps --target "$RUNNER_TEMP/installed" "$RUNNER_TEMP"/wheels/*.whl
+      - name: Run the complete lifecycle from installed bytes outside the checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          PYTHONPATH="$RUNNER_TEMP/installed:$GITHUB_WORKSPACE/tests" python -S -m unittest test_operational_runtime.OperationalRuntimeTests.test_real_subprocess_provider_git_tests_two_item_goal_and_retained_regressions -v
+      - name: Check the actual Codex CLI contract without model credentials
+        run: |
+          npm install --global @openai/codex@0.153.4
+          python -S -c 'from agent_runtime.reasoning import Reasoning; print(Reasoning({"kind":"codex", "argv":["codex"]}).preflight())'

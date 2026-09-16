@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "id": "GOAL-1",
+  "objective": "Implement the approved value behavior",
+  "risk_ceiling": "high",
+  "auto_merge_ceiling": "none",
+  "items": [
+    {
+      "id": "TASK-1",
+      "dependencies": [],
+      "ready": true,
+      "risk": "low",
+      "description": "Return 2 from value()",
+      "context": [
+        "app.py",
+        "tests/test_base.py",
+        "tools/test.py"
+      ],
+      "acceptance": [
+        {
+          "id": "AC-1",
+          "text": "value returns 2",
+          "kind": "behavior",
+          "paths": [],
+          "targets": []
+        }
+      ]
+    }
+  ],
+  "machine_conditions": [
+    {
+      "id": "healthy",
+      "kind": "cli_case",
+      "case": "positive"
+    },
+    {
+      "id": "behavior",
+      "kind": "criterion",
+      "item": "TASK-1",
+      "criterion": "AC-1"
+    }
+  ]
+}

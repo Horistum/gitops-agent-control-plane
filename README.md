@@ -1,33 +1,70 @@
-# GitOps Agent Control Plane Reference
+# GitOps Agent Control Plane
 
-**A portable decision library and a deterministic executable reference for bounded
-software delivery through Git. Initiated and maintained by the Horistum project.**
+**A reusable decision core and an executable controller for bounded software
+delivery through Git, maintained by the Horistum project.**
 
-Use `control_plane_core` in a controller to share authority, phase, acceptance and
-evidence decisions. Run the bundled reference to inspect real local Git effects,
-verification, repair and crash recovery with prepared inputs.
+Version 1.4.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+real proposals from Codex or a configured JSON command provider, applies bounded
+edits, executes tests in rootless Podman, reviews the actual candidate, publishes
+a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
+The shared `control_plane_core` owns the phase, authority and acceptance decisions.
 
-**The bundled reasoning roles are trusted deterministic fixtures. This repository
-does not call an AI model or autonomously write arbitrary product code.** Its
-architect emits a bounded template; its reviewer computes a checklist; its repair
-scenario consumes a prepared next proposal. Tests demonstrate controller behavior
-and finite negative properties. They are not a formal proof or evidence of model
-quality. The local executor is not a hostile-code security sandbox.
+The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
+faults and verifier limits. They do not establish AI reasoning quality. Operational
+integration tests execute real Git and processes with controlled reasoning/HTTP
+peers. CI also executes the lifecycle in actual rootless Podman and tests installed
+package bytes. A live authenticated model turn and a particular product deployment
+require their own host evidence; neither is inferred from those tests.
 
-## Deliverables and ownership
+## Run on your product
 
-| Component | Responsibility | Evidence |
-|---|---|---|
-| `control_plane_core` | Reusable pure authority, execution, acceptance and verification decisions | Shared conformance vectors and public adapter integration tests |
-| `reference_runtime` | Trusted local fixture profile with exact Git identity and durable effects | Full loop, negative, repair and fault-injection scenarios |
-| Consumer runtime, including `Horistum/FlowAi-control` | Model calls, authenticated provider observations, isolation and deployment | Its own integration tests and live host gates |
+Python 3.11+, Git, a supported Codex CLI and a prepared rootless Podman image are
+required for the Codex/GitHub profile. Supply a clean product checkout, exact path
+limits, owner-authored commands, trusted CI check identities and explicit item
+acceptance criteria. Examples are in [examples/operational](examples/operational).
 
-The core has no network, credentials, subprocesses or Git write authority. A model
-proposal grants no effect authority. Adapters supply observations; the controller
-validates them and applies the permitted effect. The core is reusable inside an
-existing controller and does not require a separate service.
+```bash
+python3 -m pip install .
+agent-control doctor --policy /absolute/policy.json --goal /absolute/goal.json
+agent-control start --policy /absolute/policy.json --goal /absolute/goal.json \
+  --state /absolute/agent-runs/my-goal
+agent-control status --state /absolute/agent-runs/my-goal
+agent-control resume --state /absolute/agent-runs/my-goal
+```
 
-## Start here
+The same interface is available from the checkout as `./scripts/agentctl run`.
+`resume` continues durable state; it does not start a fresh model conversation for
+an already recorded effect. The state directory contains private source/proposal
+receipts and must remain outside the product checkout.
+
+A model may request more files, propose implementation or independent tests, and
+reject an actual candidate during review. It cannot execute tools, choose build
+commands, widen goal authority or approve a merge. Human approval, when required
+by the configured risk and merge limits, names the exact current candidate binding.
+
+The [operations guide](docs/OPERATIONS.md) covers setup, execution, approval,
+recovery, image preparation and safe runtime upgrades. Local-only execution is
+available for owner-trusted code with an explicit `--trusted-local` opt-in. It
+cannot publish to GitHub. Its output is the run-owned `product.git`; it does not
+modify the source checkout.
+
+## Components and ownership
+
+| Component | Responsibility |
+|---|---|
+| `control_plane_core` | Portable pure decisions; no credentials, network, process or Git effects |
+| `agent_runtime` | Operational reasoning, GitHub, Git, verification, persistence and owner-command adapters |
+| `reference_runtime` | Versioned deterministic fixture profile and property-probe conformance demonstrations |
+| Consumers such as `FlowAi-control` | Product-specific authority formats and service deployment; may reuse the core without running another controller |
+
+The operational runtime drives the shared complete graph, including independent
+baseline, challenge review and chief acceptance. Tests added by the independent
+tester are executed on the original code and the candidate, then retained in the
+merged product. Later items preserve earlier executed test identities and frozen
+assertions. Completion requires staged acceptance and explicit machine goal
+conditions, not a model's success declaration.
+
+## Reproduce controller behavior without credentials
 
 ```bash
 ./scripts/agentctl demo happy-path
@@ -36,36 +73,19 @@ existing controller and does not require a separate service.
 ./scripts/agentctl validate
 ```
 
-Python 3.11+ and Git are required. `loop` runs two dependent items in the bundled
-example: selection, verification, exact merge, release-state transition, and goal
-reconciliation. Completion refers to the declared machine item projection;
-narrative success prose remains reasoning context.
+The fixture loop demonstrates dependency-ready selection, goal reconciliation,
+verification, exact merge, release-state transition and crash recovery. Its repair
+proposal is prepared in advance. The operational runtime obtains each proposal
+from the configured provider instead.
 
-`repair-loop` proves that failed verification produces persisted feedback and a
-bounded retry. The next fixture is prepared in advance. Production providers must
-consume that feedback themselves and require separate verification.
-
-## Preserved guarantees
-
-- Reasoning roles have no direct Git-effect or release-state authority.
-- Proposal paths use the shared allow/protect/deny decision and filesystem checks.
-- Human `approve`, `reject` and `request_changes` act on a durable pause; approval
-  is tied to the exact reviewed SHA.
-- Merge uses exact base/candidate revisions and a compare-and-swap update; both
-  merge parents are verified. A moved branch cannot inherit stale approval.
-- Durable effect identities and Git trailers support idempotent crash recovery.
-- Release progress advances only after independent post-effect verification.
-- JUnit is diagnostic. Protected probes and signed parent receipts establish the
-  local profile's evidence boundary.
-
-`raw-outcome-forgery` remains an executable **KNOWN-LIMIT**: the local fixture
-executor cannot protect observation of arbitrary hostile code in the same
-process. Production arbitrary-code verification requires the consuming runtime's
-stronger isolation and independently protected observations.
+`raw-outcome-forgery` remains an executable **KNOWN-LIMIT** of the trusted local
+property-probe profile. Rootless containers isolate operational execution from
+controller credentials and receipts; finite tests, JUnit and output assertions
+still do not prove arbitrary semantic correctness or defeat a compromised kernel.
 
 ## Contracts
 
-The authored source is [config/contract-set.json](config/contract-set.json).
+The fixture composition's authored source is [config/contract-set.json](config/contract-set.json).
 The following table, policy/schema identities and portable core constant are
 generated with `python3 scripts/generate_contracts.py`; CI rejects drift.
 
@@ -77,6 +97,10 @@ generated with `python3 scripts/generate_contracts.py`; CI rejects drift.
 | verification profile | `property-probe/v6` |
 | runtime profile | `standalone-local/v2` |
 <!-- contracts:end -->
+
+The operational profile is `operational-git/v1`, using the same portable core.
+Policy, goal and role schemas are generated from `agent_runtime/contracts.py`
+with `scripts/generate_runtime_schemas.py`; CI rejects their drift as well.
 
 Library SemVer is separate from these wire identities. All supported decisions
 are exported at the package root and through documented submodules. See the

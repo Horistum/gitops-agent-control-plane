@@ -1,63 +1,64 @@
-# Architectural review remediation — core 1.3.0
+# Architectural review remediation — 1.4.0
 
-The project delivers a portable authority/effect/evidence decision library and a
-trusted deterministic executable reference. It is useful as reusable controller
-logic and an adapter contract, with a deliberately bounded validation claim.
-It does not provide a live AI development service or a new deployment daemon.
+The first remediation, core 1.3.0, repaired library defects and clarified fixture
+scope. It did **not** deliver the working model-driven development controller
+requested in the review. Version 1.4.0 adds that executable runtime while retaining
+the earlier correctness fixes and reproducible fixture demonstrations.
 
-## Findings and implemented corrections
+## Findings, implementation and evidence
 
-| Review finding | Correction | Executable evidence |
+| Review finding | Delivered correction | Executable evidence |
 |---|---|---|
-| Fixture behavior presented as AI autonomy | README opens with fixture scope; plans/checklist/repair and live-provider boundary are explicit | Existing scenarios retain their real meaning; no AI-generation claim |
-| Repeated contract IDs | `config/contract-set.json` is authored once; generator updates policy, schemas, core constant and README | `test_contract_generation.py`; drift gate in `agentctl validate` |
-| Core graph partly unexercised, independent baseline unreachable | `tester` enters `independent_baseline`; all graph levels and challenge paths covered; public local adapter integration and repeatable consumer compatibility gate | `execution_conformance.py`, `test_adapter_integration.py`, `scripts/check_consumer.py` |
-| Inconsistent public API | Complete package-root exports plus explicit supported submodule exports; old submodule imports remain valid | `control_plane_core.conformance`, standalone package import test |
-| Duplicate path gates | BaseEngine has an abstract gate; the composed engine calls the shared core with active role authority | Role-authority tests; historical helper regression |
-| Fragmented documentation | Five primary guides with retained link aliases | README navigation; existing documentation checks |
-| Minimal schema semantics diverged | Strict JSON boolean/number equality, integer-valued numbers, uniqueness, standard regex search, unknown-keyword preflight | Supported-case tests plus required CI comparison against Draft202012Validator |
-| Identity patterns relied on nonstandard implicit anchoring | Published patterns explicitly constrain the full string under standard and local validators | Hash suffix/prefix/newline regressions |
-| Large engine and version-layer ambiguity | Attempt, human, effect and evidence responsibilities extracted; orchestration implementation reduced from 1,241 to about 330 lines | Full reference suite and crash/recovery conformance |
-| Older helpers could run an engine without current role/identity gates | Old run/resume/CLI helpers forward to the public composed engine; no permissive base path fallback | `test_runtime_entrypoints.py` runs denied role authority through all helper entry points |
+| Reasoning roles were hard-coded source fixtures | Codex structured output or an external JSON provider produces every operational role response; no operational fixture selector | Separate-process provider lifecycle; Codex protocol negatives; actual pinned Codex CLI capability check in CI |
+| Real runtime adapters absent | Real Git snapshots/commits, rootless Podman execution, authenticated GitHub publication/check/governance/merge, installed owner CLI | Real Git/process lifecycle; actual Podman CI; HTTP contract peer with real remote Git and lost-write recovery |
+| Complete graph and context/recovery APIs unintegrated | Full shared graph, revision-scoped context, dependency reconciliation, recovery, retirement and upgrades used by operational controller | Two dependent items traverse the complete graph and retain earlier tests; context, recovery and upgrade regressions |
+| Independence and acceptance only isolated vectors | New tests fail on original code and pass on candidate; assertions freeze across repairs/replans; typed CI/delivery obligations defer until observed | Tautology rejection, harness-error hold, real failed implementation repair, future-evidence rejection, retained regressions |
+| Authority and interrupted effects | Exact approval; protected paths; monotonic risk; lifetime call budget; durable receipts; explicit uncertain-call retry; reconcile merged effects before cancellation | Base movement, protected edit, receipt crash, uncertain call, bounded replan/upgrade, lost PR/merge/close and concurrent close/merge cases |
+| Repeated contract identities | One authored fixture manifest and generated projections; operational schemas generated from runtime contracts | Both generators have mandatory drift checks |
+| Inconsistent public API | Complete package-root and explicit submodule exports; pure core remains independently usable | Shared conformance, installed imports, consumer compatibility gate |
+| Duplicate gates and large legacy engine | Shared path decision; extracted attempt, human, lifecycle and evidence responsibilities; old helpers use enforced engine | Original security and entrypoint regressions |
+| Fragmented or overstated documentation | Five primary guides distinguish operational execution, fixtures, pure core and deployment evidence | README/docs consistency checks and this remediation map |
+| JSON Schema semantic differences | Correct boolean/number equality, integer-valued numbers, uniqueness, regex semantics and full-string identities; unknown keywords fail closed | Required comparison against Draft202012Validator for supported cases and all published schemas |
 
-Additional safety corrections reject arbitrary resume points to merge/completion,
-invalid context retention limits, missing acceptance specification identity, and
-candidate errors outside bound tests. Mixed assertion/harness failures route to an
-ambiguous failure instead of confidently attributing the problem to product code.
+Operational modules separate contracts, reasoning, Git, GitHub, verification,
+durable store, roles, lifecycle and owner actions. The core retains no process,
+network, credential or Git effects. A consumer can reuse its decisions without
+deploying the operational CLI.
 
-The schema criticism required precision: using a supported subset does not make
-schemas invalid for standard JSON Schema validators. The actual semantic
-mismatches were repaired; unsupported vocabularies still fail closed locally.
+## Validation and remaining evidence boundaries
 
-## Consumer evidence and migration
+`./scripts/agentctl validate` runs the complete unit/integration suite and 26
+deterministic conformance scenarios. Operational tests execute real edits, test
+failures, repairs, commits and merges. Reasoning and HTTP peers are controlled
+test infrastructure, explicitly located under `tests/`.
 
-The original FlowAi-control suite passed 406 tests. With this core snapshot and an
-accurate temporary source lock, 413 tests passed on Python 3.12. The consumer
-revision, tree and exact core file hashes are preserved in
-[consumer-compatibility.json](../validation/consumer-compatibility.json).
-The extra tests come from the expanded shared conformance modules.
+CI additionally runs the lifecycle in actual rootless Podman, runs the two-item
+lifecycle from an installed wheel outside the checkout, and checks the actual
+pinned Codex CLI contract. These jobs must pass before merging. They do not spend
+a model subscription or publish a test PR in someone else's product repository.
 
-The observed consumer already explicitly chooses its independent-baseline stage
-under its strict verification profile. The shared graph correction therefore
-preserves this consumer's tested behavior. Source compatibility is confirmed for
-the recorded revision; GitHub API responses, Codex turns and production isolation
-still require the consumer's live-host gates.
+The repeatable consumer gate records the exact clean consumer revision and
+current core hashes in [consumer-compatibility.json](../validation/consumer-compatibility.json).
+Publishing this reference does not update Flow's source lock, merge its adoption
+PR or deploy its host. Consumer activation remains a separate operation.
 
-This change updates this reference repository. It does not silently change the
-consumer's source lock, deployed runtime or activation. Adoption remains a
-reviewed source synchronization, consumer CI and host validation operation.
+A live authenticated Codex turn and delivery to an operator's protected GitHub
+product remain installation evidence, not results of test doubles. The
+[operations guide](OPERATIONS.md) provides the runnable path and prerequisites.
+No model quality, universal correctness or deployment success is inferred from
+a passing test suite.
 
-## Validation commands
+The local property-probe `raw-outcome-forgery` KNOWN-LIMIT remains reproduced.
+Rootless containers protect the controller boundary; candidate-written JUnit can
+still lie about candidate behavior. Parent-observed process assertions, protected
+verifier code, counterfactual tests and review reduce this risk within the finite
+declared scope. See [verification](VERIFICATION.md).
 
 ```bash
 ./scripts/agentctl validate
 python3 -m pip install -r requirements-test.txt
 PYTHONPATH=. python3 tests/test_schema_interoperability.py --require-reference -v
+python3 scripts/check_podman_runtime.py --image PINNED_IMAGE
 python3 scripts/check_consumer.py --consumer ../FlowAi-control \
   --expected-commit FULL_CONSUMER_SHA --output consumer-compatibility.json
 ```
-
-The local fixture executor's `raw-outcome-forgery` KNOWN-LIMIT remains reproduced.
-A green scenario suite means the limitation is correctly characterized, not that
-hostile arbitrary code has become isolated. No theorem-proving or live-model
-validation claim is made.

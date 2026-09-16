@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "profile": "operational-git/v1",
+  "product": "/absolute/path/to/product",
+  "base_branch": "main",
+  "allowed_paths": [
+    "app.py",
+    "README.md"
+  ],
+  "test_paths": [
+    "tests/test_*.py"
+  ],
+  "protected_paths": [
+    "tools/*"
+  ],
+  "critical_paths": [],
+  "risk_ceiling": "high",
+  "auto_merge_ceiling": "low",
+  "challenge": true,
+  "limits": {
+    "model_calls": 64,
+    "repairs": 3,
+    "context_rounds": 6,
+    "context_files": 24,
+    "context_bytes": 100000,
+    "edit_bytes": 100000
+  },
+  "reasoning": {
+    "kind": "codex",
+    "argv": [
+      "codex"
+    ],
+    "model": "",
+    "codex_home": "/absolute/path/to/authenticated-codex-home",
+    "timeout": 900
+  },
+  "execution": {
+    "kind": "podman",
+    "image": "docker.io/library/python@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "commands": [
+      [
+        "python3",
+        "tools/test.py"
+      ]
+    ],
+    "junit": [
+      "results/*.xml"
+    ],
+    "min_tests": 1,
+    "timeout": 30,
+    "memory_mb": 512,
+    "cpus": 1,
+    "cases": [
+      {
+        "id": "positive",
+        "argv": [
+          "python3",
+          "-c",
+          "from app import value; print(value()>0)"
+        ],
+        "predicates": [
+          {
+            "id": "exit",
+            "op": "exit_code",
+            "expected": 0
+          },
+          {
+            "id": "positive",
+            "op": "stdout_equals",
+            "expected": "True\n"
+          }
+        ]
+      }
+    ]
+  },
+  "publication": {
+    "kind": "github",
+    "repository": "OWNER/REPOSITORY",
+    "token_env": "GH_TOKEN",
+    "required_checks": [
+      {
+        "name": "tests",
+        "app_id": 15368
+      }
+    ]
+  }
+}

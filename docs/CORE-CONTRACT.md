@@ -10,6 +10,24 @@ Risk review may return to `developer` or `verify`; an arbitrary saved return poi
 cannot jump to publication, merge or completion. Consumers that implement their
 own profile-specific graph must establish equivalent preconditions explicitly.
 
+## Operational profile
+
+`agent_runtime` drives the complete shared graph for every item. Owner-held policy
+and goal JSON snapshots define paths, risk and merge ceilings, dependencies, typed
+acceptance, budgets, executable commands, providers and `machine_conditions`.
+Product edits and model output cannot change these snapshots.
+
+The owner account authenticates CLI actions. Approval binds exact base, candidate,
+specification, risk, policy, runtime and run identity. Replan reconciles a published
+PR and preserves frozen tests and risk. Cancel reconciles and verifies any observed
+merge before stopping. Retrying does not reset the lifetime call budget. See
+[OPERATIONS.md](OPERATIONS.md) for the command contract.
+
+The remaining artifact names and `approve`/`reject`/`request_changes` examples
+document the retained deterministic fixture contract. Its `release-state.json`,
+human identity and property probes are not the operational run ledger. Both
+profiles implement the same authority invariants.
+
 ## core-contract
 
 Contract: the core contract (see the [generated table](../README.md#contracts)).
@@ -37,7 +55,7 @@ Goal inputs distinguish executable authority from prose:
 - `forbidden_paths` is an `enforced_constraint`;
 - `objective`, `success_condition`, and `forbidden_directions` are `reasoning_context`.
 
-`success_condition` is intentionally **not** an executable predicate in v1. The standalone engine computes `goal-evaluation.satisfied` from requested items versus controller-owned release state. Core library 1.1.0 separately provides `verification-evidence/v1` typed conditions; Flow consumes these through explicit `machine_conditions`. This extension never interprets prose or arbitrary expressions as executable authority.
+`success_condition` is intentionally **not** an executable predicate in the fixture contract. That engine computes `goal-evaluation.satisfied` from requested items versus controller-owned release state. The core also provides typed conditions through `verification-evidence/v1`; the public operational runtime and Flow consume them through explicit `machine_conditions`. Prose is never interpreted as executable authority.
 
 ### Reasoning-role protocols
 

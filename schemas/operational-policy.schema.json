@@ -1,0 +1,359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Horistum/gitops-agent-control-plane/schemas/operational-policy.schema.json",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "const": 1
+    },
+    "profile": {
+      "type": "string",
+      "const": "operational-git/v1"
+    },
+    "product": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "base_branch": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "test_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "protected_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "critical_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "minItems": 0,
+      "maxItems": 128
+    },
+    "risk_ceiling": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "auto_merge_ceiling": {
+      "type": "string",
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "challenge": {
+      "type": "boolean"
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "model_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "repairs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "context_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "context_files": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "context_bytes": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1000000
+        },
+        "edit_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000000
+        }
+      },
+      "required": [
+        "model_calls",
+        "repairs",
+        "context_rounds",
+        "context_files",
+        "context_bytes",
+        "edit_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "reasoning": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "command"
+          ]
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "model": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "codex_home": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        }
+      },
+      "required": [
+        "kind",
+        "argv",
+        "model",
+        "codex_home",
+        "timeout"
+      ],
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "podman",
+            "trusted-local"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "minItems": 1,
+            "maxItems": 64
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "junit": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "min_tests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7200
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 65536
+        },
+        "cpus": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "predicates": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "minItems": 1,
+                "maxItems": 256
+              }
+            },
+            "required": [
+              "id",
+              "argv",
+              "predicates"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "kind",
+        "image",
+        "commands",
+        "junit",
+        "min_tests",
+        "timeout",
+        "memory_mb",
+        "cpus",
+        "cases"
+      ],
+      "additionalProperties": false
+    },
+    "publication": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "local",
+            "github"
+          ]
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "token_env": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128
+        },
+        "required_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "app_id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483648
+              }
+            },
+            "required": [
+              "name",
+              "app_id"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "kind",
+        "repository",
+        "token_env",
+        "required_checks"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "profile",
+    "product",
+    "base_branch",
+    "allowed_paths",
+    "test_paths",
+    "protected_paths",
+    "critical_paths",
+    "risk_ceiling",
+    "auto_merge_ceiling",
+    "challenge",
+    "limits",
+    "reasoning",
+    "execution",
+    "publication"
+  ],
+  "additionalProperties": false
+}

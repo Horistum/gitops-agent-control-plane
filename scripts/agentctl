@@ -9,6 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/agentctl <command> [args...]
 
+  run <start|resume|status|doctor|...>  Run the operational controller
   demo [scenario|all]    Run showcase scenarios
   loop [scenario]        Run fixture control loop (default autonomous-two-item)
   conformance            Run all conformance scenarios
@@ -55,6 +56,9 @@ main() {
   case "$command" in
     help|-h|--help)
       usage
+      ;;
+    run)
+      exec "$PYTHON" -S -m agent_runtime "$@"
       ;;
     demo)
       run_demo "$@"

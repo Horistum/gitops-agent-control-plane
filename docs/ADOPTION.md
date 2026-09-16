@@ -2,7 +2,7 @@
 
 ## Supported API
 
-Core library 1.3.0 exposes all supported decisions from `control_plane_core` and
+Core library 1.4.0 exposes all supported decisions from `control_plane_core` and
 from `decisions`, `execution`, `acceptance`, and `verification`. Each module has an
 explicit `__all__`; submodule imports remain supported. The source package has
 no runtime dependencies and needs no reference repository configuration when
@@ -12,6 +12,12 @@ The role graph now includes the independent baseline before independent candidat
 verification. Missing specification identity and candidate test errors fail
 acceptance. These are safety corrections; run consumer tests before updating its
 pinned source bytes.
+
+The distribution also installs `agent_runtime` and `agent-control`. Use it for
+the operational lifecycle in [OPERATIONS.md](OPERATIONS.md), or import only the
+pure core in an existing controller. Core adoption does not require another
+controller. Operational execution integrates the shared full graph, typed
+acceptance, bounded context, recovery, retirement and upgrade decisions.
 
 ## One authored contract manifest
 
@@ -48,7 +54,10 @@ tests remain runnable without access to that repository.
 
 ## adoption
 
-Treat the repository as a composition of a core control-plane contract plus replaceable verification/runtime profiles. Do not start by wiring an LLM to the local executor and hoping the surrounding invariants somehow materialize. Humans have tried this general technique with distributed systems too, with memorable results.
+Treat the repository as a core contract plus explicit verification/runtime profiles.
+The following artifact examples refer to the deterministic fixture profile.
+Operational policy/goal schemas and role contracts are generated from
+`agent_runtime/contracts.py` by `scripts/generate_runtime_schemas.py`.
 
 ### 1. Classify authority first
 
@@ -136,7 +145,7 @@ goal ceiling is blocked; ordinary approval cannot enlarge that goal.
 
 ### Deliberate profile differences
 
-The reference uses the verification profile (see the [generated table](../README.md#contracts)), fixture providers, retained candidate audit
+The deterministic fixture uses the verification profile (see the [generated table](../README.md#contracts)), fixture providers, retained candidate audit
 refs, local Git and controller-owned `release-state.json`. Flow uses a Codex
 provider, rootless Podman, protected GitHub PRs and durable `loop-state`. Its
 product-authored YAML release metadata is a lifecycle assertion, not the
@@ -149,6 +158,12 @@ The fixture retains its property-probe negative controls and promotion. Since co
 The reference also provides `agentctl verify-cli --trusted-fixture` as a separately runnable external process observation profile. This command is not a production sandbox and does not replace the standalone engine's configured property-probe profile. `docs/LIMITATIONS.md`, including raw-outcome-forgery, remains applicable to that legacy profile. Finite external observations do not prove every possible product behavior.
 
 ### Reproducible adoption
+
+The public `operational-git/v1` profile also supplies Codex/command reasoning,
+rootless Podman, GitHub PR/check/governance/merge adapters and an owner CLI. It uses
+explicit JSON authority snapshots and its own durable run ledger. It does not
+replace Flow's YAML normalization, activation or service lifecycle. Its integration
+tests do not require access to the private consumer.
 
 On a clean checkout of a reviewed reference commit:
 
@@ -190,12 +205,12 @@ as observations. Flow consumes its own reviewed version of these files through i
 
 ### Executable profile coverage
 
-| Obligation | Standalone reference | Flow production adapter |
+| Obligation | Deterministic fixture | Public operational runtime |
 |---|---|---|
 | behavior | Exact acceptance probes fail on original base and pass on candidate | Frozen independent tests with fail-on-base/pass-on-candidate observations |
 | compatibility | Declared probes pass on both revisions | Regression bindings pass on both revisions |
 | documentation | Exact nonempty UTF-8 Git blobs at candidate/merge revisions | Exact document paths/hashes plus semantic role review |
-| ci | Rejected before execution: no hosted CI adapter in the local profile | Trusted named checks and Flow integration checkout evidence |
+| ci | Rejected: no hosted CI in this fixture profile | Trusted App/name/head checks and requested synthetic integration execution |
 | delivery | Exact two-parent merge and executed post-merge probes | Protected merge identity, checks and repeated post-merge product execution |
 
 Every accepted criterion retains its original text and exact ID. Absent typing
