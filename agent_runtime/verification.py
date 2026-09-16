@@ -7,7 +7,7 @@ import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 from control_plane_core import evaluate_predicates
-from .io import Closed, digest, isolated_environment, run
+from .io import Closed, digest, isolated_environment, loads, run
 
 
 def junit(root, patterns):
@@ -62,11 +62,15 @@ class Verification:
     def preflight(self):
         if self.config["kind"] == "trusted-local":
             return {"kind": "trusted-local", "isolated": False}
-        result = run(["podman", "info", "--format", "{{.Host.Security.Rootless}}"], limit=200_000)
-        if result.stdout.strip() != b"true":
+        result = run(["podman", "info", "--format", "json"], limit=200_000)
+        host = loads(result.stdout).get("host", {})
+        if host.get("security", {}).get("rootless") is not True or host.get("serviceIsRemote") is True:
             raise Closed("Execution requires rootless Podman")
+        if (host.get("cgroupVersion") != "v2" or host.get("cgroupManager") != "systemd"
+                or not {"cpu", "memory", "pids"} <= set(host.get("cgroupControllers", []))):
+            raise Closed("Rootless resource limits require cgroup v2/systemd with delegated cpu, memory and pids controllers")
         run(["podman", "image", "exists", self.config["image"]])
-        return {"kind": "podman", "rootless": True, "image": self.config["image"]}
+        return {"kind": "podman", "rootless": True, "resource_limits": "delegated", "image": self.config["image"]}
 
     def command(self, argv, root):
         if self.config["kind"] == "trusted-local":

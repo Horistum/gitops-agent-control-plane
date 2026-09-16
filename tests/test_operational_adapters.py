@@ -153,6 +153,19 @@ class OperationalAdapterTests(unittest.TestCase):
         self.assertNotIn('GH_TOKEN',' '.join(argv))
         self.assertEqual(calls[-1][0][:4],['podman','rm','--force','--ignore'])
 
+    def test_podman_missing_resource_delegation_fails_before_model_or_product_execution(self):
+        config=copy.deepcopy(self.policy['execution']);config.update(kind='podman',image='test@sha256:'+'a'*64)
+        host={'security':{'rootless':True},'cgroupVersion':'v2','cgroupManager':'systemd',
+              'cgroupControllers':['memory','pids']}
+        def response(argv,**kwargs):
+            return subprocess.CompletedProcess(argv,0,canonical({'host':host}),b'')
+        with patch('agent_runtime.verification.run',side_effect=response) as process:
+            with self.assertRaisesRegex(Closed,'delegated cpu'):
+                Verification(config).preflight()
+            self.assertEqual(process.call_count,1)
+            host['cgroupControllers'].append('cpu')
+            self.assertEqual(Verification(config).preflight()['resource_limits'],'delegated')
+
     def test_no_git_credentials_or_api_keys_reach_real_command_provider(self):
         script=self.root/'provider.py'
         script.write_text('import json,os,sys\nr=json.load(sys.stdin)\nassert not any(x in os.environ for x in ["GH_TOKEN","GITHUB_TOKEN","OPENAI_API_KEY","CODEX_API_KEY","SSH_AUTH_SOCK"])\nassert not os.path.exists(".git")\nprint(json.dumps({"verdict":"ready","summary":"isolated","risk":"low","requested_files":[],"findings":[],"acceptance_evidence":[],"selected_item":"TASK-1"}))\n')

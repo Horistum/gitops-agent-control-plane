@@ -46,6 +46,8 @@ The root filesystem is read-only, capabilities are dropped, and CPU, memory,
 process and time limits apply. Timeout triggers container cleanup. Product code
 is never imported into the controller. These controls do not prove protection
 against kernel/container-runtime vulnerabilities.
+The writable snapshot volume has no built-in disk quota; use host filesystem
+quotas when required by the product's execution threat model.
 
 Codex runs in an empty directory with user configuration/rules ignored, ephemeral
 structured output, read-only sandbox and effect tools disabled. Product files

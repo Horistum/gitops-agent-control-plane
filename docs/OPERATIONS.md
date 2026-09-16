@@ -1,6 +1,9 @@
 # Run the operational controller
 
 Use Linux or WSL, Python 3.11+, Git, supported Codex CLI and rootless Podman.
+Podman needs local cgroup v2 with systemd and delegated CPU, memory and PID
+controllers; `doctor` checks these before any model turn. CI uses Ubuntu 24.04.
+For older hosts, follow the [rootless delegation requirements](https://kind.sigs.k8s.io/docs/user/rootless/#host-requirements).
 Install the distribution with `python3 -m pip install .`, or use
 `./scripts/agentctl run` instead of the installed `agent-control` command.
 The controller runs as the owner; no daemon or web interface is required.
