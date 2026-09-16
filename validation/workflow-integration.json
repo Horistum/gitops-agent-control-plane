@@ -3,14 +3,14 @@
   "scope": "integrated-development-workflow",
   "core_version": "1.5.0",
   "workflow_contract": "development-workflow/v1",
-  "reference_commit": "a310451583b892ceee2763ec09d3536d04e9178f",
-  "consumer_commit": "1dc352765021416a74dbe85f96d920f5a01fc8b0",
+  "reference_commit": "6034a58d13118b3e5ee340be580a4884b03b2a86",
+  "consumer_commit": "1755c7b20759966cb50feec752ebdb6373ae1204",
   "consumer_version": "0.7.0",
   "consumer_delivery": "owner-review-pull-request",
   "consumer_pull_request": "https://github.com/Horistum/FlowAi-control/pull/13",
-  "consumer_manifest_sha256": "2588332adb0f6e7378b841585bf98bb9463fbc07735883731fd8af57766d3cb8",
+  "consumer_manifest_sha256": "27ac5abde9bc11130c83e12501d3f818f0a248aaba174c019908e6c7c2f67b32",
   "reference_tests": {
-    "cases": 172,
+    "cases": 173,
     "failures": 0,
     "optional_comparator_skips": 2
   },
@@ -19,16 +19,17 @@
     "passed": true
   },
   "consumer_source_tests": {
-    "cases": 424,
+    "cases": 425,
     "passed": true
   },
   "consumer_manifest_installed_tests": {
-    "cases": 424,
+    "cases": 425,
     "passed": true
   },
   "reference_installed_without_fixture_runtime": {
     "cases": 7,
-    "passed": true
+    "passed": true,
+    "wheel_sha256": "8a20ec8680be4ed128d3d8b926c34dac52f40412caf7852d5ad6449dc675ec7f"
   },
   "adapter_parity": {
     "schema": 1,
@@ -191,5 +192,6 @@
     "actual-Flow-Kotlin-build",
     "Flow-AR-04C-implementation",
     "host-upgrade-or-activation"
-  ]
+  ],
+  "adapter_ci_contract": "Each actual controller records core calls against the same locked executable workflow trace contract; direct local comparison also requires identical core bytes."
 }
