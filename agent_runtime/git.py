@@ -97,24 +97,56 @@ class GitRepository:
     def context(self, revision, paths, maximum):
         tree = self.tree(revision)
         result, used = {}, 0
-        for path in paths:
+        for query in paths:
+            match = re.fullmatch(r"(.+)#L([1-9][0-9]*)-L([1-9][0-9]*)", query)
+            path = match[1] if match else query
             safe_path(path)
+            if match and not int(match[2]) <= int(match[3]) <= int(match[2]) + 399:
+                raise Closed("Requested excerpt must contain at most 400 ordered lines")
             if path not in tree:
-                result[path] = {"missing": True}
+                result[query] = {"missing": True}
                 continue
             size = int(self.text("cat-file", "-s", tree[path][1]))
-            if used + size > maximum:
-                result[path] = {"omitted": True, "bytes": size}
+            if not match and used + size > maximum:
+                result[query] = {"omitted": True, "bytes": size, "git_blob": tree[path][1]}
                 continue
             data = self.read(revision, path)
-            used += len(data)
             try:
                 content = data.decode()
             except UnicodeDecodeError:
-                result[path] = {"binary": True, "sha256": digest(data)}
+                result[query] = {"binary": True, "sha256": digest(data)}
             else:
-                result[path] = {"content": content, "sha256": digest(data)}
+                info = {"sha256": digest(data)}
+                if match:
+                    lines = content.splitlines(keepends=True)
+                    start, end = int(match[2]), int(match[3])
+                    content = "".join(lines[start - 1:end])
+                    info["excerpt"] = {"start": start, "end": min(end, len(lines)), "total_lines": len(lines)}
+                if used + len(content.encode()) > maximum:
+                    info.update(omitted=True, bytes=len(content.encode()))
+                else:
+                    info["content"] = content
+                    used += len(content.encode())
+                result[query] = info
         return result
+
+    def search(self, revision, terms):
+        results = {}
+        for term in terms:
+            if not isinstance(term, str) or not 1 <= len(term) <= 200 or "\n" in term or "\0" in term:
+                raise Closed("Search terms must be bounded literal single-line strings")
+            observed = self.command("grep", "-n", "-I", "-F", "-e", term, sha(revision), "--", check=False)
+            if observed.returncode not in (0, 1):
+                raise Closed("Source search failed")
+            hits = []
+            for line in observed.stdout.decode().splitlines():
+                match = re.match(r"[0-9a-f]{40}:(.+?):([0-9]+):", line)
+                if match:
+                    path, number = safe_path(match[1]), int(match[2])
+                    if path not in [row["path"] for row in hits]:
+                        hits.append({"path": path, "excerpt": f"{path}#L{max(1, number-12)}-L{number+24}"})
+            results[term] = {"matches": hits[:24], "total_files": len(hits), "truncated": len(hits) > 24}
+        return results
 
     @contextlib.contextmanager
     def snapshot(self, revision):
@@ -196,6 +228,14 @@ class GitRepository:
         self.text("update-ref", "refs/heads/" + self.branch, merge, base)
         require_merge_identity(base, head, self.parents(merge))
         return merge
+
+    def refresh_base(self, head, base, effect):
+        # merge-tree writes objects without a checkout, hooks or user merge drivers.
+        result = self.command("merge-tree", "--write-tree", sha(head), sha(base), check=False)
+        if result.returncode:
+            raise Closed("Base refresh has conflicts; no file was overwritten")
+        tree = sha(result.stdout.decode().splitlines()[0])
+        return self._commit_tree(tree, [head, base], effect)
 
     def publish_branch(self, branch, head):
         self.text("check-ref-format", "refs/heads/" + branch)

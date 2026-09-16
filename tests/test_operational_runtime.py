@@ -8,6 +8,7 @@ from agent_runtime.controller import Controller
 from agent_runtime.io import Closed
 from agent_runtime.store import Store
 from runtime_support import build_product, goal, policy, InProcessProvider
+from control_plane_core.workflow_conformance import capture_workflow_trace, require_delivery_trace
 
 
 class OperationalRuntimeTests(unittest.TestCase):
@@ -36,7 +37,9 @@ class OperationalRuntimeTests(unittest.TestCase):
     def test_real_subprocess_provider_git_tests_two_item_goal_and_retained_regressions(self):
         self.goal=goal(two=True)
         engine=self.start()
-        result=self.drive(engine)
+        with capture_workflow_trace() as trace:
+            result=self.drive(engine)
+        require_delivery_trace(trace, challenge=True, cycles=2)
         self.assertEqual(result['status'],'COMPLETED',result)
         self.assertEqual(result['completed'],['TASK-1','TASK-2'])
         archive=engine.state['archive']

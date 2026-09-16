@@ -7,7 +7,7 @@ from .decisions import CoreError, _ids
 
 __all__ = [
     "acceptance_contract", "evaluate_obligations", "evidence_status_valid",
-    "test_criteria",
+    "test_criteria", "refine_acceptance",
 ]
 
 STAGES = {"behavior": "candidate", "compatibility": "candidate",
@@ -16,6 +16,10 @@ TEST_KINDS = {"behavior", "compatibility"}
 
 
 def acceptance_contract(criteria, declarations=()):
+    if (not isinstance(criteria, list) or not 1 <= len(criteria) <= 128 or
+            any(not isinstance(row, dict) or not isinstance(row.get("text"), str) or
+                not row["text"].strip() or len(row["text"]) > 8000 for row in criteria)):
+        raise CoreError("Acceptance requires bounded, nonempty authored criterion text")
     ids = _ids([r["id"] for r in criteria], "acceptance ids", nonempty=True)
     if not declarations:
         # Existing specifications retain their original executable semantics.
@@ -59,6 +63,33 @@ def acceptance_contract(criteria, declarations=()):
 
 def test_criteria(criteria):
     return [r for r in criteria if r.get("kind", "behavior") in TEST_KINDS]
+
+
+def refine_acceptance(authored, proposed):
+    """Retain owner obligations verbatim and add separately named plan refinements.
+
+    A proposed kind/selector cannot replace an authored criterion, even when its
+    text or identifier is repeated. Refinements create additional obligations;
+    they grant no path, risk or effect authority.
+    """
+    def normalized(rows):
+        return acceptance_contract([{"id": r["id"], "text": r["text"]} for r in rows],
+            [{"criterion_id": r["id"], "kind": r["kind"], "paths": r["paths"], "targets": r["targets"]} for r in rows])
+    owner, extra = normalized(authored), normalized(proposed) if proposed else []
+    if len(owner) + len(extra) > 128:
+        raise CoreError("Refined acceptance exceeds the bounded work contract")
+    result = copy.deepcopy(owner)
+    texts = {row["text"] for row in owner}
+    ids = {row["id"] for row in owner}
+    for index, row in enumerate(extra, 1):
+        if row["text"] in texts:
+            continue
+        identity = "PLAN-" + str(index).zfill(2)
+        if identity in ids:
+            raise CoreError("Authored and refinement criterion identities collide")
+        result.append({**row, "id": identity})
+        ids.add(identity); texts.add(row["text"])
+    return result
 
 
 def evidence_status_valid(criterion, row, stage="candidate"):

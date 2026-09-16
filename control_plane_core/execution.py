@@ -21,7 +21,7 @@ __all__ = [
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                    separators=(",", ":")).encode()).hexdigest()
+                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
 def context_checkpoint(previous, *, revision, phase, summary, sources, requests, facts,
@@ -80,49 +80,19 @@ def repair_target(phase, verdict, findings):
 
 
 def next_phase(phase, *, level="high", challenge=False, return_phase=None):
-    """Choose the next stage after the adapter has established its preconditions.
-
-    This graph alone never authorizes an effect. In particular, independent tests
-    require a baseline observation before their candidate verification. A resumed
-    risk review can return only to implementation or candidate verification;
-    its saved return point cannot grant publication, merge or completion.
-    """
-    if level not in {"low", "medium", "high"}:
-        raise CoreError("Unknown execution graph level")
-    if type(challenge) is not bool:
-        raise CoreError("Challenge requirement must be an explicit boolean")
-    if return_phase not in {None, "developer", "verify"}:
-        raise CoreError("Risk review must resume implementation or verification")
-    transitions = {"architect": "developer" if level == "low" else "test_design",
-                   "test_design": "chief_plan" if level == "high" else (return_phase or "developer"),
-                   "chief_plan": return_phase or "developer", "developer": "verify",
-                   "verify": "tester", "tester": "independent_baseline",
-                   "independent_baseline": "independent_verify", "independent_verify": "reviewer",
-                   "reviewer": "challenge_review" if challenge else ("publish" if level == "low" else "architect_accept"),
-                   "challenge_review": "architect_accept",
-                   "architect_accept": "chief_accept" if level == "high" else "publish",
-                   "chief_accept": "publish", "publish": "ci", "ci": "merge",
-                   "merge": "postmerge", "postmerge": "done"}
-    if phase not in transitions:
-        raise CoreError("Unknown execution phase: " + str(phase))
-    return transitions[phase]
+    """Compatibility API; the workflow aggregate owns the only phase graph."""
+    from .workflow import workflow_transition
+    return workflow_transition({"phase": phase, "risk": level, "challenge": challenge,
+                                "return_phase": return_phase}, {"kind": "advance"})["phase"]
 
 
-def verification_transition(phase, passed, *, failure_kind="product"):
-    """An observation drives execution; an assertion about success cannot skip a stage."""
-    if type(passed) is not bool:
-        raise CoreError("Verification transition requires an observed boolean")
-    success = {"baseline": "architect", "verify": "tester", "independent_baseline": "independent_verify",
-               "independent_verify": "reviewer", "ci": "merge", "postmerge": "done"}
-    if phase not in success:
-        raise CoreError("Unsupported verification phase")
-    if passed:
-        return success[phase]
-    if phase == "independent_baseline":
-        return "tester"
-    if phase in {"verify", "independent_verify"} and failure_kind == "product":
-        return "developer"
-    return "await_human"
+def verification_transition(phase, passed, *, failure_kind=None):
+    """Compatibility API for adapters upgrading to workflow events."""
+    from .workflow import workflow_transition
+    if failure_kind is None:
+        failure_kind = "unavailable" if phase == "ci" else "product"
+    return workflow_transition({"phase": phase, "risk": "high"},
+        {"kind": "verification", "passed": passed, "failure_kind": failure_kind})["phase"]
 
 
 def retry_preconditions(*, baseline, regressions, negative_control):

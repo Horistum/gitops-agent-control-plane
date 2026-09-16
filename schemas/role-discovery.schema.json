@@ -36,6 +36,26 @@
       "minItems": 0,
       "maxItems": 128
     },
+    "requested_searches": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "minItems": 0,
+      "maxItems": 8
+    },
+    "requested_facts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "minItems": 0,
+      "maxItems": 8
+    },
     "findings": {
       "type": "array",
       "items": {
@@ -122,6 +142,8 @@
     "summary",
     "risk",
     "requested_files",
+    "requested_searches",
+    "requested_facts",
     "findings",
     "acceptance_evidence",
     "selected_item"

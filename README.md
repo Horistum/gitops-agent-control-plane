@@ -3,7 +3,7 @@
 **A reusable decision core and an executable controller for bounded software
 delivery through Git, maintained by the Horistum project.**
 
-Version 1.4.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.5.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from Codex or a configured JSON command provider, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
@@ -37,7 +37,7 @@ The same interface is available from the checkout as `./scripts/agentctl run`.
 an already recorded effect. The state directory contains private source/proposal
 receipts and must remain outside the product checkout.
 
-A model may request more files, propose implementation or independent tests, and
+A model may request files, exact line ranges, literal searches and bounded PR facts, propose implementation or independent tests, and
 reject an actual candidate during review. It cannot execute tools, choose build
 commands, widen goal authority or approve a merge. Human approval, when required
 by the configured risk and merge limits, names the exact current candidate binding.
@@ -52,13 +52,16 @@ modify the source checkout.
 
 | Component | Responsibility |
 |---|---|
-| `control_plane_core` | Portable pure decisions; no credentials, network, process or Git effects |
+| `control_plane_core` | Workflow aggregate, authority, context and typed evidence decisions; no credentials, network, process or Git effects |
 | `agent_runtime` | Operational reasoning, GitHub, Git, verification, persistence and owner-command adapters |
 | `reference_runtime` | Versioned deterministic fixture profile and property-probe conformance demonstrations |
 | Consumers such as `FlowAi-control` | Product-specific authority formats and service deployment; may reuse the core without running another controller |
 
-The operational runtime drives the shared complete graph, including independent
-baseline, challenge review and chief acceptance. Tests added by the independent
+Both operational runtimes call `development-workflow/v1` for advancement, repair,
+risk escalation and evidence invalidation. The same release gate checks candidate,
+integration and merged-product observations against head, base and specification.
+The graph adapts to risk; independent executable verification remains mandatory.
+Critical/high-risk work uses the full planning and acceptance graph. Tests added by the independent
 tester are executed on the original code and the candidate, then retained in the
 merged product. Later items preserve earlier executed test identities and frozen
 assertions. Completion requires staged acceptance and explicit machine goal

@@ -27,7 +27,7 @@ class PublicationPolicyTests(unittest.TestCase):
             if key != "schema":
                 self.assertIn(value, readme)
         self.assertIn("vMAJOR.MINOR.PATCH", text)
-        self.assertIn("v0.1.0", text)
+        self.assertIn("vMAJOR.MINOR.PATCH", text)
 
     def test_support_policy_is_explicitly_best_effort(self):
         text = (ROOT / "SUPPORT.md").read_text().lower()

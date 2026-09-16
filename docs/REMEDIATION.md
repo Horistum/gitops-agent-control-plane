@@ -1,4 +1,33 @@
-# Architectural review remediation — 1.4.0
+# Architectural completion, 1.5
+
+The 1.4 operational runtime supplied real adapters but still duplicated Flow's
+orchestration rules. The compatibility report only proved that old Flow tests
+accepted newer utility functions; it did not prove a unified lifecycle.
+
+The correction is implemented in both repositories:
+
+- one workflow aggregate and one revision-bound release gate;
+- actual Flow event integration, authored acceptance binding and an unversioned production facade;
+- adaptive reference review, monotonic risk, CI repair, durable base refresh,
+  documentation-only delivery, bounded search/excerpts/facts and independent role inputs;
+- operational schema validation independent of fixture execution;
+- a shared real Git/process trace contract in both CIs, a direct cross-adapter gate, portable mutation cases,
+  and an AR-04C delivery regression using the pinned real authored work package.
+
+The AR-04C regression exercises the controller and identity-collision behavior in
+a disposable Python product. It is not evidence that Flow's Kotlin AR-04C
+implementation was delivered, nor that a running controller host was upgraded.
+Authenticated Codex, the actual Flow build image/seed and host activation retain
+the existing live deployment gates.
+
+The current exact-input validation record is [workflow-integration.json](../validation/workflow-integration.json).
+It distinguishes the tested Flow integration PR from its main branch and records
+installed-byte, real Git/process and provider-simulation boundaries. The older
+consumer-compatibility.json is historical package-compatibility evidence for 1.4.
+
+## Earlier review remediation
+
+### Historical operational release — 1.4.0
 
 The first remediation, core 1.3.0, repaired library defects and clarified fixture
 scope. It did **not** deliver the working model-driven development controller

@@ -13,22 +13,27 @@ def close_unmerged(engine):
         return {"merged": task["merge_sha"]}
     if task.get("pr"):
         number = task["pr"]["number"]
+        published_head = task["pr"]["head"]
         def close(_):
             pull = engine.github.pull(number)
-            engine.github.identity(pull, task["base"], task["head"])
+            engine.github.identity(pull, pull.get("base", {}).get("sha"), published_head)
             if pull.get("merged_at"):
+                if published_head != task["head"]:
+                    raise Closed("An earlier published candidate merged during repair; diagnosis is required")
                 return {"merged": pull["merge_commit_sha"]}
             if pull.get("state") == "open":
                 engine.github.api(engine.github.prefix + f"/pulls/{number}", "PATCH", {"state": "closed"})
             # Confirm the write; a concurrent merge must not be called cancellation.
             observed = engine.github.pull(number)
-            engine.github.identity(observed, task["base"], task["head"])
+            engine.github.identity(observed, observed.get("base", {}).get("sha"), published_head)
             if observed.get("merged_at"):
+                if published_head != task["head"]:
+                    raise Closed("An earlier published candidate merged during repair; diagnosis is required")
                 return {"merged": observed["merge_commit_sha"]}
             if observed.get("state") != "closed":
                 raise Closed("PR closure did not establish an unmerged terminal state")
             return {"closed": number}
-        return engine.store.effect("close-pr", {"number": number, "head": task["head"]}, close)
+        return engine.store.effect("close-pr", {"number": number, "head": published_head}, close)
     return {}
 
 

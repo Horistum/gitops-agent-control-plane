@@ -44,6 +44,9 @@ product; it is not inferred from README prose.
 
 Item IDs use letters, digits, hyphens and underscores. Behavior criteria require
 new-behavior negative controls; compatibility criteria require regression bindings.
+Documentation-only items run the existing suite and document evidence without
+inventing behavior bindings. Set `adaptive_agent_graph` to false only when the
+operator requires the full review graph for every risk level (default: true).
 Policy CLI cases are invariants checked on every candidate and merged item, so
 they must be valid at every intermediate delivery stage. Item-specific future
 behavior belongs in the corresponding item's acceptance criteria.
@@ -104,6 +107,22 @@ agent-control approve --state /absolute/agent-runs/my-goal --binding DISPLAYED_H
 agent-control retry --state /absolute/agent-runs/my-goal
 agent-control replan --state /absolute/agent-runs/my-goal
 ```
+
+A non-conflicting movement of the base records a durable refresh intent, merges
+without force-push, reruns the new baseline and frozen negative controls, and
+invalidates old candidate/CI/review/approval evidence. Conflicts and a base that
+already contains an unverified candidate stop for diagnosis. Refreshes and CI
+repairs are bounded by the repair policy. A failed trusted candidate check sends
+the observation to the developer; the same PR is updated only after local gates
+pass again. Independent assertions remain frozen. Missing or untrusted checks
+never become a successful result.
+
+Roles can use `requested_searches` (literal bounded terms), `requested_files`
+(including `path#L20-L100`) and `requested_facts` (`pr:N` in the authorized GitHub
+repository). Excerpts identify the complete blob hash and exact included lines.
+Notes are phase-private and bound to head/base/specification/goal/policy; repeated
+requests without new information stop. Independent review inputs omit previous
+role verdicts, and challenge review reconstructs the problem without the old plan.
 
 An approval is invalid after the candidate, base, risk, goal, policy or runtime
 changes. Replanning does not reset the run's model-call budget. A post-merge failure

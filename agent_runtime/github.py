@@ -97,6 +97,14 @@ class GitHub:
             raise Closed("Ambiguous publication identity")
         if existing:
             pull = existing[0]
+            previous = pull.get("head", {}).get("sha")
+            if previous != head and pull.get("state") == "open" and not pull.get("merged_at"):
+                # Repairs and base refreshes extend the published candidate; an
+                # unrelated external rewrite must never be silently overwritten.
+                self.identity(pull, base, previous)
+                repo.text("merge-base", "--is-ancestor", sha(previous), sha(head))
+                repo.publish_branch(branch, head)
+                pull = self.pull(pull["number"])
             self.identity(pull, base, head)
             if pull["state"] != "open" and not pull.get("merged_at"):
                 raise Closed("Published pull request was closed without merge")

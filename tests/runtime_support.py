@@ -45,7 +45,7 @@ def build_product(root, *, two=False):
 def policy(product):
     return {'schema':1,'profile':'operational-git/v1','product':str(product),'base_branch':'main',
         'allowed_paths':['*.py','README.md'],'test_paths':['tests/test_*.py'],
-        'protected_paths':['tools/*'],'critical_paths':[], 'risk_ceiling':'high','auto_merge_ceiling':'low','challenge':True,
+        'protected_paths':['tools/*'],'critical_paths':[], 'risk_ceiling':'high','auto_merge_ceiling':'low','challenge':True,'adaptive_agent_graph':False,
         'limits':{'model_calls':64,'repairs':3,'context_rounds':6,'context_files':24,'context_bytes':100000,'edit_bytes':100000},
         'reasoning':{'kind':'command','argv':[sys.executable,str(ROOT/'tests/runtime_fixtures/provider.py')],
                      'model':'','codex_home':'','timeout':30},
@@ -71,7 +71,7 @@ def goal(*, two=False, approval=False):
 def proposal(payload):
     phase=payload['phase']; task=payload['task']
     result={'verdict':'ready','summary':'Evaluated actual request data','risk':'low','requested_files':[],
-            'findings':[], 'acceptance_evidence':[]}
+            'findings':[], 'acceptance_evidence':[], 'requested_searches':[], 'requested_facts':[]}
     if phase=='discovery':
         result['selected_item']=payload['eligible_items'][0]
     elif phase=='architect':

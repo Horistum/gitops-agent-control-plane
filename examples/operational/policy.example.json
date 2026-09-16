@@ -83,5 +83,6 @@
         "app_id": 15368
       }
     ]
-  }
+  },
+  "adaptive_agent_graph": true
 }

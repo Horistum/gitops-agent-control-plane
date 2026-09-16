@@ -1,9 +1,44 @@
-# Adopting and testing the shared core
+# Adopting the shared controller domain
+
+For Flow 0.7, source synchronization alone is insufficient: its task controller
+must use `flow_loop/workflow.py`, the authored work-contract binding and the
+current `flow_loop.runtime.Controller` facade. The adapters reduce actual events
+through `development-workflow/v1` and call its revision-bound release gate.
+
+Run the executable cross-adapter contract after ordinary tests:
+
+```bash
+python3 scripts/check_workflow_adapters.py --consumer /absolute/FlowAi-control
+```
+
+This verifies identical locked core bytes, then drives both real controllers
+through Git commits, actual local test subprocesses, negative controls and merge
+verification. It compares the observed core transition traces. Each repository runs its actual controller against the same locked executable
+workflow contract in CI. The direct comparison above also runs both adapters in
+one local gate when both trusted checkouts are available. No cross-repository CI
+credential is required; a package-only compatibility run is not a substitute. Provider peers in this gate are controlled
+fixtures, and the product is a disposable test repository.
+
+Flow YAML work items need an authored `invariant` or explicit typed
+`acceptanceCriteria`. Discovery can select eligible work and propose a plan, but
+cannot replace those texts or downgrade their evidence types. Additional model
+criteria are separately named PLAN refinements and remain extra obligations,
+including predecessor handoff when the bounded task needs it. Changes to the
+contract invalidate an active attempt even if the author forgot to bump revision.
+The explicit historical `goal-order/v1` profile retains model-proposed bounded
+criteria; it must not be presented as authored YAML acceptance.
+
+Upgrade Flow through its existing reviewed release/manifest procedure, preserving
+state, roles, credentials and product seed. Upgrade requires a quiescent boundary
+and leaves activation paused. Do not run a second public controller against the
+same Flow product while the service owns it.
+
+## Public core and legacy profile adoption
 
 ## Supported API
 
-Core library 1.4.0 exposes all supported decisions from `control_plane_core` and
-from `decisions`, `execution`, `acceptance`, and `verification`. Each module has an
+Core library 1.5.0 exposes all supported decisions from `control_plane_core` and
+from `workflow`, `decisions`, `execution`, `acceptance`, `verification` and `schema`. Each module has an
 explicit `__all__`; submodule imports remain supported. The source package has
 no runtime dependencies and needs no reference repository configuration when
 installed on its own.
@@ -16,7 +51,7 @@ pinned source bytes.
 The distribution also installs `agent_runtime` and `agent-control`. Use it for
 the operational lifecycle in [OPERATIONS.md](OPERATIONS.md), or import only the
 pure core in an existing controller. Core adoption does not require another
-controller. Operational execution integrates the shared full graph, typed
+controller. Operational execution integrates the shared risk-adaptive graph, typed
 acceptance, bounded context, recovery, retirement and upgrade decisions.
 
 ## One authored contract manifest
