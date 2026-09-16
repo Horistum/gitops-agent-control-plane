@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Horistum/gitops-agent-control-plane/schemas/operational-goal.schema.json",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "risk_ceiling": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "auto_merge_ceiling": {
+      "type": "string",
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "minItems": 0,
+            "maxItems": 128
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          },
+          "context": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "minItems": 0,
+            "maxItems": 128
+          },
+          "acceptance": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "behavior",
+                    "compatibility",
+                    "documentation",
+                    "ci",
+                    "delivery"
+                  ]
+                },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "minItems": 0,
+                  "maxItems": 128
+                },
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "candidate",
+                      "integration"
+                    ]
+                  },
+                  "minItems": 0,
+                  "maxItems": 2
+                }
+              },
+              "required": [
+                "id",
+                "text",
+                "kind",
+                "paths",
+                "targets"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "id",
+          "dependencies",
+          "ready",
+          "risk",
+          "description",
+          "context",
+          "acceptance"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 256
+    },
+    "machine_conditions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "minItems": 0,
+      "maxItems": 256
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "objective",
+    "risk_ceiling",
+    "auto_merge_ceiling",
+    "items",
+    "machine_conditions"
+  ],
+  "additionalProperties": false
+}

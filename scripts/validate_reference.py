@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 PRODUCT = ROOT / "examples" / "minimal-product"
 
 
@@ -50,7 +51,12 @@ def validate_publication_identity() -> None:
 
 
 def validate_schemas_and_static_contracts() -> None:
+    run([sys.executable, str(ROOT / "scripts" / "generate_runtime_schemas.py"), "--check"])
     run([sys.executable, str(ROOT / "scripts" / "generate_contracts.py"), "--check"])
+    from agent_runtime.contracts import validate_configuration
+    operational = ROOT / "examples" / "operational"
+    validate_configuration(json.loads((operational / "policy.example.json").read_text()),
+                           json.loads((operational / "goal.example.json").read_text()))
     from reference_runtime.base import BaseEngine
     from reference_runtime.contracts import (
         CORE_CONTRACT,
@@ -229,7 +235,7 @@ def validate_authority_layout() -> None:
 
 def validate_python_and_shell() -> None:
     for base in (
-        ROOT / "reference_runtime", ROOT / "control_plane_core", ROOT / "scripts", ROOT / "tests",
+        ROOT / "reference_runtime", ROOT / "agent_runtime", ROOT / "control_plane_core", ROOT / "scripts", ROOT / "tests",
         PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci",
     ):
         for path in base.rglob("*.py"):
