@@ -28,6 +28,12 @@ def main():
                 break
         print(json.dumps(result, indent=2))
         if result["status"] != "COMPLETED":
+            # This script owns a disposable public test product; printing these
+            # receipts is safe and makes real execution failures diagnosable.
+            for path in sorted((controller.root / "receipts").glob("*.json")):
+                receipt = json.loads(path.read_text())
+                if receipt["request"]["kind"] == "verify":
+                    print(json.dumps(receipt["output"], indent=2), flush=True)
             raise SystemExit("Real Podman lifecycle did not complete")
         evidence = controller.state["archive"][0]
         assert evidence["independent_baseline"]["junit"]["failed_identities"] == ["TASK1:test_value"]

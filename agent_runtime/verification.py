@@ -102,7 +102,8 @@ class Verification:
                 result = self.command(argv, root)
                 outputs.append({"argv": argv, "exit_code": result.returncode,
                                 "stdout_hash": digest(result.stdout), "stderr_hash": digest(result.stderr),
-                                "diagnostic": result.stdout.decode(errors="replace")[-2000:]})
+                                "diagnostic": result.stdout.decode(errors="replace")[-2000:],
+                                "stderr_diagnostic": result.stderr.decode(errors="replace")[-2000:]})
             tests = junit(root, self.config["junit"])
         # Each external assertion starts with a fresh exact snapshot, so a build
         # cannot silently rewrite the product used by the subsequent CLI gate.
