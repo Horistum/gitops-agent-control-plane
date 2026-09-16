@@ -1,10 +1,50 @@
 """Portable aggregate contract; run unchanged by every production consumer."""
 import copy
+from contextlib import contextmanager
+import sys
 import unittest
-from . import CoreError, workflow_transition, require_workflow_evidence
+from . import CoreError, workflow_transition, require_workflow_evidence, acceptance_contract, refine_acceptance
+
+
+@contextmanager
+def capture_workflow_trace():
+    """Observe actual adapter calls without asking the adapter to report its path."""
+    trace, previous = [], sys.getprofile()
+    def observe(frame, event, value):
+        if previous:
+            previous(frame, event, value)
+        if event == "return" and frame.f_code is workflow_transition.__code__ and isinstance(value, dict):
+            if frame.f_locals["event"]["kind"] in {"advance", "verification"}:
+                trace.append([frame.f_locals["state"]["phase"], value["phase"]])
+    sys.setprofile(observe)
+    try:
+        yield trace
+    finally:
+        sys.setprofile(previous)
+
+
+def require_delivery_trace(trace, *, challenge=False, cycles=1):
+    phases = ["baseline", "architect", "test_design", "chief_plan", "developer", "verify", "tester",
+              "independent_baseline", "independent_verify", "reviewer"]
+    phases += (["challenge_review"] if challenge else [])
+    phases += ["architect_accept", "chief_accept", "publish", "ci", "merge", "postmerge", "done"]
+    expected = [[a, b] for a, b in zip(phases, phases[1:])] * cycles
+    if trace != expected:
+        raise AssertionError("Actual adapter workflow differs from the shared delivery contract: " + repr(trace))
 
 
 class WorkflowConformance(unittest.TestCase):
+    def test_model_refinement_preserves_owner_criteria_and_keeps_additional_handoff_obligations(self):
+        owner = acceptance_contract([{"id": "AC-01", "text": "Deterministic system identity"}])
+        proposed = acceptance_contract([{"id": "AC-01", "text": "Deterministic system identity"},
+            {"id": "AC-02", "text": "Verify exact predecessor handoff"}], [
+            {"criterion_id": "AC-01", "kind": "documentation", "paths": ["README.md"], "targets": []},
+            {"criterion_id": "AC-02", "kind": "behavior", "paths": [], "targets": []}])
+        combined = refine_acceptance(owner, proposed)
+        self.assertEqual(combined[0], owner[0])
+        self.assertEqual(combined[1]["id"], "PLAN-02")
+        self.assertEqual(combined[1]["text"], proposed[1]["text"])
+        self.assertEqual(combined[1]["kind"], "behavior")
     def test_late_escalation_inserts_missing_plan_gates_and_invalidates_release_authority(self):
         state = {"phase": "reviewer", "risk": "low", "completed": ["architect", "developer", "tester"]}
         decision = workflow_transition(state, {"kind": "risk", "risk": "high"})

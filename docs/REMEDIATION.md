@@ -11,7 +11,7 @@ The correction is implemented in both repositories:
 - adaptive reference review, monotonic risk, CI repair, durable base refresh,
   documentation-only delivery, bounded search/excerpts/facts and independent role inputs;
 - operational schema validation independent of fixture execution;
-- a cross-adapter real Git/process trace gate in Flow CI, portable mutation cases,
+- a shared real Git/process trace contract in both CIs, a direct cross-adapter gate, portable mutation cases,
   and an AR-04C delivery regression using the pinned real authored work package.
 
 The AR-04C regression exercises the controller and identity-collision behavior in

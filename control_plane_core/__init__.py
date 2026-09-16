@@ -4,7 +4,7 @@ All public functions are available here and from their documented submodules.
 The core performs no provider side effects and does not authenticate observations.
 """
 
-from .acceptance import (acceptance_contract, evaluate_obligations,
+from .acceptance import (acceptance_contract, refine_acceptance, evaluate_obligations,
                          evidence_status_valid, test_criteria)
 from .decisions import (CoreError, completion_transition, goal_projection,
                         merge_authority, path_allowed, require_merge_identity,
@@ -30,7 +30,7 @@ __all__ = [
     "SchemaValidationError", "SUPPORTED_SCHEMA_KEYWORDS", "validate_instance", "validate_schema",
     "WORKFLOW_CONTRACT", "graph_level", "required_reviews", "workflow_transition",
     "require_workflow_evidence", "CONTRACT", "EVIDENCE_CONTRACT", "CoreError", "__version__",
-    "acceptance_contract", "acceptance_evidence", "completion_transition",
+    "acceptance_contract", "refine_acceptance", "acceptance_evidence", "completion_transition",
     "context_checkpoint", "context_files", "context_view", "evaluate_goal_conditions",
     "evaluate_obligations", "evaluate_predicates", "evidence_status_valid",
     "fingerprint", "goal_projection", "identity", "merge_authority", "next_attempt",

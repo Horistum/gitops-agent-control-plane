@@ -13,14 +13,17 @@ python3 scripts/check_workflow_adapters.py --consumer /absolute/FlowAi-control
 
 This verifies identical locked core bytes, then drives both real controllers
 through Git commits, actual local test subprocesses, negative controls and merge
-verification. It compares the observed core transition traces. Flow CI fetches
-the exact reference commit from its core lock and runs this gate; a package-only
-compatibility run is not a substitute. Provider peers in this gate are controlled
+verification. It compares the observed core transition traces. Each repository runs its actual controller against the same locked executable
+workflow contract in CI. The direct comparison above also runs both adapters in
+one local gate when both trusted checkouts are available. No cross-repository CI
+credential is required; a package-only compatibility run is not a substitute. Provider peers in this gate are controlled
 fixtures, and the product is a disposable test repository.
 
 Flow YAML work items need an authored `invariant` or explicit typed
 `acceptanceCriteria`. Discovery can select eligible work and propose a plan, but
-cannot replace those texts or downgrade their evidence types. Changes to the
+cannot replace those texts or downgrade their evidence types. Additional model
+criteria are separately named PLAN refinements and remain extra obligations,
+including predecessor handoff when the bounded task needs it. Changes to the
 contract invalidate an active attempt even if the author forgot to bump revision.
 The explicit historical `goal-order/v1` profile retains model-proposed bounded
 criteria; it must not be presented as authored YAML acceptance.

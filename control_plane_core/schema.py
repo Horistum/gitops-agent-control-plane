@@ -176,5 +176,3 @@ def _validate_instance(instance: Any, schema: dict, path: str = "$") -> None:
             raise SchemaValidationError(f"{path}: below/equal exclusiveMinimum")
         if "exclusiveMaximum" in schema and instance >= schema["exclusiveMaximum"]:
             raise SchemaValidationError(f"{path}: above/equal exclusiveMaximum")
-
-
