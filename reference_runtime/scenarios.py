@@ -341,6 +341,14 @@ def _edit(path: str, content: str, reason: str) -> dict:
 
 
 def developer_proposal(fixture: str, item_id: str = "EXAMPLE-001") -> list[dict]:
+    supported = {
+        "correct", "broken", "forbidden-authority", "critical-top-level",
+        "medium-contract", "budget", "patch-budget", "test-tamper",
+        "assertion-tamper", "junit-forgery", "probe-aware", "receipt-injection",
+        "raw-outcome-forgery",
+    }
+    if fixture not in supported:
+        raise ValueError(f"unknown developer fixture: {fixture}")
     if fixture == "forbidden-authority":
         return [
             _edit(
@@ -536,3 +544,4 @@ def scenario_names(repository_root: Path) -> list[str]:
         path.stem
         for path in (repository_root / "examples" / "scenarios").glob("*.json")
     )
+

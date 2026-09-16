@@ -11,6 +11,13 @@ import json
 
 from .decisions import CoreError
 
+__all__ = [
+    "context_checkpoint", "context_files", "context_view", "fingerprint",
+    "next_attempt", "next_phase", "recovery_actions", "repair_target",
+    "retirement", "retry_preconditions", "upgrade_boundary",
+    "verification_transition",
+]
+
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
@@ -25,6 +32,8 @@ def context_checkpoint(previous, *, revision, phase, summary, sources, requests,
     omissions. Repeating a request after a changed response is legitimate; asking
     again with the same available input is a detectable absence of progress.
     """
+    if any(type(value) is not int or value < 1 for value in (max_entries, max_sources)):
+        raise CoreError("Context retention limits must be positive integers")
     old = previous if isinstance(previous, dict) and previous.get("revision") == revision else {}
     if turn_id is not None and old.get("turn_id") == turn_id:
         return copy.deepcopy(old)
@@ -48,6 +57,8 @@ def context_view(checkpoints, phase, revision):
 
 def context_files(required, requested, previous, limit):
     """Prioritize fresh requests while retaining earlier files within the bound."""
+    if type(limit) is not int or limit < 0:
+        raise CoreError("Context file limit must be a nonnegative integer")
     required = list(dict.fromkeys(required))
     if len(required) > limit:
         raise CoreError("Required source set exceeds the context file limit")
@@ -69,12 +80,23 @@ def repair_target(phase, verdict, findings):
 
 
 def next_phase(phase, *, level="high", challenge=False, return_phase=None):
+    """Choose the next stage after the adapter has established its preconditions.
+
+    This graph alone never authorizes an effect. In particular, independent tests
+    require a baseline observation before their candidate verification. A resumed
+    risk review can return only to implementation or candidate verification;
+    its saved return point cannot grant publication, merge or completion.
+    """
     if level not in {"low", "medium", "high"}:
         raise CoreError("Unknown execution graph level")
+    if type(challenge) is not bool:
+        raise CoreError("Challenge requirement must be an explicit boolean")
+    if return_phase not in {None, "developer", "verify"}:
+        raise CoreError("Risk review must resume implementation or verification")
     transitions = {"architect": "developer" if level == "low" else "test_design",
                    "test_design": "chief_plan" if level == "high" else (return_phase or "developer"),
                    "chief_plan": return_phase or "developer", "developer": "verify",
-                   "verify": "tester", "tester": "independent_verify",
+                   "verify": "tester", "tester": "independent_baseline",
                    "independent_baseline": "independent_verify", "independent_verify": "reviewer",
                    "reviewer": "challenge_review" if challenge else ("publish" if level == "low" else "architect_accept"),
                    "challenge_review": "architect_accept",

@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from control_plane_core import completion_transition, require_revision_identity
 
-import argparse
 import json
-from pathlib import Path
-import sys
 
 from ._engine_impl import AutonomousEngine as _CoreAutonomousEngine, TERMINAL_STATUSES
 from .base import InjectedCrash
 from .contracts import load_json, sha256_json
-from .scenarios import build_request
 
 
 class AutonomousEngine(_CoreAutonomousEngine):
@@ -329,107 +325,19 @@ class AutonomousEngine(_CoreAutonomousEngine):
         raise RuntimeError(f"phase is not safely resumable without a pending effect: {phase}")
 
 
-def run_request(
-    repository_root: Path,
-    request: dict,
-    output_root: Path,
-    *,
-    run_id: str | None = None,
-) -> dict:
-    return AutonomousEngine(
-        repository_root,
-        request,
-        output_root,
-        run_id=run_id,
-    ).run()
+def run_request(repository_root, request, output_root, *, run_id=None):
+    from .engine import run_request as public_run
+    return public_run(repository_root, request, output_root, run_id=run_id)
 
 
-def resume_run(
-    repository_root: Path,
-    run_dir: Path,
-    *,
-    decision: str | None = None,
-    decided_by: str = "human",
-) -> dict:
-    engine = AutonomousEngine.resume_engine(repository_root, run_dir)
-    if engine.authority_error:
-        engine.state["goal_status"] = "BLOCKED"
-        engine.event("policy-configuration-blocked", {"reason": engine.authority_error})
-        return engine.finish(
-            "BLOCKED_POLICY",
-            phase="BLOCKED_POLICY",
-            reason=f"policy configuration invalid during resume: {engine.authority_error}",
-            goal_satisfied=False,
-        )
-    if engine.state.get("phase") == "AWAITING_DECISION":
-        if decision is None:
-            return engine.build_summary(goal_satisfied=False)
-        return engine.apply_human_decision(decision, decided_by)
-    effect = engine.state.get("pending_effect")
-    if isinstance(effect, dict):
-        if decision is not None:
-            raise RuntimeError("human decision supplied while recovering a durable effect")
-        if effect.get("effect") == "merge":
-            return engine.recover_merge()
-        if effect.get("effect") == "control-state":
-            return engine.recover_control_state()
-        raise RuntimeError(f"unsupported pending effect during resume: {effect.get('effect')}")
-    if engine.state.get("status") in TERMINAL_STATUSES:
-        path = engine.evidence / "run-summary.json"
-        return json.loads(path.read_text()) if path.is_file() else engine.build_summary()
-    if engine.state.get("phase") in {"POSTMERGE_VERIFY", "RECONCILE"}:
-        if decision is not None:
-            raise RuntimeError("human decision supplied during phase recovery")
-        return engine.recover_phase()
-    raise RuntimeError(
-        f"run is not resumable: status={engine.state.get('status')} phase={engine.state.get('phase')}"
-    )
+def resume_run(repository_root, run_dir, *, decision=None, decided_by="human"):
+    from .engine import resume_run as public_resume
+    return public_resume(repository_root, run_dir, decision=decision, decided_by=decided_by)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Standalone bounded autonomous delivery reference runtime."
-    )
-    parser.add_argument(
-        "--repository-root",
-        type=Path,
-        default=Path(__file__).resolve().parents[1],
-    )
-    parser.add_argument("--output", type=Path, default=Path(".demo/runs"))
-    parser.add_argument("--scenario")
-    parser.add_argument("--resume", type=Path)
-    parser.add_argument("--run-id")
-    parser.add_argument("--decision", choices=["approve", "reject", "request_changes"])
-    parser.add_argument("--decided-by", default="human")
-    args = parser.parse_args(argv)
-    try:
-        if args.resume:
-            summary = resume_run(
-                args.repository_root.resolve(),
-                args.resume.resolve(),
-                decision=args.decision,
-                decided_by=args.decided_by,
-            )
-        else:
-            if not args.scenario:
-                parser.error("--scenario is required unless --resume is used")
-            goal = load_json(args.repository_root / "examples" / "goal.example.json")
-            request = build_request(
-                args.repository_root.resolve(),
-                args.scenario,
-                goal,
-            )
-            summary = run_request(
-                args.repository_root.resolve(),
-                request,
-                args.output.resolve(),
-                run_id=args.run_id,
-            )
-        print(json.dumps(summary, indent=2, sort_keys=True))
-        return 0
-    except InjectedCrash as exc:
-        print(str(exc), file=sys.stderr)
-        return 75
+def main(argv=None):
+    from .engine import main as public_main
+    return public_main(argv)
 
 
 if __name__ == "__main__":

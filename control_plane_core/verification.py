@@ -8,6 +8,12 @@ import json
 import hashlib
 from .decisions import CoreError, _ids, _sha
 
+__all__ = [
+    "EVIDENCE_CONTRACT", "acceptance_evidence", "evaluate_goal_conditions",
+    "evaluate_predicates", "identity", "test_failure_kind", "validate_bindings",
+    "validate_goal_conditions", "validate_predicates",
+]
+
 EVIDENCE_CONTRACT = "verification-evidence/v1"
 
 
@@ -67,10 +73,10 @@ def validate_bindings(criteria, bindings) -> list[dict]:
 
 def test_failure_kind(receipt: dict) -> str:
     junit = receipt.get("junit", {})
-    if junit.get("failed_identities") or junit.get("assertion_failures", 0):
-        return "product"
     if junit.get("error_identities") or junit.get("errors", 0):
         return "ambiguous"
+    if junit.get("failed_identities") or junit.get("assertion_failures", 0):
+        return "product"
     if not junit.get("executed_identities", junit.get("identities", [])):
         return "test_preparation"
     return "ambiguous"
@@ -86,6 +92,8 @@ the build producing JUnit is trusted; the external CLI profile supplies that gat
     validate_bindings(criteria, bindings)
     for receipt in (baseline, candidate):
         _sha(receipt.get("head")); _sha(receipt.get("base"))
+        if not isinstance(receipt.get("spec_hash"), str) or not receipt["spec_hash"].strip():
+            raise CoreError("Counterfactual evidence requires explicit specification identity")
     if baseline["base"] != candidate["base"] or baseline.get("spec_hash") != candidate.get("spec_hash"):
         raise CoreError("Counterfactual evidence has a different base or specification")
     old, new = baseline.get("junit", {}), candidate.get("junit", {})
@@ -102,7 +110,8 @@ the build producing JUnit is trusted; the external CLI profile supplies that gat
                      "candidate_head": candidate["head"]})
     # A broken preexisting test or broken test harness is never a valid negative control.
     permitted_failures = {r["test_id"] for r in bindings if r["mode"] == "new_behavior"}
-    complete = bool(rows) and not old_errors and old_bad <= permitted_failures and all(r["passed"] for r in rows)
+    complete = (bool(rows) and not old_errors and not new_errors and not new_bad
+                and old_bad <= permitted_failures and all(r["passed"] for r in rows))
     return {"contract": EVIDENCE_CONTRACT, "passed": complete, "rows": rows,
             "baseline_receipt_hash": identity(baseline), "candidate_receipt_hash": identity(candidate)}
 

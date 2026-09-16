@@ -5,3 +5,6 @@ policy.json
 __pycache__/
 *.pyc
 examples/minimal-product/build/
+/build/
+/dist/
+*.egg-info/

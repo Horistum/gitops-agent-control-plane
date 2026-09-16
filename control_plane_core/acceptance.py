@@ -5,6 +5,11 @@ import copy
 from pathlib import PurePosixPath
 from .decisions import CoreError, _ids
 
+__all__ = [
+    "acceptance_contract", "evaluate_obligations", "evidence_status_valid",
+    "test_criteria",
+]
+
 STAGES = {"behavior": "candidate", "compatibility": "candidate",
           "documentation": "candidate", "ci": "integration", "delivery": "postmerge"}
 TEST_KINDS = {"behavior", "compatibility"}

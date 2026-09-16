@@ -42,6 +42,20 @@ class VerificationConformance(unittest.TestCase):
         candidate["base"] = "f" * 40
         with self.assertRaises(CoreError): acceptance_evidence(["AC-01"], bindings, base, candidate)
 
+    def test_missing_specification_is_not_matching_evidence_authority(self):
+        for missing in (None, "", " ", False):
+            base, candidate, bindings = self.receipts()
+            base["spec_hash"] = candidate["spec_hash"] = missing
+            with self.subTest(spec_hash=missing), self.assertRaises(CoreError):
+                acceptance_evidence(["AC-01"], bindings, base, candidate)
+
+    def test_candidate_failures_outside_bound_tests_still_block_acceptance(self):
+        for field in ("failed_identities", "error_identities"):
+            base, candidate, bindings = self.receipts()
+            candidate["junit"][field] = ["Other:broken"]
+            with self.subTest(field=field):
+                self.assertFalse(acceptance_evidence(["AC-01"], bindings, base, candidate)["passed"])
+
     def test_json_predicate_is_type_strict(self):
         p = [{"id": "typed", "op": "json_equals", "pointer": "/x", "expected": True}]
         self.assertTrue(evaluate_predicates(p, {"exit_code": 0, "stdout": '{"x":true}'})["passed"])
@@ -76,6 +90,8 @@ class VerificationConformance(unittest.TestCase):
         self.assertEqual(test_failure_kind({"junit": {"failed_identities": ["T:x"]}}), "product")
         self.assertEqual(test_failure_kind({"junit": {"error_identities": ["T:x"]}}), "ambiguous")
         self.assertEqual(test_failure_kind({"junit": {}}), "test_preparation")
+        self.assertEqual(test_failure_kind({"junit": {"failed_identities": ["T:x"],
+                                                      "error_identities": ["T:harness"]}}), "ambiguous")
 
 
 if __name__ == "__main__": unittest.main()

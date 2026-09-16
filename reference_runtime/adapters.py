@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+from .contract_ids import RUNTIME_PROFILE
 from .executor import ExecutionResult, LocalFixtureExecutor
 
 
@@ -22,7 +23,7 @@ class GitEffectAdapter(Protocol):
 @dataclass
 class LocalVerificationAdapter:
     executor: LocalFixtureExecutor
-    profile: str = "standalone-local/v2"
+    profile: str = RUNTIME_PROFILE
 
     def run(self, argv: list[str], cwd: Path, **kwargs) -> ExecutionResult:
         return self.executor.run(argv, cwd, **kwargs)
@@ -31,7 +32,7 @@ class LocalVerificationAdapter:
 @dataclass
 class LocalGitEffectAdapter:
     git: Callable[..., str]
-    profile: str = "standalone-local/v2"
+    profile: str = RUNTIME_PROFILE
 
     def find_trailer_effect(self, trailer_name: str, value: str) -> list[str]:
         marker = f"{trailer_name}: {value}"
@@ -79,3 +80,4 @@ class LocalGitEffectAdapter:
             self.git("add", path)
         self.git("commit", "-m", message)
         return self.git("rev-parse", "HEAD")
+

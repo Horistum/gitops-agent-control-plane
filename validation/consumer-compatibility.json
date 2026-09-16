@@ -1,0 +1,37 @@
+{
+  "command": [
+    "python3",
+    "-S",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-v"
+  ],
+  "consumer_commit": "5d77eabfb990234f119750f0741276705fbe05ff",
+  "consumer_repository": "Horistum/FlowAi-control",
+  "consumer_tree": "baeaa1709951ef659cb9dd663ed06ef174bb35a7",
+  "core_files": {
+    "control_plane_core/LICENSE.md": "e53028e2e0ac2e31d95f9c66409ba27e0caaff80abe45cc0a0288895ff027dc1",
+    "control_plane_core/NOTICE.md": "556c5eaa7543304d603fd92f90658679eac46400054d71569e9da1c67eaeec6b",
+    "control_plane_core/__init__.py": "38b58ab756a6bef86707b58aeb514b139b53ceb9e4538f2331562411c9aeeee2",
+    "control_plane_core/acceptance.py": "bb6f18bd5f0aa7c5817dde45f1f49dbf447a95a7886222c7ed480a8f96aef826",
+    "control_plane_core/conformance.py": "82a3a1eefa487827c19817681c00a31bb6bd3a356a89dc04ca00dec5ae56ac38",
+    "control_plane_core/decisions.py": "af1740091ce6c2a79b0f7ae30b18bb9db0dc845f0aebe5d969f9b00a4a6a27ee",
+    "control_plane_core/execution.py": "35c1462971ffd2dae18aabdfc6accf2ac745652edd6a58560b423d70c51e269e",
+    "control_plane_core/execution_conformance.py": "35296189dd0c8e936a1fd6793a018cea123f5573e0c0cd87a443481472a434b3",
+    "control_plane_core/verification.py": "b0d9b6fbd531e3372741193403bcef27c656fbaae369562afa7498e273bc64c9",
+    "control_plane_core/verification_conformance.py": "da30567471c3b901aca1962244521fb1dd2c50701d6ba705aa44f968fac0dab3"
+  },
+  "core_snapshot_commit": "f4ea9bdfca971149b2768b11b7bc3d9af6665a81",
+  "core_unchanged_during_tests": true,
+  "core_version": "1.3.0",
+  "exit_code": 0,
+  "live_provider_validation": false,
+  "passed": true,
+  "schema": 1,
+  "scope": "consumer-source-compatibility",
+  "snapshot_note": "The core_snapshot_commit identifies a temporary local Git snapshot; core_files are the durable byte identity.",
+  "tests": 413
+}

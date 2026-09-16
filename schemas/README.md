@@ -1,5 +1,9 @@
-# Portable JSON Schema contracts
+# Published schemas
 
-Repository `gitops-agent-control-plane/v7`; core `autonomous-control-plane/v1`; verification `property-probe/v6`; runtime `standalone-local/v2`.
+Contract identities are generated from [config/contract-set.json](../config/contract-set.json).
+See the [contract table](../README.md#contracts) and [schema interoperability](../docs/VERIFICATION.md#json-schema-compatibility).
 
-The fail-closed Draft 2020-12 subset covers goals, policy, contract/profile manifests, role protocols/evidence, authority classification, roadmap/release state, scenarios, durable state, control-loop/goal-reconciliation evidence, feedback, human decisions, release transitions, verification evidence, effects, recovery, and terminal summaries.
+The schemas use a supported subset of Draft 2020-12. The runtime rejects unsupported
+keywords, including nested ones. CI validates the schemas with a standard validator
+and compares supported instance semantics. Runtime semantic authority checks remain
+additional constraints beyond structural JSON Schema validation.

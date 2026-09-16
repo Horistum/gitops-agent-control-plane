@@ -9,6 +9,12 @@ from collections import deque
 import fnmatch
 import re
 
+__all__ = [
+    "CoreError", "completion_transition", "goal_projection", "merge_authority",
+    "path_allowed", "require_merge_identity", "require_revision_identity",
+    "risk_rank", "trusted_checks_pass",
+]
+
 
 class CoreError(ValueError):
     """Malformed authority or an observation that cannot authorize a transition."""

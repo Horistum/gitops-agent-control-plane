@@ -9,10 +9,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-REFERENCE_CONTRACT = "gitops-agent-control-plane/v7"
-CORE_CONTRACT = "autonomous-control-plane/v1"
-VERIFICATION_PROFILE = "property-probe/v6"
-RUNTIME_PROFILE = "standalone-local/v2"
+from .contract_ids import (
+    CONTRACT_SET, CORE_CONTRACT, REFERENCE_CONTRACT, RUNTIME_PROFILE,
+    VERIFICATION_PROFILE,
+)
 
 
 ROLE_NAMES = {"discovery", "architect", "developer", "test-designer", "tester", "reviewer"}
@@ -130,7 +130,7 @@ def risk_rank(value: str) -> int:
 
 def validate_contract_set(value: dict) -> None:
     require_fields(value, {"schema", "reference_contract", "core_contract", "verification_profile", "runtime_profile"}, where="contract_set")
-    if value != {"schema": 1, "reference_contract": REFERENCE_CONTRACT, "core_contract": CORE_CONTRACT, "verification_profile": VERIFICATION_PROFILE, "runtime_profile": RUNTIME_PROFILE}:
+    if type(value["schema"]) is not int or value != CONTRACT_SET:
         raise ValueError("unsupported contract set")
 
 

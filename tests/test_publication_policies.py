@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import json
 import subprocess
 import unittest
 
@@ -17,10 +18,14 @@ class PublicationPolicyTests(unittest.TestCase):
         self.assertIn("GitHub Private Vulnerability Reporting", text)
         self.assertIn("Do not open a public GitHub issue", text)
 
-    def test_release_policy_uses_contract_v7_and_separate_semver(self):
+    def test_release_policy_links_canonical_contracts_and_separate_semver(self):
         text = (ROOT / "docs" / "RELEASES.md").read_text()
-        self.assertIn("gitops-agent-control-plane/v7", text)
-        self.assertIn("autonomous-control-plane/v1", text)
+        self.assertIn("config/contract-set.json", text)
+        readme = (ROOT / "README.md").read_text()
+        manifest = json.loads((ROOT / "config/contract-set.json").read_text())
+        for key, value in manifest.items():
+            if key != "schema":
+                self.assertIn(value, readme)
         self.assertIn("vMAJOR.MINOR.PATCH", text)
         self.assertIn("v0.1.0", text)
 
@@ -58,3 +63,4 @@ class PublicationPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

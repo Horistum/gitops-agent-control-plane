@@ -47,6 +47,16 @@ class ExecutionConformance(unittest.TestCase):
         self.assertEqual(omitted, ["registry"])
         with self.assertRaises(CoreError): context_files(["a", "b"], [], [], 1)
 
+    def test_invalid_context_limits_cannot_disable_retention_bounds(self):
+        for value in (0, -1, True, 1.5):
+            for limit in ("max_entries", "max_sources"):
+                with self.subTest(limit=limit, value=value), self.assertRaises(CoreError):
+                    self.checkpoint(**{limit: value})
+        for value in (-1, True, 1.5):
+            with self.subTest(limit=value), self.assertRaises(CoreError):
+                context_files([], ["a"], [], value)
+        self.assertEqual(context_files([], ["a"], [], 0), ([], ["a"]))
+
     def test_failure_ownership_does_not_start_implementation_before_design(self):
         finding = [{"kind": "testing", "severity": "medium"}]
         self.assertEqual(repair_target("test_design", "fix", finding), "test_design")
@@ -71,6 +81,49 @@ class ExecutionConformance(unittest.TestCase):
         self.assertEqual(verification_transition("independent_verify", False, failure_kind="ambiguous"), "await_human")
         self.assertEqual(verification_transition("postmerge", False), "await_human")
         with self.assertRaises(CoreError): verification_transition("postmerge", "true")
+
+    def test_complete_graphs_execute_counterfactual_before_independent_candidate(self):
+        visited = set()
+        for level in ("low", "medium", "high"):
+            for challenge in (False, True):
+                with self.subTest(level=level, challenge=challenge):
+                    phase, path = "architect", []
+                    while phase != "done":
+                        self.assertNotIn(phase, path, "Execution graph must terminate")
+                        path.append(phase)
+                        phase = next_phase(phase, level=level, challenge=challenge)
+                    visited.update(path)
+                    self.assertLess(path.index("independent_baseline"), path.index("independent_verify"))
+                    self.assertLess(path.index("independent_verify"), path.index("reviewer"))
+                    self.assertEqual("test_design" in path, level != "low")
+                    self.assertEqual("chief_plan" in path, level == "high")
+                    self.assertEqual("chief_accept" in path, level == "high")
+                    self.assertEqual("challenge_review" in path, challenge)
+                    for observation_phase in ("verify", "independent_baseline", "independent_verify", "ci", "postmerge"):
+                        self.assertEqual(verification_transition(observation_phase, True),
+                                         next_phase(observation_phase, level=level, challenge=challenge))
+        self.assertEqual(visited, {"architect", "test_design", "chief_plan", "developer", "verify",
+                                   "tester", "independent_baseline", "independent_verify", "reviewer",
+                                   "challenge_review", "architect_accept", "chief_accept", "publish",
+                                   "ci", "merge", "postmerge"})
+
+    def test_risk_review_return_cannot_skip_effect_or_evidence_gates(self):
+        for stage in ("test_design", "chief_plan"):
+            for target in ("publish", "ci", "merge", "postmerge", "done", "tester", "", False):
+                with self.subTest(stage=stage, target=target), self.assertRaises(CoreError):
+                    next_phase(stage, level="medium", return_phase=target)
+        self.assertEqual(next_phase("test_design", level="medium", return_phase="verify"), "verify")
+        self.assertEqual(next_phase("test_design", level="high", return_phase="verify"), "chief_plan")
+        self.assertEqual(next_phase("chief_plan", return_phase="verify"), "verify")
+        for challenge in (None, "false", 0, 1):
+            with self.subTest(challenge=challenge), self.assertRaises(CoreError):
+                next_phase("reviewer", challenge=challenge)
+
+    def test_failed_counterfactual_cannot_advance_to_candidate_verification(self):
+        self.assertEqual(verification_transition("independent_baseline", False), "tester")
+        for value in (None, 0, 1, "false"):
+            with self.subTest(value=value), self.assertRaises(CoreError):
+                verification_transition("independent_baseline", value)
 
     def test_attempt_identity_and_retry_evidence_are_conservative(self):
         self.assertEqual(next_attempt(1, [{"attempt": 3}]), 4)

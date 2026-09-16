@@ -1,5 +1,6 @@
 """Executable portable contract vectors. Both runtime profiles run these bytes."""
 import unittest
+import importlib
 
 from . import (CoreError, completion_transition, goal_projection, merge_authority,
                path_allowed, require_merge_identity, require_revision_identity,
@@ -7,6 +8,19 @@ from . import (CoreError, completion_transition, goal_projection, merge_authorit
 
 
 class CoreConformance(unittest.TestCase):
+    def test_public_package_covers_every_supported_decision_module(self):
+        import control_plane_core as core
+        exported = {"CONTRACT", "__version__"}
+        for name in ("decisions", "execution", "acceptance", "verification"):
+            module = importlib.import_module("control_plane_core." + name)
+            self.assertEqual(len(module.__all__), len(set(module.__all__)))
+            for symbol in module.__all__:
+                with self.subTest(module=name, symbol=symbol):
+                    self.assertIs(getattr(core, symbol), getattr(module, symbol))
+            exported.update(module.__all__)
+        self.assertEqual(set(core.__all__), exported)
+        self.assertEqual(len(core.__all__), len(exported))
+
     def test_dependency_ready_selection_and_progress(self):
         items = [{"id": "A", "dependencies": [], "ready": True},
                  {"id": "B", "dependencies": ["A"], "ready": True}]

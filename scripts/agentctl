@@ -10,7 +10,7 @@ usage() {
 Usage: scripts/agentctl <command> [args...]
 
   demo [scenario|all]    Run showcase scenarios
-  loop [scenario]        Run autonomous control loop (default autonomous-two-item)
+  loop [scenario]        Run fixture control loop (default autonomous-two-item)
   conformance            Run all conformance scenarios
   verify-cli [options]   Verify external CLI observations (trusted fixtures only)
   validate               Run repository validation, unit tests, and conformance
@@ -97,3 +97,4 @@ main() {
 }
 
 main "$@"
+

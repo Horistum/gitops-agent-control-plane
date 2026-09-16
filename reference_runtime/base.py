@@ -457,28 +457,8 @@ class BaseEngine:
         return patterns
 
     def check_proposal(self, proposal: list[dict], *, actor: str) -> tuple[bool, list[dict]]:
-        allowed_patterns = self.policy[f"{actor}_allowed_paths"]
-        forbidden = self.enforced_forbidden_patterns()
-        decisions = []
-        accepted_all = True
-        for edit in proposal:
-            raw = edit.get("path")
-            try:
-                canonical = safe_relative_path(raw)
-                self.workspace_path(canonical)
-                valid = True
-                error = None
-            except (TypeError, ValueError) as exc:
-                canonical = None
-                valid = False
-                error = str(exc)
-            in_allowed = bool(valid and matches_any(canonical, allowed_patterns))
-            in_authority = bool(valid and matches_any(canonical, self.policy["authority_paths"]))
-            is_forbidden = bool(valid and matches_any(canonical, forbidden))
-            accepted = valid and in_allowed and not in_authority and not is_forbidden
-            decisions.append({"actor": actor, "path": raw, "canonical_path": canonical, "path_valid": valid, "path_error": error, "allowed_path": in_allowed, "authority_path": in_authority, "forbidden_path": is_forbidden, "accepted": accepted})
-            accepted_all = accepted_all and accepted
-        return accepted_all, decisions
+        """The composed engine supplies the single role-aware shared-core gate."""
+        raise NotImplementedError("Use reference_runtime.engine.AutonomousEngine")
 
     def diff_for(self, proposal: list[dict]) -> str:
         chunks: list[str] = []
@@ -607,3 +587,4 @@ class BaseEngine:
         self.state["phase"] = "POSTMERGE_VERIFY"
         self.write_json("merge-evidence.json", {"schema": 2, "candidate_sha": effect["candidate_sha"], "merge_sha": merge_sha, "request_hash": effect["request_hash"], "effect_occurrences": len(commits), "recovered_existing_effect": recovered_existing, "method": "local-git-no-ff"})
         self.event("effect-consumed", {"kind": "merge", "request_hash": effect["request_hash"], "merge_sha": merge_sha, "recovered_existing_effect": recovered_existing})
+

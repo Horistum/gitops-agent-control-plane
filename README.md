@@ -1,172 +1,103 @@
 # GitOps Agent Control Plane Reference
 
-A **standalone executable reference for bounded autonomous software delivery through Git**.
+**A portable decision library and a deterministic executable reference for bounded
+software delivery through Git. Initiated and maintained by the Horistum project.**
 
-**Initiated and maintained by the Horistum project.**
+Use `control_plane_core` in a controller to share authority, phase, acceptance and
+evidence decisions. Run the bundled reference to inspect real local Git effects,
+verification, repair and crash recovery with prepared inputs.
 
-The reusable implementation lives in `control_plane_core` and is consumed by
-`Horistum/FlowAi-control` as exact, versioned source bytes. See
-[shared core and runtime profiles](docs/SHARED-CORE.md) for the integration contract,
-validation boundary and synchronization command.
+**The bundled reasoning roles are trusted deterministic fixtures. This repository
+does not call an AI model or autonomously write arbitrary product code.** Its
+architect emits a bounded template; its reviewer computes a checklist; its repair
+scenario consumes a prepared next proposal. Tests demonstrate controller behavior
+and finite negative properties. They are not a formal proof or evidence of model
+quality. The local executor is not a hostile-code security sandbox.
 
-Core library 1.2.0 also provides `verification-evidence/v1`: executable acceptance
-bindings, counterfactual/regression semantics and typed external CLI predicates.
-The separately runnable `agentctl verify-cli --trusted-fixture` extension is
-described in [profiles](docs/PROFILES.md); Flow uses the same predicates in its
-rootless production adapter.
+## Deliverables and ownership
 
-Core 1.2.0 also shares staged acceptance, repair routing, recovery limits, attempt
-identity and bounded phase-private context decisions. The public reference engine
-executes typed behavior, compatibility, documentation and delivery criteria; its
-local profile rejects hosted CI criteria before execution. See [shared execution](docs/SHARED-EXECUTION.md).
+| Component | Responsibility | Evidence |
+|---|---|---|
+| `control_plane_core` | Reusable pure authority, execution, acceptance and verification decisions | Shared conformance vectors and public adapter integration tests |
+| `reference_runtime` | Trusted local fixture profile with exact Git identity and durable effects | Full loop, negative, repair and fault-injection scenarios |
+| Consumer runtime, including `Horistum/FlowAi-control` | Model calls, authenticated provider observations, isolation and deployment | Its own integration tests and live host gates |
 
-The current repository contract is `gitops-agent-control-plane/v7`, composed from:
+The core has no network, credentials, subprocesses or Git write authority. A model
+proposal grants no effect authority. Adapters supply observations; the controller
+validates them and applies the permitted effect. The core is reusable inside an
+existing controller and does not require a separate service.
 
-- **core contract:** `autonomous-control-plane/v1`
-- **verification profile:** `property-probe/v6`
-- **runtime profile:** `standalone-local/v2`
-
-The split is intentional. Autonomy, verification, and runtime/provider mechanics can evolve without pretending they are the same contract.
-
-## The central idea
-
-AI or another reasoning provider is not given unrestricted execution authority. It operates inside a control plane:
-
-```text
-product authority
-      ↓
-goal
-      ↓
-discovery / selection
-      ↓
-bounded plan
-      ↓
-developer + test-design proposals
-      ↓
-policy / risk / budgets
-      ↓
-candidate
-      ↓
-independent verification
-      ↓
-review
-      ↓
-human authority when required
-      ↓
-durable Git effect
-      ↓
-post-effect verification
-      ↓
-release-state transition
-      ↓
-goal reconciliation
-      ├─ objective projection satisfied → stop
-      └─ work remains → select next dependency-ready item
-```
-
-Authority, effects, risk, verification, durable state, and evidence remain outside reasoning-role control.
-
-## One-command autonomous showcase
+## Start here
 
 ```bash
+./scripts/agentctl demo happy-path
 ./scripts/agentctl loop
-```
-
-The default `autonomous-two-item` scenario delivers two dependent roadmap items in one control-plane run. The controller selects `EXAMPLE-001`, verifies and merges it, commits a controller-owned release-state transition, re-evaluates the goal, unlocks `EXAMPLE-002`, preserves the first item's acceptance probes as regressions, and stops only when the requested item projection is satisfied.
-
-Other important scenarios include:
-
-```bash
 ./scripts/agentctl demo repair-loop
-./scripts/agentctl demo human-approve-resume
-./scripts/agentctl demo human-approve-after-tamper
-./scripts/agentctl demo dependency-blocked
-./scripts/agentctl conformance
-```
-
-`repair-loop` demonstrates verification feedback returning to a bounded developer repair attempt rather than making every failed candidate terminal.
-
-`human-approve-resume` demonstrates `NEEDS_DECISION` as a durable resumable authority boundary. A fresh process records the human decision and continues the same run.
-
-`human-approve-after-tamper` moves the candidate branch after review and proves that approval is bound to the exact reviewed SHA, not to a mutable branch name.
-
-`dependency-blocked` proves the controller will not invent work outside declared dependency authority merely to make progress.
-
-## Authority is explicit
-
-Product authority is classified into:
-
-- **intent authority:** roadmap and desired work;
-- **state authority:** controller-recorded release progress;
-- **change authority:** structured forbidden/write boundaries;
-- **verification authority:** quality gates and product invariants;
-- **context:** prose that reasoning may use but the controller does not silently execute.
-
-`examples/minimal-product/.agent-control/authority-model.json` makes this machine-visible. It is an authority manifest, not a bag of arbitrary feature flags.
-
-Goal fields are also classified. `items`, risk ceilings, auto-merge ceilings, forbidden paths, and autonomy budgets are machine enforced. Narrative objective, `success_condition`, and forbidden-direction prose are reasoning context. Machine completion is the separate `goal-evaluation.satisfied` projection computed from controller-owned release state. The runtime does not claim to interpret success prose as executable policy.
-
-## Reasoning roles are protocols
-
-Discovery, architect, developer, test-designer, tester, and reviewer have explicit input/output contracts in `config/role-protocols.json`.
-
-Role write power is active runtime authority: proposal gates resolve each proposal-producing role's `product_write_power` to a concrete policy path envelope. No reasoning role has direct Git-effect authority.
-
-The standalone implementation uses deterministic fixture role providers so controller behavior is reproducible. A production system may replace those producers with AI while preserving the same authority/effect/evidence boundaries.
-
-## Exact candidate identity
-
-Candidate evidence records an immutable Git SHA plus a retained audit ref under `refs/tags/evidence/candidates/...`. Transient candidate branches may be deleted during repair or rejection without making the reviewed commit unreachable.
-
-Human approval re-resolves the candidate branch immediately before authorization. If its tip no longer equals the reviewed SHA, approval fails closed. The durable merge effect names exact base/candidate SHAs, builds the merge from those commits, advances `main` with compare-and-swap semantics, and verifies both actual merge parents before consuming the effect.
-
-## Verification profile
-
-The v7 core reuses the hardened `property-probe/v6` verification profile:
-
-- product-authored generic invariant DSL;
-- bounded DSL depth and static arg/kwarg/type reference validation;
-- case-level negative control;
-- exact candidate/merge binding;
-- HMAC-authenticated verifier-parent receipts;
-- diagnostic JUnit kept non-authoritative;
-- executable negative scenarios;
-- executable `raw-outcome-forgery` **KNOWN-LIMIT**.
-
-Verification is a profile of the control plane, not the definition of the control plane.
-
-## Human authority and repair
-
-A risk or auto-merge boundary creates durable `NEEDS_DECISION` state with allowed actions:
-
-- `approve`
-- `reject`
-- `request_changes`
-
-Approval is valid only for the exact reviewed revision. Rejection terminates without merge. `request_changes` creates repair feedback and, before the next proposal attempt, reruns baseline diagnostics, completed-item regression probes, and the acceptance negative control against the current `main` revision.
-
-## Git as the control/effect ledger
-
-In this reference, “GitOps” means that desired product authority, candidate identities, merge effects, controller-owned release-state transitions, retained audit refs, and recovery identities are represented through versioned Git state.
-
-Provider-specific GitHub/GitLab/Argo/Jenkins behavior is a runtime adapter concern, not part of the core contract.
-
-## Trust boundary
-
-The local fixture runtime is not a hostile-code security sandbox. `raw-outcome-forgery` deliberately reproduces the acknowledged same-process observation weakness. Production arbitrary-code verification requires a stronger container/VM/remote verifier and independently protected result channel.
-
-The CLI repeats this warning in `agentctl help` because an operator should not have to remember which paragraph of README contains the most important runtime limitation.
-
-## Validate
-
-```bash
 ./scripts/agentctl validate
 ```
 
-Validation covers schemas/static contracts, direct code-path unit tests, the full security regression matrix, exact-revision human approval, and autonomous-control-loop scenarios on Python 3.11, 3.12 and 3.13.
+Python 3.11+ and Git are required. `loop` runs two dependent items in the bundled
+example: selection, verification, exact merge, release-state transition, and goal
+reconciliation. Completion refers to the declared machine item projection;
+narrative success prose remains reasoning context.
+
+`repair-loop` proves that failed verification produces persisted feedback and a
+bounded retry. The next fixture is prepared in advance. Production providers must
+consume that feedback themselves and require separate verification.
+
+## Preserved guarantees
+
+- Reasoning roles have no direct Git-effect or release-state authority.
+- Proposal paths use the shared allow/protect/deny decision and filesystem checks.
+- Human `approve`, `reject` and `request_changes` act on a durable pause; approval
+  is tied to the exact reviewed SHA.
+- Merge uses exact base/candidate revisions and a compare-and-swap update; both
+  merge parents are verified. A moved branch cannot inherit stale approval.
+- Durable effect identities and Git trailers support idempotent crash recovery.
+- Release progress advances only after independent post-effect verification.
+- JUnit is diagnostic. Protected probes and signed parent receipts establish the
+  local profile's evidence boundary.
+
+`raw-outcome-forgery` remains an executable **KNOWN-LIMIT**: the local fixture
+executor cannot protect observation of arbitrary hostile code in the same
+process. Production arbitrary-code verification requires the consuming runtime's
+stronger isolation and independently protected observations.
+
+## Contracts
+
+The authored source is [config/contract-set.json](config/contract-set.json).
+The following table, policy/schema identities and portable core constant are
+generated with `python3 scripts/generate_contracts.py`; CI rejects drift.
+
+<!-- contracts:begin -->
+| Component | Contract |
+|---|---|
+| reference contract | `gitops-agent-control-plane/v7` |
+| core contract | `autonomous-control-plane/v1` |
+| verification profile | `property-probe/v6` |
+| runtime profile | `standalone-local/v2` |
+<!-- contracts:end -->
+
+Library SemVer is separate from these wire identities. All supported decisions
+are exported at the package root and through documented submodules. See the
+[adoption guide](docs/ADOPTION.md) for imports, source synchronization and the
+consumer compatibility gate.
+
+## Documentation
+
+1. [Architecture and scope](docs/ARCHITECTURE.md): purpose, implementation map and runtime boundaries.
+2. [Authority and lifecycle](docs/CORE-CONTRACT.md): goals, policy, human authority and reconciliation.
+3. [Verification and limits](docs/VERIFICATION.md): profiles, evidence, schema interoperability and trust boundaries.
+4. [Operations](docs/OPERATIONS.md): commands, results and diagnostics.
+5. [Adoption](docs/ADOPTION.md): public API, generated contracts, compatibility tests and consumer responsibilities.
+
+[Review remediation and validation scope](docs/REMEDIATION.md) records the changes
+made after architectural review. Historical document links remain as navigation
+aliases to these guides.
 
 ## Origin, license and branding
 
-This reference architecture was originally developed and published from the **Horistum GitHub organization**.
-
-Source, documentation, schemas, and examples are Apache-2.0 licensed. See `LICENSE`, `NOTICE`, and `TRADEMARKS.md`.
+Originally developed and published from the **Horistum GitHub organization**.
+Source, documentation, schemas and examples are Apache-2.0 licensed. See
+[LICENSE](LICENSE), [NOTICE](NOTICE), [TRADEMARKS.md](TRADEMARKS.md),
+[release policy](docs/RELEASES.md) and [publication checklist](docs/PUBLICATION.md).

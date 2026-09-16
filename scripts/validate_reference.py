@@ -50,6 +50,7 @@ def validate_publication_identity() -> None:
 
 
 def validate_schemas_and_static_contracts() -> None:
+    run([sys.executable, str(ROOT / "scripts" / "generate_contracts.py"), "--check"])
     from reference_runtime.base import BaseEngine
     from reference_runtime.contracts import (
         CORE_CONTRACT,
@@ -240,21 +241,20 @@ def validate_python_and_shell() -> None:
 
 
 def validate_docs_claims() -> None:
-    readme = (ROOT / "README.md").read_text().lower()
-    core = (ROOT / "docs" / "CORE-CONTRACT.md").read_text().lower()
-    profiles = (ROOT / "docs" / "PROFILES.md").read_text().lower()
-    reconciliation = (ROOT / "docs" / "RECONCILIATION.md").read_text().lower()
-    human = (ROOT / "docs" / "HUMAN-AUTHORITY.md").read_text().lower()
-    limitations = (ROOT / "docs" / "LIMITATIONS.md").read_text().lower()
-    check("gitops-agent-control-plane/v7" in readme, "README does not name v7")
-    check("autonomous-control-plane/v1" in readme and "property-probe/v6" in readme, "contract/profile split missing")
-    check("goal reconciliation" in readme and "release-state transition" in readme, "README lost autonomous loop")
-    check("authority" in core and "reasoning" in core and "effect" in core, "core contract is underspecified")
-    check("verification profile" in profiles and "runtime profile" in profiles, "profile split undocumented")
-    check("repair" in reconciliation and "dependency" in reconciliation, "reconciliation semantics incomplete")
+    from reference_runtime.contract_ids import CONTRACT_SET
+    readme = " ".join((ROOT / "README.md").read_text().lower().split())
+    for key, value in CONTRACT_SET.items():
+        if key != "schema":
+            check(value in readme, f"README contract missing: {key}")
+    check("deterministic fixtures" in readme[:2000], "fixture scope must appear at the beginning")
+    check("goal reconciliation" in readme and "release-state transition" in readme, "README lost lifecycle scope")
+    core = (ROOT / "docs/CORE-CONTRACT.md").read_text().lower()
+    verification = (ROOT / "docs/VERIFICATION.md").read_text().lower()
     for action in ("approve", "reject", "request_changes"):
-        check(action in human, f"human authority action undocumented: {action}")
-    check("raw-outcome-forgery" in limitations and "known-limit" in limitations, "known verifier limitation disappeared")
+        check(action in core, f"human authority action undocumented: {action}")
+    check("raw-outcome-forgery" in verification and "known-limit" in verification, "known verifier limitation disappeared")
+    for name in ("ARCHITECTURE", "CORE-CONTRACT", "VERIFICATION", "OPERATIONS", "ADOPTION"):
+        check(f"docs/{name.lower()}.md" in readme, f"missing primary guide: {name}")
 
 
 def main(argv: list[str] | None = None) -> int:

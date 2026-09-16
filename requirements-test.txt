@@ -1,0 +1,2 @@
+# Development/CI comparator only; production core and local runtime use stdlib.
+jsonschema==4.26.0
