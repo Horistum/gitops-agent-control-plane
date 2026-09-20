@@ -6,11 +6,12 @@ from pathlib import Path
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from agent_runtime.contracts import GOAL_SCHEMA, POLICY_SCHEMA, ROLE_SCHEMAS
+from agent_runtime.contracts import GOAL_SCHEMA, POLICY_SCHEMA, ROLE_SCHEMAS, PROVIDER_RESPONSE_SCHEMA
 
 
 def projections():
     schemas = {"operational-policy": POLICY_SCHEMA, "operational-goal": GOAL_SCHEMA,
+               "command-reasoning-response": PROVIDER_RESPONSE_SCHEMA,
                **{"role-" + phase: schema for phase, schema in ROLE_SCHEMAS.items()}}
     return {ROOT / "schemas" / (name + ".schema.json"): json.dumps({
         "$schema": "https://json-schema.org/draft/2020-12/schema",

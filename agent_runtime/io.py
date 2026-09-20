@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -20,6 +21,10 @@ class Closed(RuntimeError):
 
 class Unavailable(RuntimeError):
     """An external observation is temporarily unavailable; never infer success."""
+
+
+class Busy(Closed):
+    """A different worker owns this run; a scheduler may retry later."""
 
 
 def canonical(value):
@@ -46,7 +51,8 @@ def loads(data):
 
 def read_json(path, *, maximum=8_000_000):
     path = Path(path)
-    if path.is_symlink() or path.stat().st_size > maximum:
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
         raise Closed("Expected bounded regular JSON")
     return loads(path.read_bytes())
 
@@ -78,7 +84,7 @@ def locked(directory):
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise Closed("Another writer owns this run") from None
+            raise Busy("Another writer owns this run") from None
         yield
 
 

@@ -198,9 +198,8 @@ def lifecycle_step(engine):
                                     auto_merge_ceiling=engine.goal["auto_merge_ceiling"], critical=critical)
         if authority["blocked"]:
             raise Closed("Hard risk ceiling cannot be approved")
-        binding = fingerprint({"base": task["base"], "head": task["head"], "spec_hash": task["spec_hash"],
-                               "risk": task["risk"], "policy_hash": engine.state["policy_hash"],
-                               "runtime_hash": engine.state["runtime_hash"], "run_id": engine.state["run_id"]})
+        from .decisions import approval_binding
+        binding = approval_binding(engine.state)
         if authority["requires_approval"] and task.get("approval") != binding:
             task["approval_required"] = binding
             engine.hold("Owner approval required for this exact candidate", kind="NEEDS_DECISION", approvable=True)

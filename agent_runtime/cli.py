@@ -1,8 +1,9 @@
-"""Owner-operated CLI; one controller process, resumable state, no dashboard."""
+"""Owner-operated governance runtime with resumable state and local review."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -44,13 +45,18 @@ def main(argv=None):
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--max-steps", type=int, default=256)
     p.add_argument("--poll-seconds", type=int, default=0)
-    for name in ("status", "pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
+    for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name)
         p.add_argument("--state", type=Path, required=True)
         if name in {"approve", "retry-effect"}:
             p.add_argument("--binding", required=True)
         if name == "upgrade":
             p.add_argument("--suspend", action="store_true")
+        if name == "approve":
+            p.add_argument("--decision-hash")
+        if name == "review":
+            p.add_argument("--port", type=int, default=8765)
+            p.add_argument("--token-env", default="AGENT_REVIEW_TOKEN")
     p = sub.add_parser("schema")
     p.add_argument("name", choices=["policy", "goal", *ROLE_SCHEMAS])
     args = parser.parse_args(argv)
@@ -73,6 +79,19 @@ def main(argv=None):
             return drive(engine, args.max_steps, args.poll_seconds)
         elif args.command == "resume":
             return drive(Controller(args.state), args.max_steps, args.poll_seconds)
+        elif args.command in {"tick", "decision", "usage"}:
+            from .service import RunService
+            print(json.dumps(getattr(RunService(args.state), args.command)(), ensure_ascii=False))
+        elif args.command == "review":
+            from .review import create_server
+            if not 1 <= args.port <= 65535:
+                raise Closed("Review port must be 1..65535")
+            with create_server(args.state, os.environ.get(args.token_env, ""), port=args.port) as server:
+                print(f"Review: http://127.0.0.1:{server.server_port}", flush=True)
+                try:
+                    server.serve_forever()
+                except KeyboardInterrupt:
+                    pass
         elif args.command == "status":
             state = Store(args.state).state
             task = state.get("task") or {}
@@ -85,7 +104,8 @@ def main(argv=None):
         elif args.command == "upgrade":
             print(json.dumps(upgrade(args.state, suspend=args.suspend)))
         else:
-            print(json.dumps(action(args.state, args.command, getattr(args, "binding", None))))
+            print(json.dumps(action(args.state, args.command, getattr(args, "binding", None),
+                                    decision_hash=getattr(args, "decision_hash", None))))
         return 0
     except (Closed, Unavailable, ValueError, OSError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}), file=sys.stderr)

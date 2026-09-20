@@ -1,12 +1,14 @@
 # Run the operational controller
 
-Use Linux or WSL, Python 3.11+, Git, supported Codex CLI and rootless Podman.
+Use Linux or WSL, Python 3.11+, Git, a trusted JSON command provider and rootless Podman.
+Codex CLI is an optional alternative provider.
 Podman needs local cgroup v2 with systemd and delegated CPU, memory and PID
 controllers; `doctor` checks these before any model turn. CI uses Ubuntu 24.04.
 For older hosts, follow the [rootless delegation requirements](https://kind.sigs.k8s.io/docs/user/rootless/#host-requirements).
 Install the distribution with `python3 -m pip install .`, or use
 `./scripts/agentctl run` instead of the installed `agent-control` command.
-The controller runs as the owner; no daemon or web interface is required.
+The controller runs as the owner. A local review UI and single-tick scheduling
+entrypoint are available; neither requires a hosted service.
 
 ## Prepare one bounded product goal
 
@@ -15,10 +17,13 @@ The controller runs as the owner; no daemon or web interface is required.
 2. Copy `examples/operational/policy.example.json` and `goal.example.json` outside
    that product. Replace all placeholder paths, repository identity, context,
    criteria, test commands, JUnit selectors and required check names/App IDs.
-3. Authenticate the trusted Codex CLI using the owner's ChatGPT account. Set
-   `reasoning.codex_home` to that authenticated directory; `doctor` checks required
-   CLI capabilities. The implementation is checked against Codex 0.153.4. Model
-   availability and quota belong to the account; an empty model uses its default.
+3. Configure `reasoning.kind=command`, an absolute trusted adapter executable and
+   explicit credential references. The primary example uses the versioned JSON
+   protocol documented in [middleware integration](MIDDLEWARE.md). `doctor`
+   checks executable availability, not model authentication or quota.
+   For Codex, copy `policy.codex.example.json` instead and configure a dedicated
+   authenticated `codex_home`. That optional transport retains its existing
+   ChatGPT login contract and capability checks against Codex 0.153.4.
 4. Prepare the product's build image and dependencies before the run. Pin the
    image by a locally available repository digest. Execution never pulls images
    or enables the container network. For a Python-only experiment, for example:
@@ -29,9 +34,12 @@ The controller runs as the owner; no daemon or web interface is required.
    ```
 
 5. Provide the controller's GitHub credential through the configured environment
-   variable (the example uses `GH_TOKEN`) and configure Git's transport separately.
-   Credentials are not copied into model prompts, model environment, product
-   snapshots, containers or receipts. Keep them out of policy JSON and Git.
+   variable (the example uses `GH_TOKEN`) or an explicit credential broker reference,
+   and configure Git's transport separately. Only explicitly configured model
+   credentials enter the trusted command adapter's environment. GitHub credentials
+   are not automatically inherited by that adapter. Resolved secrets are never
+   inserted into controller requests, policy, snapshots or receipts; the trusted
+   adapter must also avoid echoing them in its response. Keep secrets out of Git.
 6. Protect the target branch with PRs, resolved review threads, strict required
    checks bound to the declared App IDs, and no delete/force-push bypass. Classic
    protection or compatible active rulesets are supported. Permit two-parent
@@ -71,13 +79,16 @@ Each invocation has a step bound; `--max-steps` controls it. Exit 0 means the go
 completed; exit 2 means inspect status or continue the pending run. `status` is
 read-only. The final merge SHA and private receipts define the validation scope.
 
-## Alternative reasoning and local operation
+## Provider protocol and local operation
 
 `reasoning.kind=command` invokes the owner-provided `argv` in an empty directory
 with an allowlisted environment. Stdin contains `{instructions,input,output_schema}`;
-stdout must contain one JSON object matching that phase's schema. The command
-provider is trusted infrastructure: it must authenticate to its own model service
-without receiving product/GitHub credentials. No fixture implementation is selected
+The legacy protocol (absent `protocol`, or `protocol=1`) returns one role JSON
+object on stdout. With `protocol=2`, stdin also supplies model/effect identity and
+the response envelope schema; stdout wraps the role result, usage and provider
+metadata. The command provider is trusted infrastructure: authenticate using
+explicit model credential references, and keep product/GitHub credentials separate.
+No fixture implementation is selected
 by operational configuration. `agent-control schema developer` prints the contract.
 
 For owner-trusted local code, choose `publication.kind=local` and
@@ -107,6 +118,20 @@ agent-control approve --state /absolute/agent-runs/my-goal --binding DISPLAYED_H
 agent-control retry --state /absolute/agent-runs/my-goal
 agent-control replan --state /absolute/agent-runs/my-goal
 ```
+
+`agent-control decision --state RUN` prints the complete `human-decision.json`
+projection, including SHA, risk, findings and verification evidence. For a decision
+reviewed outside the CLI, include `--decision-hash DISPLAYED_DECISION_HASH` in the
+approval command. The local `agent-control review --state RUN` UI always sends
+both hashes and rejects a changed document. It binds only to `127.0.0.1`, requires
+`AGENT_REVIEW_TOKEN` and serves one owner-selected run. Setup and trust limits are
+in [middleware integration](MIDDLEWARE.md#local-decision-review).
+
+For a supervisor or job queue, `agent-control tick --state RUN` performs at most
+one reconciliation step without a polling loop. A busy run returns
+`{"outcome":"busy","retryable":true}` without executing another effect. A step
+may still wait for its bounded provider/build call; execute it in a worker, not
+in a webhook request thread. See [the scheduling examples](../examples/operations).
 
 A non-conflicting movement of the base records a durable refresh intent, merges
 without force-push, reruns the new baseline and frozen negative controls, and

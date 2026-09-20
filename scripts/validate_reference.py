@@ -55,8 +55,9 @@ def validate_schemas_and_static_contracts() -> None:
     run([sys.executable, str(ROOT / "scripts" / "generate_contracts.py"), "--check"])
     from agent_runtime.contracts import validate_configuration
     operational = ROOT / "examples" / "operational"
-    validate_configuration(json.loads((operational / "policy.example.json").read_text()),
-                           json.loads((operational / "goal.example.json").read_text()))
+    for policy_path in operational.glob("policy*.json"):
+        validate_configuration(json.loads(policy_path.read_text()),
+                               json.loads((operational / "goal.example.json").read_text()))
     from reference_runtime.base import BaseEngine
     from reference_runtime.contracts import (
         CORE_CONTRACT,

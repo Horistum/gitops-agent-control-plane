@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+import re
 import control_plane_core
 from control_plane_core import fingerprint
 from .io import Closed, atomic_json, digest, read_json
@@ -26,6 +27,19 @@ class Store:
         self.state["history"] = self.state.get("history", [])[-1000:]
         atomic_json(self.path, self.state)
 
+    def read_receipt(self, identity):
+        if not re.fullmatch(r"[0-9a-f]{64}", identity):
+            raise Closed("Invalid effect identity")
+        value = read_json(self.root / "receipts" / (identity + ".json"))
+        if not isinstance(value, dict):
+            raise Closed("Effect receipt must be an object")
+        request = value.get("request")
+        if (not isinstance(request, dict) or fingerprint(request) != identity
+                or request.get("run_id") != self.state["run_id"]
+                or value.get("output_hash") != fingerprint(value.get("output"))):
+            raise Closed("Effect receipt provenance or content differs")
+        return value
+
     def effect(self, kind, payload, perform):
         task = self.state.get("task") or {}
         request = {"kind": kind, "payload": payload, "policy_hash": self.state["policy_hash"],
@@ -35,14 +49,14 @@ class Store:
         identity = fingerprint(request)
         receipt = self.root / "receipts" / (identity + ".json")
         pending = self.state.get("pending")
+        if pending and pending["id"] != identity:
+            raise Closed("A different effect remains pending; reconcile it first")
         if receipt.exists():
-            value = read_json(receipt)
-            if value.get("request") != request or value.get("output_hash") != fingerprint(value.get("output")):
+            value = self.read_receipt(identity)
+            if value.get("request") != request:
                 raise Closed("Effect receipt provenance or content differs")
             result = value["output"]
         else:
-            if pending and pending["id"] != identity:
-                raise Closed("A different effect remains pending; reconcile it first")
             if pending and kind == "model":
                 raise Closed("Indeterminate model call; explicit retry-effect must name " + identity)
             if not pending:

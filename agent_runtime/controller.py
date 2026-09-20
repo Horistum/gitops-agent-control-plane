@@ -100,7 +100,8 @@ class Controller:
                    "criteria": criteria(self.item()) if self.task else [], **(extra or {})}
         if len(canonical(payload)) > limits["context_bytes"] + 200_000:
             raise Closed("Complete model input exceeds prompt limit")
-        result = self.store.effect("model", payload, lambda _: self.reasoning.execute(payload))
+        result = self.store.effect("model", payload,
+            lambda identity: self.reasoning.execute({**payload, "effect_id": identity}))
         task["turn"] = task.get("turn", 0) + 1
         if result.get("protocol_error"):
             task["context_rounds"] = task.get("context_rounds", 0) + 1
@@ -126,7 +127,8 @@ class Controller:
         task["requested_files"], task["context_rounds"] = [], 0
         task.setdefault("role_results", {})[phase] = {"summary": output["summary"], "head": task["head"],
                                                      "verdict": output["verdict"], "base": task["base"],
-                "spec_hash": task.get("spec_hash"), "acceptance_evidence": output["acceptance_evidence"]}
+                "spec_hash": task.get("spec_hash"), "acceptance_evidence": output["acceptance_evidence"],
+                "findings": output["findings"], "risk": output["risk"]}
         return output
 
     def reconcile(self):

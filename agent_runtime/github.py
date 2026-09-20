@@ -1,10 +1,10 @@
 """Authenticated GitHub observations, idempotent PR publication and exact merge."""
 from __future__ import annotations
 
-import os
 from urllib import error, parse, request
 from control_plane_core import require_revision_identity, trusted_checks_pass
 from .git import sha
+from .credentials import CredentialResolver
 from .io import Closed, Unavailable, canonical, loads
 
 
@@ -14,20 +14,20 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 
 class GitHub:
-    def __init__(self, configuration, branch, transport=None):
+    def __init__(self, configuration, branch, transport=None, *, credentials=None):
         self.config, self.branch = configuration, branch
         self.prefix = "/repos/" + configuration["repository"]
         self.transport = transport
         self.opener = request.build_opener(NoRedirect())
+        self.credentials = credentials or CredentialResolver()
 
     def api(self, path, method="GET", body=None, optional=False):
         if (path != self.prefix and not path.startswith(self.prefix + "/")) or ".." in path:
             raise Closed("GitHub path exceeds configured repository")
         if self.transport:
             return self.transport(path, method, body)
-        token = os.environ.get(self.config["token_env"], "")
-        if not token:
-            raise Closed("Missing controller GitHub credential")
+        reference = self.config.get("credential") or {"kind": "env", "name": self.config["token_env"]}
+        token = self.credentials.resolve(reference, purpose="github:" + self.config["repository"])
         req = request.Request("https://api.github.com" + path, method=method,
             data=canonical(body) if body is not None else None,
             headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",

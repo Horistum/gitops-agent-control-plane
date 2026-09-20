@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile the owner-operated governance run
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+Unit=agent-control-tick.service
+
+[Install]
+WantedBy=timers.target

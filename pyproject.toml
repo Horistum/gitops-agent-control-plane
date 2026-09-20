@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.5.0"
-description = "Portable authority decisions for bounded autonomous software delivery"
+version = "1.6.0"
+description = "Provider-neutral trust and governance for bounded software delivery"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 dependencies = []
@@ -18,4 +18,3 @@ include = ["control_plane_core*", "agent_runtime*", "reference_runtime*"]
 
 [tool.setuptools.package-data]
 control_plane_core = ["*.md", "*.json"]
-
