@@ -159,6 +159,56 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 3600
+        },
+        "protocol": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "credentials": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "env",
+                  "command"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "timeout": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -327,6 +377,47 @@
           },
           "minItems": 0,
           "maxItems": 32
+        },
+        "credential": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "env",
+                "command"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "argv": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "minItems": 1,
+              "maxItems": 64
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

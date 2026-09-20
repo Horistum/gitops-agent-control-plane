@@ -1,13 +1,26 @@
 # GitOps Agent Control Plane
 
-**A reusable decision core and an executable controller for bounded software
-delivery through Git, maintained by the Horistum project.**
+**A provider-neutral trust and governance layer for bounded software delivery
+through Git, maintained by the Horistum project.**
 
-Version 1.5.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
-real proposals from Codex or a configured JSON command provider, applies bounded
+Version 1.6.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
 The shared `control_plane_core` owns the phase, authority and acceptance decisions.
+
+Embed the pure core above an existing agent, or use the supplied operational
+controller. The primary integration is `reasoning.kind=command`: your adapter
+owns its model API and returns data; this controller owns execution and release
+authority. Codex remains supported as an explicit owner-operated alternative.
+Claude, Copilot and other agents need adapters satisfying this protocol; their
+unrestricted tool sessions are not automatically governed by it.
+
+The runtime is **single-host and owner-operated**, not a multi-tenant SaaS.
+Version 1.6 adds explicit credential references and a broker protocol, versioned
+provider usage, a one-tick embedding API and a local exact-decision review UI.
+PostgreSQL persistence, distributed queues, enterprise identity and tenant
+isolation are separate work with explicit gates in [hosting architecture](docs/HOSTING.md).
 
 The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
 faults and verifier limits. They do not establish AI reasoning quality. Operational
@@ -18,8 +31,8 @@ require their own host evidence; neither is inferred from those tests.
 
 ## Run on your product
 
-Python 3.11+, Git, a supported Codex CLI and a prepared rootless Podman image are
-required for the Codex/GitHub profile. Supply a clean product checkout, exact path
+Python 3.11+, Git, your trusted reasoning adapter and a prepared rootless Podman
+image are required for the command/GitHub profile. Supply a clean product checkout, exact path
 limits, owner-authored commands, trusted CI check identities and explicit item
 acceptance criteria. Examples are in [examples/operational](examples/operational).
 
@@ -29,6 +42,8 @@ agent-control doctor --policy /absolute/policy.json --goal /absolute/goal.json
 agent-control start --policy /absolute/policy.json --goal /absolute/goal.json \
   --state /absolute/agent-runs/my-goal
 agent-control status --state /absolute/agent-runs/my-goal
+agent-control decision --state /absolute/agent-runs/my-goal
+agent-control usage --state /absolute/agent-runs/my-goal
 agent-control resume --state /absolute/agent-runs/my-goal
 ```
 
@@ -48,12 +63,17 @@ available for owner-trusted code with an explicit `--trusted-local` opt-in. It
 cannot publish to GitHub. Its output is the run-owned `product.git`; it does not
 modify the source checkout.
 
+For the command protocol, rotating credentials, worker integration and local
+review, start with the [middleware integration guide](docs/MIDDLEWARE.md).
+`model_calls` reserves attempts, including uncertain outcomes; receipt-derived
+usage is operational accounting, not an exactly-once billing ledger.
+
 ## Components and ownership
 
 | Component | Responsibility |
 |---|---|
 | `control_plane_core` | Workflow aggregate, authority, context and typed evidence decisions; no credentials, network, process or Git effects |
-| `agent_runtime` | Operational reasoning, GitHub, Git, verification, persistence and owner-command adapters |
+| `agent_runtime` | Operational reasoning, credential resolution, GitHub, Git, verification, local persistence, embedding and owner review |
 | `reference_runtime` | Versioned deterministic fixture profile and property-probe conformance demonstrations |
 | Consumers such as `FlowAi-control` | Product-specific authority formats and service deployment; may reuse the core without running another controller |
 
@@ -117,6 +137,8 @@ consumer compatibility gate.
 3. [Verification and limits](docs/VERIFICATION.md): profiles, evidence, schema interoperability and trust boundaries.
 4. [Operations](docs/OPERATIONS.md): commands, results and diagnostics.
 5. [Adoption](docs/ADOPTION.md): public API, generated contracts, compatibility tests and consumer responsibilities.
+6. [Middleware integration](docs/MIDDLEWARE.md): provider/credential contracts, one-tick service API, usage and local review.
+7. [Hosting architecture](docs/HOSTING.md): verified limits and required multi-tenant migration work.
 
 [Review remediation and validation scope](docs/REMEDIATION.md) records the changes
 made after architectural review. Historical document links remain as navigation

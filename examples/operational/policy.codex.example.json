@@ -26,20 +26,13 @@
     "edit_bytes": 100000
   },
   "reasoning": {
-    "kind": "command",
+    "kind": "codex",
     "argv": [
-      "/absolute/path/to/trusted-reasoning-adapter"
+      "codex"
     ],
-    "model": "your-model",
-    "codex_home": "",
-    "timeout": 900,
-    "protocol": 2,
-    "credentials": {
-      "MODEL_API_KEY": {
-        "kind": "env",
-        "name": "AGENT_MODEL_API_KEY"
-      }
-    }
+    "model": "",
+    "codex_home": "/absolute/path/to/authenticated-codex-home",
+    "timeout": 900
   },
   "execution": {
     "kind": "podman",

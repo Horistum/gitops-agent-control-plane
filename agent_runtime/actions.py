@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from control_plane_core import fingerprint, recovery_actions, require_merge_identity, retirement, upgrade_boundary
 from .controller import Controller
+from .decisions import approval_binding, decision_document
 from .io import Closed, locked
 from .store import Store, runtime_fingerprint
 
@@ -67,7 +68,7 @@ def retire_attempt(engine):
     state.pop("owner_intent")
 
 
-def action(root, name, binding=None):
+def action(root, name, binding=None, *, decision_hash=None):
     root = root.resolve()
     with locked(root):
         engine = Controller(root)
@@ -77,9 +78,15 @@ def action(root, name, binding=None):
         elif name == "continue":
             state["paused"] = False
         elif name == "approve":
+            document = decision_document(state)
             if (not task or not task.get("approvable") or state["status"] != "NEEDS_DECISION"
-                    or binding != task.get("approval_required") or not binding):
+                    or binding != task.get("approval_required") or not binding
+                    or not document["approvable"] or binding != approval_binding(state)):
                 raise Closed("Approval must name the exact current candidate binding")
+            if decision_hash is not None and decision_hash != document["decision_hash"]:
+                raise Closed("Displayed decision changed; reload before approving")
+            state.setdefault("human_actions", []).append({"action": "approve", "binding": binding,
+                "decision_hash": document["decision_hash"], "authority": "local-owner"})
             task["approval"] = binding
             task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"

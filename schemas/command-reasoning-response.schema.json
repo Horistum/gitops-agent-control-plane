@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Horistum/gitops-agent-control-plane/schemas/command-reasoning-response.schema.json",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "command-reasoning/v2"
+    },
+    "result": {
+      "type": "object"
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "provider": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "request_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "result",
+    "usage",
+    "provider"
+  ],
+  "additionalProperties": false
+}

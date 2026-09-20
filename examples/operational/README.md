@@ -2,7 +2,11 @@
 
 These files are templates for the real `agent-control` runtime, not fixture
 selectors. Copy both outside the product checkout and fill in the actual product
-path, authenticated Codex home, pinned prepared image and GitHub identity/checks.
+path, trusted command provider, model credential reference, pinned prepared image
+and GitHub identity/checks. `policy.example.json` is the primary provider-neutral
+profile; `policy.codex.example.json` retains the optional authenticated Codex profile.
+These are configuration templates: no model adapter or credential broker is
+silently installed. Implement the [documented command protocol](../../docs/MIDDLEWARE.md).
 The illustrative product has `app.py`, `tests/test_base.py` and a protected
 `tools/test.py` runner that writes `results/*.xml`. Adapt commands and criteria
 to your product; the controller does not invent a test harness from this template.

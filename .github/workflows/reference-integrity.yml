@@ -71,7 +71,10 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -c 'import os, shutil; shutil.rmtree(os.path.join(os.environ["RUNNER_TEMP"], "installed", "reference_runtime"))'
-          PYTHONPATH="$RUNNER_TEMP/installed:$GITHUB_WORKSPACE/tests" python -S -m unittest test_operational_runtime.OperationalRuntimeTests.test_real_subprocess_provider_git_tests_two_item_goal_and_retained_regressions -v
+          PYTHONPATH="$RUNNER_TEMP/installed:$GITHUB_WORKSPACE/tests" python -S -m unittest \
+            test_operational_runtime.OperationalRuntimeTests.test_real_subprocess_provider_git_tests_two_item_goal_and_retained_regressions \
+            test_governance_middleware.MiddlewareTests.test_v2_real_provider_credentials_usage_and_complete_goal \
+            test_governance_middleware.MiddlewareTests.test_review_http_auth_origin_host_snapshot_and_approval -v
       - name: Check the actual Codex CLI contract without model credentials
         run: |
           npm install --global @openai/codex@0.153.4

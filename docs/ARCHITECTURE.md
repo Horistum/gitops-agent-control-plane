@@ -28,7 +28,7 @@ can authenticate a remote check.
 | Authoritative state | Private fsynced state and immutable receipts | Single-writer `loop-state` Git branch and event chain |
 | Provider effects | Codex/command, Git, GitHub and Podman | Existing Codex, GitHub, product, integration-log and Podman services |
 | Product completion | Retained tests and verified merge | Retained tests, completion records, roadmap/lifecycle reconciliation |
-| Operations | Owner CLI, pause/replan/resume | Issue projection, owner commands, activation and reviewed upgrades |
+| Operations | Owner CLI, one-tick embedding, local exact-decision review | Issue projection, owner commands, activation and reviewed upgrades |
 
 A projection is not another persisted ledger. Flow runs one controller; it does
 not launch `agent-control` beside its service. Its production entry point is
@@ -61,6 +61,11 @@ package from an installed distribution before exercising the operational loop.
 | `agent_runtime/github.py` | Authenticated PR/check observations, server governance and merge API |
 | `agent_runtime/store.py` | One writer, fsynced state, request-bound immutable effect receipts |
 | `agent_runtime/actions.py` | Owner decisions, retirement, explicit uncertain-call retry and upgrade boundary |
+| `agent_runtime/credentials.py` | Resolve explicit environment references or an external broker on each use |
+| `agent_runtime/usage.py` | Validate receipts and project reserved, recorded and unknown model attempts |
+| `agent_runtime/decisions.py` | Shared approval identity and full decision-document fingerprint |
+| `agent_runtime/service.py` | Trusted-path embedding API for single-step workers and owner review |
+| `agent_runtime/review.py` | Bearer-authenticated loopback review; no enterprise identity/tenancy |
 
 `operational-git/v1` is authored once as `agent_runtime.PROFILE`; its policy and
 role schemas are generated from the contracts actually consumed by the controller.
@@ -140,6 +145,12 @@ Runtime source changes invalidate resumption. Upgrade requires an authoritative
 pause and no active work, or explicit suspension of a held, unchanged attempt.
 It preserves the goal and history and leaves the new runtime paused. There is no
 self-deployment, distributed leader election or HA controller in this profile.
+
+The service facade does not change that storage contract. Local Git objects,
+receipts, the state snapshot and execution workspaces remain part of one owner
+boundary. A broker reference is not a tenant authorization decision, and rootless
+Podman is not a complete hostile multi-tenant isolation boundary. The migration
+design and acceptance gates are recorded in [hosting architecture](HOSTING.md).
 
 ## Deterministic profile compatibility
 

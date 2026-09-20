@@ -1,0 +1,12 @@
+[Unit]
+Description=One bounded owner-operated governance tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agentcontrol
+EnvironmentFile=/etc/agent-control/runtime.env
+ExecStart=/usr/local/bin/agent-control tick --state /var/lib/agent-control/run
+TimeoutStartSec=4h
+UMask=0077

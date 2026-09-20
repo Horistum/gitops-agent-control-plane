@@ -56,6 +56,14 @@ ROLE_SCHEMAS = {
     **{name: obj(COMMON) for name in ("chief_plan", "reviewer", "challenge_review", "architect_accept", "chief_accept")},
 }
 
+PROVIDER_RESPONSE_SCHEMA = obj({
+    "schema": {"type": "string", "const": "command-reasoning/v2"},
+    "result": {"type": "object"},
+    "usage": {"type": "object", "properties": {
+        name: integer(0, 10**12) for name in ("input_tokens", "output_tokens", "cached_input_tokens")},
+        "additionalProperties": False},
+    "provider": obj({"id": text(200, 1), "model": text(200, 1), "request_id": text(500)})})
+
 
 def normalize_role_output(value):
     # v1 command providers remain compatible; absence cannot grant a fact or
@@ -85,6 +93,16 @@ POLICY_SCHEMA = obj({
                          "token_env": text(128), "required_checks": array(obj({"name": text(200, 1), "app_id": integer(1, 2**31)}), 32)}),
 })
 POLICY_SCHEMA["properties"]["adaptive_agent_graph"] = {"type": "boolean"}
+CREDENTIAL_SCHEMA = {"type": "object", "properties": {
+    "kind": enum("env", "command"), "name": text(128, 1), "argv": ARGV,
+    "reference": text(1000, 1), "timeout": integer(1, 60)},
+    "required": ["kind"], "additionalProperties": False}
+# Optional additions preserve existing v1 policies. Cross-field constraints are
+# enforced by validate_configuration and again at credential resolution.
+POLICY_SCHEMA["properties"]["reasoning"]["properties"].update({
+    "protocol": integer(1, 2),
+    "credentials": {"type": "object", "maxProperties": 16, "additionalProperties": CREDENTIAL_SCHEMA}})
+POLICY_SCHEMA["properties"]["publication"]["properties"]["credential"] = CREDENTIAL_SCHEMA
 CRITERION = obj({"id": text(128, 1), "text": text(4000, 1),
                  "kind": enum("behavior", "compatibility", "documentation", "ci", "delivery"),
                  "paths": PATHS, "targets": array(enum("candidate", "integration"), 2)})
@@ -101,6 +119,14 @@ GOAL_SCHEMA = obj({"schema": {"type": "integer", "const": 1}, "id": text(128, 1)
 def validate_configuration(policy, goal):
     validate_instance(policy, POLICY_SCHEMA)
     validate_instance(goal, GOAL_SCHEMA)
+    from .credentials import validate_provider_credentials, validate_reference
+    validate_provider_credentials(policy["reasoning"])
+    if policy["reasoning"]["kind"] != "command" and policy["reasoning"].get("protocol", 1) != 1:
+        raise Closed("Versioned command protocol is only available for command reasoning")
+    if "credential" in policy["publication"]:
+        validate_reference(policy["publication"]["credential"])
+        if policy["publication"]["kind"] != "github" or policy["publication"]["token_env"]:
+            raise Closed("Use one GitHub credential source; set token_env to empty for a reference")
     if not Path(policy["product"]).is_absolute():
         raise Closed("Product checkout must be an absolute path")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", policy["base_branch"]):
@@ -120,7 +146,7 @@ def validate_configuration(policy, goal):
             raise Closed("GitHub requires a repository identity and trusted named checks")
         if policy["execution"]["kind"] != "podman":
             raise Closed("GitHub publication requires isolated Podman execution")
-        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", pub["token_env"]):
+        if "credential" not in pub and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", pub["token_env"]):
             raise Closed("Invalid token environment variable")
     if policy["reasoning"]["kind"] == "codex" and not Path(policy["reasoning"]["codex_home"]).is_absolute():
         raise Closed("Codex requires an explicit absolute authenticated home")
