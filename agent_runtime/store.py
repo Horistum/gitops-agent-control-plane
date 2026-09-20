@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import control_plane_core
-from control_plane_core import fingerprint
-from .io import Closed, atomic_json, digest, read_json
+from control_plane_core import fingerprint, model_call_action
+from .io import Closed, NotDispatched, atomic_json, digest, read_json
 
 
 def runtime_fingerprint():
@@ -24,13 +25,20 @@ class Store:
         self.after_receipt = lambda _: None  # Fault-injection seam; never policy input.
 
     def save(self):
+        self.state["revision"] = self.state.get("revision", 0) + 1
+        self.state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if self.state.get("task"):
+            self.state["phase"] = self.state["task"]["phase"]
         self.state["history"] = self.state.get("history", [])[-1000:]
         atomic_json(self.path, self.state)
 
     def read_receipt(self, identity):
         if not re.fullmatch(r"[0-9a-f]{64}", identity):
             raise Closed("Invalid effect identity")
-        value = read_json(self.root / "receipts" / (identity + ".json"))
+        try:
+            value = read_json(self.root / "receipts" / (identity + ".json"))
+        except FileNotFoundError:
+            raise Closed("Recorded effect receipt is missing; restore evidence before continuing") from None
         if not isinstance(value, dict):
             raise Closed("Effect receipt must be an object")
         request = value.get("request")
@@ -40,7 +48,7 @@ class Store:
             raise Closed("Effect receipt provenance or content differs")
         return value
 
-    def effect(self, kind, payload, perform):
+    def effect(self, kind, payload, perform, *, prepare=None):
         task = self.state.get("task") or {}
         request = {"kind": kind, "payload": payload, "policy_hash": self.state["policy_hash"],
                    "runtime_hash": self.state["runtime_hash"], "run_id": self.state["run_id"],
@@ -57,16 +65,30 @@ class Store:
                 raise Closed("Effect receipt provenance or content differs")
             result = value["output"]
         else:
-            if pending and kind == "model":
+            if identity in self.state.get("receipts", {}):
+                raise Closed("Recorded effect receipt is missing; restore it instead of repeating the effect")
+            if kind == "model" and model_call_action(receipt_available=False,
+                    dispatch_state="dispatched" if pending else "not_started") == "hold":
                 raise Closed("Indeterminate model call; explicit retry-effect must name " + identity)
             if not pending:
+                if kind == "model" and self.state["model_calls"] >= self.state["policy"]["limits"]["model_calls"]:
+                    raise Closed("Model call budget exhausted")
+                # No provider can be called during preparation. Resolve credentials
+                # before reserving; a receipt replay never needs current credentials.
+                if prepare is not None:
+                    prepare()
                 if kind == "model":
-                    if self.state["model_calls"] >= self.state["policy"]["limits"]["model_calls"]:
-                        raise Closed("Model call budget exhausted")
                     self.state["model_calls"] += 1
                 self.state["pending"] = {"id": identity, "kind": kind, "request": request}
                 self.save()
-            result = perform(identity)
+            try:
+                result = perform(identity)
+            except NotDispatched:
+                if kind == "model":
+                    self.state["model_calls"] -= 1
+                    self.state["pending"] = None
+                    self.save()
+                raise
             value = {"request": request, "output": result, "output_hash": fingerprint(result)}
             atomic_json(receipt, value)
             self.after_receipt(identity)

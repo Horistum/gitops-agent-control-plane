@@ -1,6 +1,6 @@
 # Adopting the shared controller domain
 
-For Flow 0.7, source synchronization alone is insufficient: its task controller
+For Flow 0.8, source synchronization alone is insufficient: its task controller
 must use `flow_loop/workflow.py`, the authored work-contract binding and the
 current `flow_loop.runtime.Controller` facade. The adapters reduce actual events
 through `development-workflow/v1` and call its revision-bound release gate.
@@ -37,7 +37,7 @@ same Flow product while the service owns it.
 
 ## Supported API
 
-Core library 1.5.0 exposes all supported decisions from `control_plane_core` and
+Core library 1.7.0 exposes all supported decisions from `control_plane_core` and
 from `workflow`, `decisions`, `execution`, `acceptance`, `verification` and `schema`. Each module has an
 explicit `__all__`; submodule imports remain supported. The source package has
 no runtime dependencies and needs no reference repository configuration when

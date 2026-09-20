@@ -1,6 +1,9 @@
 """Owner commands with exact bindings and quiescent upgrade/retirement gates."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import uuid
+
 from control_plane_core import fingerprint, recovery_actions, require_merge_identity, retirement, upgrade_boundary
 from .controller import Controller
 from .decisions import approval_binding, decision_document
@@ -68,11 +71,17 @@ def retire_attempt(engine):
     state.pop("owner_intent")
 
 
-def action(root, name, binding=None, *, decision_hash=None):
+def action(root, name, binding=None, *, decision_hash=None, reason=""):
     root = root.resolve()
     with locked(root):
         engine = Controller(root)
         state, task = engine.state, engine.task
+        document = decision_document(state)
+        if decision_hash is not None and decision_hash != document["decision_hash"]:
+            raise Closed("Displayed decision changed; reload before acting")
+        if not isinstance(reason, str) or len(reason) > 1000:
+            raise Closed("Owner reason must be a bounded string")
+        before = engine.summary()
         if name == "pause":
             state["paused"] = True
         elif name == "continue":
@@ -85,8 +94,6 @@ def action(root, name, binding=None, *, decision_hash=None):
                 raise Closed("Approval must name the exact current candidate binding")
             if decision_hash is not None and decision_hash != document["decision_hash"]:
                 raise Closed("Displayed decision changed; reload before approving")
-            state.setdefault("human_actions", []).append({"action": "approve", "binding": binding,
-                "decision_hash": document["decision_hash"], "authority": "local-owner"})
             task["approval"] = binding
             task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"
@@ -130,6 +137,11 @@ def action(root, name, binding=None, *, decision_hash=None):
             retire_attempt(engine)
         else:
             raise Closed("Unknown owner action")
+        state.setdefault("human_actions", []).append({"action": name, "binding": binding,
+            "decision_hash": document["decision_hash"], "authority": "local-owner",
+            "action_id": uuid.uuid4().hex, "at": datetime.now(timezone.utc).isoformat(),
+            "reason": reason, "before": {key: before[key] for key in ("status", "phase", "head")},
+            "after": {key: engine.summary()[key] for key in ("status", "phase", "head")}})
         engine.store.save()
         return engine.summary()
 

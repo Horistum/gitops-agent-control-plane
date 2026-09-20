@@ -28,20 +28,24 @@
   "reasoning": {
     "kind": "command",
     "argv": [
-      "/absolute/path/to/trusted-reasoning-adapter"
+      "/absolute/path/to/agent-reasoning-openai",
+      "--timeout",
+      "840",
+      "--max-output-tokens",
+      "16384"
     ],
     "model": "your-model",
     "codex_home": "",
     "timeout": 900,
     "protocol": 2,
     "credentials": {
-      "MODEL_API_KEY": {
+      "OPENAI_API_KEY": {
         "kind": "env",
         "name": "AGENT_MODEL_API_KEY"
       }
     },
     "check_argv": [
-      "/absolute/path/to/trusted-reasoning-adapter",
+      "/absolute/path/to/agent-reasoning-openai",
       "--check"
     ]
   },
