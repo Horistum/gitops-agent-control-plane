@@ -148,9 +148,9 @@ self-deployment, distributed leader election or HA controller in this profile.
 
 The service facade does not change that storage contract. Local Git objects,
 receipts, the state snapshot and execution workspaces remain part of one owner
-boundary. A broker reference is not a tenant authorization decision, and rootless
-Podman is not a complete hostile multi-tenant isolation boundary. The migration
-design and acceptance gates are recorded in [hosting architecture](HOSTING.md).
+boundary. Durable local state and one writer per run are intentional deployment
+choices, not a persistence migration backlog. The portable core lets consumers
+retain their own storage and orchestration. See [deployment scope](HOSTING.md).
 
 ## Deterministic profile compatibility
 

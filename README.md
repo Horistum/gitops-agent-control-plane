@@ -16,11 +16,13 @@ authority. Codex remains supported as an explicit owner-operated alternative.
 Claude, Copilot and other agents need adapters satisfying this protocol; their
 unrestricted tool sessions are not automatically governed by it.
 
-The runtime is **single-host and owner-operated**, not a multi-tenant SaaS.
+The runtime is **single-host and owner-operated**, with durable local JSON state,
+effect receipts and a per-run writer lock. This is the supported storage design;
+no external database is required.
 Version 1.6 adds explicit credential references and a broker protocol, versioned
 provider usage, a one-tick embedding API and a local exact-decision review UI.
-PostgreSQL persistence, distributed queues, enterprise identity and tenant
-isolation are separate work with explicit gates in [hosting architecture](docs/HOSTING.md).
+These integrations preserve that deployment model. See
+[deployment scope](docs/HOSTING.md) for storage, concurrency and consumer ownership.
 
 The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
 faults and verifier limits. They do not establish AI reasoning quality. Operational
@@ -138,7 +140,7 @@ consumer compatibility gate.
 4. [Operations](docs/OPERATIONS.md): commands, results and diagnostics.
 5. [Adoption](docs/ADOPTION.md): public API, generated contracts, compatibility tests and consumer responsibilities.
 6. [Middleware integration](docs/MIDDLEWARE.md): provider/credential contracts, one-tick service API, usage and local review.
-7. [Hosting architecture](docs/HOSTING.md): verified limits and required multi-tenant migration work.
+7. [Deployment scope](docs/HOSTING.md): supported local storage, per-run concurrency and consumer ownership.
 
 [Review remediation and validation scope](docs/REMEDIATION.md) records the changes
 made after architectural review. Historical document links remain as navigation
