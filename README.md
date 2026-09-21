@@ -9,6 +9,14 @@ edits, executes tests in rootless Podman, reviews the actual candidate, publishe
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
 The shared `control_plane_core` owns the phase, authority and acceptance decisions.
 
+The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
+faults and verifier limits. They do not establish AI reasoning quality. Operational
+integration tests execute real Git and processes with controlled reasoning/HTTP
+peers. CI also executes the lifecycle in actual rootless Podman and tests installed
+package bytes. A live authenticated model turn and a particular product deployment
+require their own host evidence; neither is inferred from those tests.
+
+
 Embed the pure core above an existing agent, or use the supplied operational
 controller. The primary integration is `reasoning.kind=command`: your adapter
 owns its model API and returns data; this controller owns execution and release
@@ -31,12 +39,6 @@ See [recovery and prompts](docs/RECOVERY-180.md).
 These integrations preserve that deployment model. See
 [deployment scope](docs/HOSTING.md) for storage, concurrency and consumer ownership.
 
-The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
-faults and verifier limits. They do not establish AI reasoning quality. Operational
-integration tests execute real Git and processes with controlled reasoning/HTTP
-peers. CI also executes the lifecycle in actual rootless Podman and tests installed
-package bytes. A live authenticated model turn and a particular product deployment
-require their own host evidence; neither is inferred from those tests.
 
 ## Run on your product
 
