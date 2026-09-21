@@ -1,20 +1,19 @@
 """Receipt-derived operational accounting, deliberately not an invoice ledger."""
 from __future__ import annotations
 
+from control_plane_core import CoreError, TOKEN_FIELDS, validate_usage as _validate_usage
+
 from .io import Closed
 
-TOKEN_FIELDS = ("input_tokens", "output_tokens", "cached_input_tokens")
+__all__ = ["TOKEN_FIELDS", "validate_usage", "usage_report"]
 
 
 def validate_usage(value):
-    if not isinstance(value, dict) or set(value) - set(TOKEN_FIELDS):
-        raise Closed("Usage must contain only supported token counters")
-    if any(type(v) is not int or not 0 <= v <= 10**12 for v in value.values()):
-        raise Closed("Usage counters must be bounded nonnegative integers")
-    if "cached_input_tokens" in value and ("input_tokens" not in value
-            or value["cached_input_tokens"] > value["input_tokens"]):
-        raise Closed("Cached tokens must be a subset of reported input tokens")
-    return dict(value)
+    """Agent-runtime boundary: the shared core rule, reported as this module's ``Closed``."""
+    try:
+        return _validate_usage(value)
+    except CoreError as exc:
+        raise Closed(str(exc)) from exc
 
 
 def usage_report(store):

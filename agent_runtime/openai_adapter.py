@@ -1,11 +1,30 @@
 """Opt-in Chat Completions command/v2 adapter. One HTTP attempt, no fallback."""
 import argparse
+import json
 import os
 import sys
 from urllib import error, parse, request
 
 from .io import Closed, canonical, loads
 from .usage import validate_usage
+
+# Fields the runtime holds stable across most consecutive role calls within a
+# run (the whole goal, declared path authority, the item's acceptance
+# criteria and the currently retrieved sources), placed first so a provider
+# with prefix-based prompt caching can reuse them. Everything else (task
+# state, phase, per-role memory, omitted paths, ...) genuinely changes call
+# to call and always follows. Key order carries no meaning here: nothing in
+# this runtime hashes, diffs or parses this specific string back, so
+# reordering cannot change what the model is told or any identity decision.
+STABLE_PREFIX_KEYS = ("goal", "authority", "criteria", "sources")
+
+
+def cache_friendly_json(value):
+    if not isinstance(value, dict):
+        return canonical(value).decode()
+    ordered = {key: value[key] for key in STABLE_PREFIX_KEYS if key in value}
+    ordered.update((key, item) for key, item in value.items() if key not in STABLE_PREFIX_KEYS)
+    return json.dumps(ordered, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -29,7 +48,7 @@ def complete(envelope, *, url, key, timeout, max_tokens, opener=None):
             "max_completion_tokens": max_tokens, "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": envelope["instructions"] +
                 "\nReturn a JSON object matching this schema:\n" + canonical(envelope["output_schema"]).decode()},
-                {"role": "user", "content": canonical(envelope["input"]).decode()}]}
+                {"role": "user", "content": cache_friendly_json(envelope["input"])}]}
     req = request.Request(endpoint(url), data=canonical(body), method="POST", headers={
         "Authorization": "Bearer " + key, "Content-Type": "application/json",
         "X-Client-Request-Id": envelope.get("effect_id", ""), "User-Agent": "agent-control-command-v2"})

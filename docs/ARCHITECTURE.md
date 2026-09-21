@@ -66,6 +66,7 @@ package from an installed distribution before exercising the operational loop.
 | `agent_runtime/decisions.py` | Shared approval identity and full decision-document fingerprint |
 | `agent_runtime/service.py` | Trusted-path embedding API for single-step workers and owner review |
 | `agent_runtime/review.py` | Bearer-authenticated loopback review; no enterprise identity/tenancy |
+| `agent_runtime/registry.py` | Read-only status across several local run directories; no shared store |
 
 `operational-git/v1` is authored once as `agent_runtime.PROFILE`; its policy and
 role schemas are generated from the contracts actually consumed by the controller.

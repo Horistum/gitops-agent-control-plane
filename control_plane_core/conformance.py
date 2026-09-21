@@ -11,7 +11,7 @@ class CoreConformance(unittest.TestCase):
     def test_public_package_covers_every_supported_decision_module(self):
         import control_plane_core as core
         exported = {"CONTRACT", "__version__"}
-        for name in ("decisions", "execution", "acceptance", "verification", "workflow", "schema"):
+        for name in ("decisions", "execution", "acceptance", "verification", "workflow", "schema", "usage"):
             module = importlib.import_module("control_plane_core." + name)
             self.assertEqual(len(module.__all__), len(set(module.__all__)))
             for symbol in module.__all__:

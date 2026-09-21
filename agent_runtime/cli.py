@@ -55,6 +55,9 @@ def main(argv=None):
     p = sub.add_parser("restore")
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--archive", type=Path, required=True)
+    p = sub.add_parser("registry")
+    p.add_argument("--root", type=Path, required=True,
+                   help="One run, or a flat directory whose immediate children are runs")
     for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name)
         p.add_argument("--state", type=Path, required=True)
@@ -103,6 +106,9 @@ def main(argv=None):
             from .backup import backup, restore
             print(json.dumps(backup(args.state, args.output) if args.command == "backup"
                              else restore(args.archive, args.state)))
+        elif args.command == "registry":
+            from .registry import registry_status
+            print(json.dumps(registry_status(args.root), ensure_ascii=False))
         elif args.command in {"tick", "decision", "usage"}:
             from .service import RunService
             print(json.dumps(getattr(RunService(args.state), args.command)(), ensure_ascii=False))

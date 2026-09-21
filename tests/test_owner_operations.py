@@ -17,7 +17,7 @@ from agent_runtime.backup import backup, restore
 from agent_runtime.controller import Controller
 from agent_runtime.doctor import diagnose
 from agent_runtime.io import Closed, canonical, locked, read_json
-from agent_runtime.openai_adapter import complete, endpoint
+from agent_runtime.openai_adapter import cache_friendly_json, complete, endpoint
 from agent_runtime.review import create_server
 from agent_runtime.service import RunService
 from agent_runtime.supervisor import supervise
@@ -85,6 +85,27 @@ class OwnerOperationsTests(unittest.TestCase):
             self.assertEqual(send.call_count, 1)
         for url in ('http://example.com', 'https://token@example.com', 'https://example.com?secret=x'):
             with self.assertRaises(Closed): endpoint(url)
+
+    def test_cache_friendly_ordering_preserves_values_and_shares_a_longer_prefix(self):
+        stable = {'goal': {'id': 'GOAL-1', 'items': ['TASK-1', 'TASK-2']},
+                  'authority': {'allowed_paths': ['src/**']}, 'criteria': [{'id': 'AC-1'}],
+                  'sources': {'app.py': {'sha256': 'abc', 'content': 'def value():\n    return 1\n'}}}
+        first = {**stable, 'phase': 'architect', 'task': {'id': 'TASK-1', 'turn': 1}, 'memory': {'architect': {}}}
+        second = {**stable, 'phase': 'developer', 'task': {'id': 'TASK-1', 'turn': 2, 'feedback': ['x']}, 'memory': {}}
+        rendered_first, rendered_second = cache_friendly_json(first), cache_friendly_json(second)
+        # Same values regardless of key order: a reorder can only change bytes, never meaning.
+        self.assertEqual(json.loads(rendered_first), first)
+        self.assertEqual(json.loads(rendered_second), second)
+        def common_prefix_len(a, b):
+            return next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), min(len(a), len(b)))
+        reordered_prefix = common_prefix_len(rendered_first, rendered_second)
+        baseline_prefix = common_prefix_len(canonical(first).decode(), canonical(second).decode())
+        self.assertGreater(reordered_prefix, baseline_prefix)
+        # The stable block itself is one exact shared prefix, independent of any volatile field.
+        self.assertTrue(rendered_first.startswith(cache_friendly_json(stable)[:-1]))
+        self.assertTrue(rendered_second.startswith(cache_friendly_json(stable)[:-1]))
+        # A non-dict payload (still a legitimate command/v2 "input") falls back to plain canonical output.
+        self.assertEqual(cache_friendly_json(["x"]), canonical(["x"]).decode())
 
     def test_supervisor_runs_ready_phases_immediately_and_backs_off_waits(self):
         class Service:
