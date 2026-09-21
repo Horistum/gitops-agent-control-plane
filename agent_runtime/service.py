@@ -4,7 +4,8 @@ from pathlib import Path
 from .actions import action
 from .controller import Controller
 from .decisions import decision_document
-from .io import Busy, locked
+from .io import Busy, Closed, locked
+from .store import Store
 from .usage import usage_report
 
 
@@ -21,16 +22,27 @@ class RunService:
             return {"outcome": "busy", "retryable": True}
 
     def status(self):
-        with locked(self.root):
-            return Controller(self.root).summary()
+        from .observations import status_document
+        return status_document(Store(self.root).state)
 
     def decision(self):
-        with locked(self.root):
-            return decision_document(Controller(self.root).state)
+        return decision_document(Store(self.root).state)
 
     def usage(self):
-        with locked(self.root):
-            return usage_report(Controller(self.root).store)
+        return usage_report(Store(self.root))
 
     def approve(self, binding, decision_hash):
         return action(self.root, "approve", binding, decision_hash=decision_hash)
+
+    def act(self, name, decision_hash, *, binding=None, reason=""):
+        return action(self.root, name, binding, decision_hash=decision_hash, reason=reason)
+
+    def diff(self, decision_hash):
+        from .git import GitRepository
+        state = Store(self.root).state
+        decision = decision_document(state)
+        if not decision["head"] or decision_hash != decision["decision_hash"]:
+            raise Closed("Displayed decision changed; reload before reading diff")
+        repo = GitRepository(self.root / "product.git", state["policy"]["base_branch"])
+        return {"decision_hash": decision_hash, "base": decision["base"], "head": decision["head"],
+                "diff": repo.text("diff", "--no-ext-diff", "--no-textconv", decision["base"], decision["head"], "--")}

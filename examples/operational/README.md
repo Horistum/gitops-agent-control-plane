@@ -5,8 +5,11 @@ selectors. Copy both outside the product checkout and fill in the actual product
 path, trusted command provider, model credential reference, pinned prepared image
 and GitHub identity/checks. `policy.example.json` is the primary provider-neutral
 profile; `policy.codex.example.json` retains the optional authenticated Codex profile.
-These are configuration templates: no model adapter or credential broker is
-silently installed. Implement the [documented command protocol](../../docs/MIDDLEWARE.md).
+An optional concrete API adapter is installed as `agent-reasoning-openai`; use
+`policy.openai.example.json` and configure an available model and explicit API key
+reference. This is an owner-selected API billing path, never a fallback from Codex.
+The primary generic template still requires your own trusted adapter and its
+non-billing `check_argv` handshake. Implement the [documented command protocol](../../docs/MIDDLEWARE.md).
 The illustrative product has `app.py`, `tests/test_base.py` and a protected
 `tools/test.py` runner that writes `results/*.xml`. Adapt commands and criteria
 to your product; the controller does not invent a test harness from this template.

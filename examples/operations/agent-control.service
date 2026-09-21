@@ -1,0 +1,17 @@
+[Unit]
+Description=Owner-operated governance supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentcontrol
+EnvironmentFile=/etc/agent-control/runtime.env
+ExecStart=/usr/local/bin/agent-control serve --state /var/lib/agent-control/run
+Restart=on-failure
+RestartSec=30s
+TimeoutStopSec=4h
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

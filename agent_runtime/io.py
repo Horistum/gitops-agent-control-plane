@@ -27,6 +27,14 @@ class Busy(Closed):
     """A different worker owns this run; a scheduler may retry later."""
 
 
+class InvalidJSON(Closed):
+    """Untrusted JSON decoding failed, without exposing response bytes."""
+
+
+class NotDispatched(Unavailable):
+    """The operating system did not create a child process."""
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
                       separators=(",", ":")).encode()
@@ -41,11 +49,11 @@ def loads(data):
         out = {}
         for key, value in pairs:
             if key in out:
-                raise Closed("Duplicate JSON key")
+                raise InvalidJSON("Duplicate JSON key")
             out[key] = value
         return out
     def invalid(_):
-        raise Closed("Nonfinite JSON value")
+        raise InvalidJSON("Nonfinite JSON value")
     return json.loads(data, object_pairs_hook=unique, parse_constant=invalid)
 
 
@@ -90,9 +98,12 @@ def locked(directory):
 
 def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, check=True):
     """Drain stdin/stdout/stderr concurrently, enforce bounds, kill descendants."""
-    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               start_new_session=True)
+    try:
+        process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   start_new_session=True)
+    except OSError:
+        raise NotDispatched("Process could not be started; no dispatch occurred") from None
     buffers = {"out": bytearray(), "err": bytearray()}
     incoming = memoryview(data)
     deadline = time.monotonic() + timeout

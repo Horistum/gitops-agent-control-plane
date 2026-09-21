@@ -3,12 +3,20 @@ import unittest
 
 from .decisions import CoreError
 from .execution import (context_checkpoint, context_files, context_view, next_phase,
-                        recovery_actions, repair_target, retry_preconditions,
+                        recovery_actions, repair_target, retry_preconditions, model_call_action,
                         upgrade_boundary, verification_transition, next_attempt)
 from .acceptance import acceptance_contract, evaluate_obligations, evidence_status_valid, test_criteria
 
 
 class ExecutionConformance(unittest.TestCase):
+    def test_model_dispatch_without_receipt_never_grants_automatic_retry(self):
+        for state in ('dispatched', 'legacy_unknown'):
+            self.assertEqual(model_call_action(receipt_available=False, dispatch_state=state), 'hold')
+            self.assertEqual(model_call_action(receipt_available=True, dispatch_state=state), 'reuse')
+        self.assertEqual(model_call_action(receipt_available=False, dispatch_state='not_started'), 'execute')
+        with self.assertRaises(CoreError):
+            model_call_action(receipt_available='yes', dispatch_state='not_started')
+
     def checkpoint(self, previous=None, **overrides):
         args = dict(revision="rev1", phase="architect", summary="first-match collision found",
                     sources={"catalog.py": {"sha256": "a", "text": "first match"}},

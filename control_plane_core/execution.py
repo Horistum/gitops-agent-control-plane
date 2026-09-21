@@ -12,6 +12,7 @@ import json
 from .decisions import CoreError
 
 __all__ = [
+    "model_call_action",
     "context_checkpoint", "context_files", "context_view", "fingerprint",
     "next_attempt", "next_phase", "recovery_actions", "repair_target",
     "retirement", "retry_preconditions", "upgrade_boundary",
@@ -115,6 +116,15 @@ def recovery_actions(task, limits):
                           task.get("hold_kind") in {"FAILED", "BLOCKED_POLICY"} and not exhausted),
             "replan": bool(held and not task.get("merge_sha") and
                            task.get("owner_replans", 0) < limits.get("max_owner_replans", 2))}
+
+
+def model_call_action(*, receipt_available, dispatch_state):
+    """Transport-independent rule; missing evidence never proves no dispatch."""
+    if type(receipt_available) is not bool or dispatch_state not in {"not_started", "dispatched", "legacy_unknown"}:
+        raise CoreError("Invalid model effect observation")
+    if receipt_available:
+        return "reuse"
+    return "execute" if dispatch_state == "not_started" else "hold"
 
 
 def next_attempt(current, archived=()):

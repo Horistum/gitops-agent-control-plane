@@ -2,7 +2,22 @@
 from __future__ import annotations
 
 import copy
-from control_plane_core import fingerprint
+from control_plane_core import fingerprint, recovery_actions
+
+
+def owner_actions(state):
+    task, pending = state.get("task") or {}, state.get("pending")
+    allowed = ["continue" if state["paused"] else "pause"]
+    if pending:
+        allowed.append("retry-effect" if pending["kind"] == "model" else "reconcile")
+        return allowed
+    allowed.append("cancel")
+    if task and state.get("owner_replans", {}).get(task["id"], 0) < 2:
+        allowed.append("replan")
+    if recovery_actions({**task, "pending": pending, "agent_calls": state["model_calls"]},
+            {"max_agent_calls_per_task": state["policy"]["limits"]["model_calls"]})["retry"]:
+        allowed.append("retry")
+    return allowed
 
 
 def approval_binding(state):
@@ -30,5 +45,8 @@ def decision_document(state):
             "independent_evidence", "candidate_obligations", "integration_obligations",
             "obligations", "acceptance", "ci_evidence", "integration_evidence") if key in task},
         "pull_request": task.get("pr")}
+    document["actions"] = owner_actions(state)
+    document["pending_effect"] = (state.get("pending") or {}).get("id")
+    document["recent_actions"] = state.get("human_actions", [])[-30:]
     document["decision_hash"] = fingerprint(document)
     return copy.deepcopy(document)

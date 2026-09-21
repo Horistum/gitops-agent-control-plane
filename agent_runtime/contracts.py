@@ -101,6 +101,7 @@ CREDENTIAL_SCHEMA = {"type": "object", "properties": {
 # enforced by validate_configuration and again at credential resolution.
 POLICY_SCHEMA["properties"]["reasoning"]["properties"].update({
     "protocol": integer(1, 2),
+    "check_argv": ARGV,
     "credentials": {"type": "object", "maxProperties": 16, "additionalProperties": CREDENTIAL_SCHEMA}})
 POLICY_SCHEMA["properties"]["publication"]["properties"]["credential"] = CREDENTIAL_SCHEMA
 CRITERION = obj({"id": text(128, 1), "text": text(4000, 1),
@@ -123,6 +124,8 @@ def validate_configuration(policy, goal):
     validate_provider_credentials(policy["reasoning"])
     if policy["reasoning"]["kind"] != "command" and policy["reasoning"].get("protocol", 1) != 1:
         raise Closed("Versioned command protocol is only available for command reasoning")
+    if policy["reasoning"]["kind"] != "command" and "check_argv" in policy["reasoning"]:
+        raise Closed("Custom readiness handshake is only available for command reasoning")
     if "credential" in policy["publication"]:
         validate_reference(policy["publication"]["credential"])
         if policy["publication"]["kind"] != "github" or policy["publication"]["token_env"]:

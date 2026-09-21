@@ -8,7 +8,7 @@ import tempfile
 from control_plane_core.schema import SchemaValidationError, validate_instance
 from .contracts import ROLE_SCHEMAS, PROVIDER_RESPONSE_SCHEMA, normalize_role_output
 from .credentials import CredentialResolver, validate_provider_credentials
-from .io import Closed, Unavailable, canonical, isolated_environment, loads, read_json, run
+from .io import Closed, InvalidJSON, Unavailable, canonical, isolated_environment, loads, read_json, run
 from .usage import validate_usage
 
 ROLE_INSTRUCTIONS = {
@@ -29,26 +29,71 @@ class Reasoning:
     def __init__(self, configuration, *, credentials=None):
         self.config = configuration
         self.credentials = credentials or CredentialResolver()
+        self._prepared_environment = None
 
-    def preflight(self):
+    def prepare(self):
+        """Local/broker preparation only; no model dispatch or persisted secrets."""
+        self._prepared_environment = None
+        if not shutil.which(self.config["argv"][0]):
+            raise Unavailable("Reasoning executable is unavailable before dispatch")
+        if self.config["kind"] == "command":
+            try:
+                self._prepared_environment = self.credentials.provider_environment(self.config)
+            except (Closed, Unavailable, OSError):
+                raise Unavailable("Reasoning credentials unavailable before dispatch") from None
+
+    def discard_preparation(self):
+        self._prepared_environment = None
+
+    def preflight(self, *, readiness=False):
         validate_provider_credentials(self.config)
         if not shutil.which(self.config["argv"][0]):
             raise Closed("Reasoning executable is unavailable")
         if self.config["kind"] != "codex":
-            return {"kind": "command", "protocol": self.config.get("protocol", 1),
+            report = {"kind": "command", "protocol": self.config.get("protocol", 1),
                     "authentication": "not-checked", "model_called": False,
-                    "credential_targets": sorted(self.config.get("credentials", {}))}
+                    "credential_targets": sorted(self.config.get("credentials", {})),
+                    "checks": {"executable": "passed", "credentials": "not_checked", "adapter": "not_checked"}}
+            if readiness:
+                with tempfile.TemporaryDirectory(prefix="agent-preflight-") as directory:
+                    env = isolated_environment(directory)
+                    env.update(self.credentials.provider_environment(self.config))
+                    report["checks"]["credentials"] = "passed"
+                    if self.config.get("check_argv"):
+                        result = run(self.config["check_argv"], cwd=directory, env=env,
+                            data=canonical({"schema": "command-reasoning/check/v1", "model": self.config["model"]}),
+                            timeout=min(60, self.config["timeout"]), limit=32_000, check=False)
+                        if result.returncode:
+                            raise Closed("Provider adapter readiness check failed")
+                        value = loads(result.stdout)
+                        if value != {"schema": "command-reasoning/check/v1", "ready": True,
+                                    "protocol": self.config.get("protocol", 1), "model_called": False}:
+                            raise Closed("Invalid provider readiness handshake")
+                        report["checks"]["adapter"] = "passed"
+            return report
         help_text = run(self.config["argv"] + ["exec", "--help"], limit=200_000).stdout.decode()
         for flag in ("--ignore-user-config", "--ignore-rules", "--output-schema", "--ephemeral"):
             if flag not in help_text:
                 raise Closed("Installed Codex lacks required capability: " + flag)
-        return {"kind": "codex", "capabilities": "verified", "model_called": False}
+        report = {"kind": "codex", "capabilities": "verified", "model_called": False,
+                  "authentication": "not-checked", "checks": {"adapter": "passed", "credentials": "not_checked"}}
+        if readiness:
+            with tempfile.TemporaryDirectory(prefix="agent-login-check-") as directory:
+                env = isolated_environment(directory); env["CODEX_HOME"] = self.config["codex_home"]
+                result = run(self.config["argv"] + ["login", "status"], env=env, cwd=directory, check=False, limit=32_000)
+                if result.returncode:
+                    raise Closed("Codex login readiness check failed")
+                report["checks"]["credentials"] = "passed"
+                report["authentication"] = "login-status-verified"
+        return report
 
     def execute(self, payload):
         try:
             return self._execute(payload)
-        except (SchemaValidationError, json.JSONDecodeError, UnicodeDecodeError):
+        except (InvalidJSON, SchemaValidationError, json.JSONDecodeError, UnicodeDecodeError):
             return {"protocol_error": "Provider response violates the JSON contract"}
+        finally:
+            self.discard_preparation()
 
     def _execute(self, payload):
         phase = payload["phase"]
@@ -63,7 +108,8 @@ class Reasoning:
             request = {"instructions": instructions, "input": payload, "output_schema": schema}
             provider = {}
             if self.config["kind"] == "command":
-                environment.update(self.credentials.provider_environment(self.config))
+                environment.update(self._prepared_environment if self._prepared_environment is not None
+                                   else self.credentials.provider_environment(self.config))
                 if self.config.get("protocol", 1) == 2:
                     request.update(schema="command-reasoning/v2", model=self.config["model"],
                         effect_id=payload.get("effect_id"), response_schema={**PROVIDER_RESPONSE_SCHEMA,

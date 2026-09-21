@@ -3,7 +3,7 @@
 **A provider-neutral trust and governance layer for bounded software delivery
 through Git, maintained by the Horistum project.**
 
-Version 1.6.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.7.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
@@ -21,6 +21,10 @@ effect receipts and a per-run writer lock. This is the supported storage design;
 no external database is required.
 Version 1.6 adds explicit credential references and a broker protocol, versioned
 provider usage, a one-tick embedding API and a local exact-decision review UI.
+Version 1.7 adds recoverable initialization, pre-dispatch credential checks,
+nonblocking observation, a local supervisor, complete owner controls, checked backups,
+and an optional installed OpenAI command adapter. Both runtimes share the same
+model dispatch/replay rule. See [recovery and operations](docs/RECOVERY-170.md).
 These integrations preserve that deployment model. See
 [deployment scope](docs/HOSTING.md) for storage, concurrency and consumer ownership.
 

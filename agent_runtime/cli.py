@@ -45,11 +45,23 @@ def main(argv=None):
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--max-steps", type=int, default=256)
     p.add_argument("--poll-seconds", type=int, default=0)
+    p = sub.add_parser("serve")
+    p.add_argument("--state", type=Path, required=True)
+    p.add_argument("--poll-seconds", type=int, default=5)
+    p.add_argument("--max-backoff", type=int, default=60)
+    p = sub.add_parser("backup")
+    p.add_argument("--state", type=Path, required=True)
+    p.add_argument("--output", type=Path, required=True)
+    p = sub.add_parser("restore")
+    p.add_argument("--state", type=Path, required=True)
+    p.add_argument("--archive", type=Path, required=True)
     for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name)
         p.add_argument("--state", type=Path, required=True)
         if name in {"approve", "retry-effect"}:
             p.add_argument("--binding", required=True)
+        if name in {"pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel"}:
+            p.add_argument("--reason", default="")
         if name == "upgrade":
             p.add_argument("--suspend", action="store_true")
         if name == "approve":
@@ -67,18 +79,30 @@ def main(argv=None):
             print(json.dumps({"policy": POLICY_SCHEMA, "goal": GOAL_SCHEMA, **ROLE_SCHEMAS}[args.name], indent=2))
         elif args.command == "doctor":
             policy, goal = read_json(args.policy), read_json(args.goal)
-            validate_configuration(policy, goal)
-            result = {"reasoning": Reasoning(policy["reasoning"]).preflight(),
-                      "execution": Verification(policy["execution"]).preflight(), "model_called": False}
-            if policy["publication"]["kind"] == "github":
-                GitHub(policy["publication"], policy["base_branch"]).preflight()
-                result["github_governance"] = "verified"
+            from .doctor import diagnose
+            result = diagnose(policy, goal)
             print(json.dumps(result))
+            return 0 if result["ready"] else 2
         elif args.command == "start":
             engine = Controller.start(args.state, read_json(args.policy), read_json(args.goal), trusted_local=args.trusted_local)
             return drive(engine, args.max_steps, args.poll_seconds)
         elif args.command == "resume":
-            return drive(Controller(args.state), args.max_steps, args.poll_seconds)
+            return drive(Controller.resume(args.state), args.max_steps, args.poll_seconds)
+        elif args.command == "serve":
+            import signal
+            import threading
+            from .supervisor import supervise
+            stop = threading.Event()
+            previous = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGINT, signal.SIGTERM)}
+            try:
+                print(json.dumps(supervise(args.state, poll_seconds=args.poll_seconds,
+                    max_backoff=args.max_backoff, stop=stop)))
+            finally:
+                for sig, handler in previous.items(): signal.signal(sig, handler)
+        elif args.command in {"backup", "restore"}:
+            from .backup import backup, restore
+            print(json.dumps(backup(args.state, args.output) if args.command == "backup"
+                             else restore(args.archive, args.state)))
         elif args.command in {"tick", "decision", "usage"}:
             from .service import RunService
             print(json.dumps(getattr(RunService(args.state), args.command)(), ensure_ascii=False))
@@ -93,19 +117,13 @@ def main(argv=None):
                 except KeyboardInterrupt:
                     pass
         elif args.command == "status":
-            state = Store(args.state).state
-            task = state.get("task") or {}
-            print(json.dumps({"status": state["status"], "phase": state["phase"], "paused": state["paused"],
-                              "item": task.get("id"), "head": task.get("head", state["base"]),
-                              "merge_sha": task.get("merge_sha", (state["archive"][-1].get("merge_sha") if state["archive"] else None)),
-                              "completed": state["completed"],
-                              "reason": state.get("reason"), "approval": task.get("approval_required"),
-                              "pending_effect": (state.get("pending") or {}).get("id")}))
+            from .service import RunService
+            print(json.dumps(RunService(args.state).status()))
         elif args.command == "upgrade":
             print(json.dumps(upgrade(args.state, suspend=args.suspend)))
         else:
             print(json.dumps(action(args.state, args.command, getattr(args, "binding", None),
-                                    decision_hash=getattr(args, "decision_hash", None))))
+                                    decision_hash=getattr(args, "decision_hash", None), reason=getattr(args, "reason", ""))))
         return 0
     except (Closed, Unavailable, ValueError, OSError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}), file=sys.stderr)

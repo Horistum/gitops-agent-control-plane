@@ -1,4 +1,14 @@
-# Single-host scheduling template
+# Local scheduling
+
+For continuous operation, use `agent-control serve` and the provided
+`agent-control.service`. RUNNING phases advance immediately; external waits use
+bounded backoff and held/paused states await owner action. Stop and disable the
+older `agent-control-tick.timer` before enabling the supervisor service. Review
+service owner, paths, environment and rootless Podman delegation on the target host.
+SIGTERM drains the current bounded tick; set TimeoutStopSec accordingly.
+See [recovery and operations](../../docs/RECOVERY-170.md).
+
+The following one-tick timer remains an alternative for existing schedulers.
 
 These systemd units wake one already initialized run with `agent-control tick`.
 They do not create a product goal, approve a decision or provide a distributed

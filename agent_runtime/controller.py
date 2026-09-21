@@ -12,7 +12,7 @@ from .context import requested_context, role_view
 from .contracts import ROLE_SCHEMAS, criteria, validate_configuration, normalize_role_output
 from .git import GitRepository
 from .github import GitHub
-from .io import Closed, Unavailable, canonical, locked
+from .io import Closed, Unavailable, canonical, locked, read_json
 from .reasoning import Reasoning
 from .store import Store, runtime_fingerprint
 from .verification import Verification
@@ -49,13 +49,23 @@ class Controller:
             Verification(policy["execution"]).preflight()
             if policy["publication"]["kind"] == "github":
                 GitHub(policy["publication"], policy["base_branch"]).preflight()
-            repo = GitRepository.initialize(product, root / "product.git", policy)
-            Store(root, {"schema": 1, "run_id": uuid.uuid4().hex, "policy": copy.deepcopy(policy),
+            from .initialization import initialize
+            repo, run_id = initialize(root, policy, goal)
+            Store(root, {"schema": 1, "run_id": run_id, "policy": copy.deepcopy(policy),
                 "goal": copy.deepcopy(goal), "policy_hash": fingerprint({"policy": policy, "goal": goal}),
                 "runtime_hash": runtime_fingerprint(), "status": "RUNNING", "phase": "reconcile",
                 "base": repo.resolve(policy["base_branch"]), "task": None, "discovery": None,
                 "completed": [], "criteria": {}, "cli_cases": {}, "history": [], "archive": [],
                 "attempts": {}, "model_calls": 0, "pending": None, "effect_epoch": 1, "paused": False}).save()
+        return cls(root)
+
+    @classmethod
+    def resume(cls, root):
+        root = Path(root).resolve()
+        if not (root / "state.json").exists():
+            intent = read_json(root / "initialization.json")
+            return cls.start(root, intent["policy"], intent["goal"],
+                             trusted_local=intent["policy"]["execution"]["kind"] == "trusted-local")
         return cls(root)
 
     @property
@@ -100,8 +110,14 @@ class Controller:
                    "criteria": criteria(self.item()) if self.task else [], **(extra or {})}
         if len(canonical(payload)) > limits["context_bytes"] + 200_000:
             raise Closed("Complete model input exceeds prompt limit")
-        result = self.store.effect("model", payload,
-            lambda identity: self.reasoning.execute({**payload, "effect_id": identity}))
+        try:
+            result = self.store.effect("model", payload,
+                lambda identity: self.reasoning.execute({**payload, "effect_id": identity}),
+                prepare=getattr(self.reasoning, "prepare", None))
+        finally:
+            discard = getattr(self.reasoning, "discard_preparation", None)
+            if discard:
+                discard()
         task["turn"] = task.get("turn", 0) + 1
         if result.get("protocol_error"):
             task["context_rounds"] = task.get("context_rounds", 0) + 1
@@ -201,12 +217,5 @@ class Controller:
             return self.summary()
 
     def summary(self):
-        task = self.task or {}
-        return {"run_id": self.state["run_id"], "status": self.state["status"], "phase": self.state["phase"],
-                "item": task.get("id"), "head": task.get("head", self.state["base"]),
-                "merge_sha": task.get("merge_sha", (self.state["archive"][-1].get("merge_sha") if self.state["archive"] else None)),
-                "completed": self.state["completed"], "model_calls": self.state["model_calls"],
-                "reason": self.state.get("reason"), "approval": task.get("approval_required"),
-                "pending_effect": (self.state.get("pending") or {}).get("id"),
-                "recovery": recovery_actions({**task, "agent_calls": self.state["model_calls"], "pending": self.state.get("pending")},
-                    {"max_agent_calls_per_task": self.policy["limits"]["model_calls"]}) if task else {}}
+        from .observations import status_document
+        return status_document(self.state)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import hmac
+import re
 
 from .io import Busy, Closed, Unavailable, canonical, loads
 from .service import RunService
@@ -20,6 +21,12 @@ The controller rechecks evidence and repository identity before merging.</p>
 <section><h2>Current decision</h2><dl id="facts"></dl>
 <p>Inspect the complete decision below, including findings and verification evidence.</p>
 <button id="approve" type="button" disabled>Approve this exact decision</button></section>
+<section><h2>Review findings</h2><div id="findings"></div>
+<h2>Verification evidence</h2><div id="evidence"></div>
+<button id="load-diff" type="button" disabled>Load exact revision diff</button><pre id="diff"></pre></section>
+<section><h2>Run controls</h2><p id="blocked-reason"></p>
+<label>Reason for action <input id="reason" maxlength="1000"></label><div id="actions"></div>
+<h2>Usage and recent activity</h2><pre id="usage"></pre><pre id="health"></pre></section>
 <details open><summary>Complete human-decision.json</summary><pre id="document"></pre></details>
 <p>The token is kept only in this page's memory. Reloading clears it.
 This interface provides local owner authority, not named enterprise identities.</p>
@@ -37,18 +44,62 @@ async function api(path, options = {}) {
   return value;
 }
 el("token").addEventListener("input", () => { shown = null; el("approve").disabled = true; });
+el("load-diff").addEventListener("click", async () => {
+  if (!shown) return;
+  try { const value = await api("/api/diff/" + shown.decision_hash); el("diff").textContent = value.diff; }
+  catch (error) { el("message").textContent = error.message; }
+});
+function details(target, title, value) {
+  const box = document.createElement("details"), label = document.createElement("summary"), text = document.createElement("pre");
+  label.textContent = title; text.textContent = JSON.stringify(value, null, 2);
+  box.append(label, text); el(target).append(box);
+}
 el("load").addEventListener("click", async () => {
   shown = null; el("approve").disabled = true; el("document").textContent = "";
   el("facts").replaceChildren(); el("message").textContent = "Loading...";
+  for (const id of ["findings", "evidence", "actions"]) el(id).replaceChildren();
+  el("diff").textContent = ""; el("load-diff").disabled = true;
   try {
     const value = await api("/api/decision");
     el("document").textContent = JSON.stringify(value, null, 2);
-    for (const name of ["run_id", "status", "head", "base", "risk", "binding", "decision_hash"]) {
+    for (const name of ["run_id", "status", "phase", "paused", "head", "base", "risk", "binding", "decision_hash"]) {
       const term = document.createElement("dt"), detail = document.createElement("dd");
       term.textContent = name; detail.textContent = value[name] ?? "-";
       el("facts").append(term, detail);
     }
     shown = value; el("approve").disabled = !value.approvable;
+    el("load-diff").disabled = !value.head;
+    el("blocked-reason").textContent = value.reason || "No recorded blocker.";
+    for (const [role, review] of Object.entries(value.reviews)) {
+      const title = document.createElement("h3"), summary = document.createElement("p");
+      title.textContent = role; summary.textContent = review.summary || "";
+      el("findings").append(title, summary);
+      for (const finding of review.findings || []) details("findings", finding.severity || "Finding", finding);
+    }
+    for (const [name, evidence] of Object.entries(value.evidence)) details("evidence", name, evidence);
+    for (const name of value.actions) {
+      const button = document.createElement("button"); button.type = "button";
+      button.textContent = name === "retry-effect" ? "Retry unknown model call (possible additional cost)" : name;
+      button.addEventListener("click", async () => {
+        if (!shown) return;
+        if (name === "retry-effect" && !window.confirm("The previous model call may already have been charged. Authorize another call?")) return;
+        if ((name === "cancel" || name === "replan") && !window.confirm("Apply " + name + " to this exact run state?")) return;
+        const current = shown; shown = null; button.disabled = true; el("approve").disabled = true;
+        try {
+          await api("/api/action", {method: "POST", body: JSON.stringify({action: name,
+            binding: current.pending_effect, decision_hash: current.decision_hash,
+            reason: el("reason").value, accept_duplicate_cost: name === "retry-effect"})});
+          el("load").click();
+        } catch (error) { el("message").textContent = error.message + " Reload before acting."; }
+      });
+      el("actions").append(button);
+    }
+    api("/api/usage").then(report => { el("usage").textContent = JSON.stringify({reserved_calls: report.reserved_calls,
+      recorded_calls: report.recorded_calls, unknown_outcomes: report.unknown_outcomes,
+      reported_tokens: report.reported_tokens, recent_actions: value.recent_actions}, null, 2); })
+      .catch(error => { el("usage").textContent = error.message; });
+    api("/api/status").then(status => { el("health").textContent = JSON.stringify(status, null, 2); })
+      .catch(error => { el("health").textContent = error.message; });
     el("message").textContent = value.approvable ? "Waiting for your decision." : "No approvable decision in this state.";
   } catch (error) { el("message").textContent = error.message; }
 });
@@ -57,7 +108,7 @@ el("approve").addEventListener("click", async () => {
   const current = shown; shown = null; el("approve").disabled = true;
   try {
     await api("/api/approve", {method: "POST", body: JSON.stringify({binding: current.binding, decision_hash: current.decision_hash})});
-    el("message").textContent = "Approval recorded. Resume the controller to recheck gates and continue.";
+    el("message").textContent = "Approval recorded. The supervisor can continue and recheck gates.";
   } catch (error) { el("message").textContent = error.message + " Reload the decision before trying again."; }
 });'''
 
@@ -113,7 +164,11 @@ def create_server(root, token, *, port=8765):
                 return self.send(401, {"reason": "Review token required"})
             if self.command == "GET" and self.path == "/api/decision":
                 return self.send(200, service.decision())
-            if self.command != "POST" or self.path != "/api/approve":
+            if self.command == "GET" and self.path in {"/api/status", "/api/usage"}:
+                return self.send(200, getattr(service, self.path.rsplit("/", 1)[-1])())
+            if self.command == "GET" and re.fullmatch(r"/api/diff/[0-9a-f]{64}", self.path):
+                return self.send(200, service.diff(self.path.rsplit("/", 1)[-1]))
+            if self.command != "POST" or self.path not in {"/api/approve", "/api/action"}:
                 return self.send(404, {"reason": "Unknown review operation"})
             lengths = self.headers.get_all("Content-Length", [])
             if (len(lengths) != 1 or not lengths[0].isdigit() or not 1 <= int(lengths[0]) <= 2048
@@ -121,6 +176,19 @@ def create_server(root, token, *, port=8765):
                     or self.headers.get_all("Content-Type") != ["application/json"]):
                 return self.send(400, {"reason": "Expected bounded JSON body"})
             value = loads(self.rfile.read(int(lengths[0])))
+            if self.path == "/api/action":
+                if (not isinstance(value, dict) or set(value) != {"action", "binding", "decision_hash", "reason", "accept_duplicate_cost"}
+                        or not isinstance(value["action"], str)
+                        or value["action"] not in {"pause", "continue", "retry", "retry-effect", "reconcile", "replan", "cancel"}
+                        or not isinstance(value["decision_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["decision_hash"])
+                        or not isinstance(value["reason"], str) or len(value["reason"]) > 1000
+                        or type(value["accept_duplicate_cost"]) is not bool
+                        or (value["binding"] is not None and (not isinstance(value["binding"], str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", value["binding"])))
+                        or value["action"] == "retry-effect" and not value["accept_duplicate_cost"]):
+                    return self.send(400, {"reason": "Exact action binding and explicit cost acknowledgement required"})
+                return self.send(200, service.act(value["action"], value["decision_hash"],
+                    binding=value["binding"], reason=value["reason"]))
             if (not isinstance(value, dict) or set(value) != {"binding", "decision_hash"}
                     or any(not isinstance(v, str) or len(v) != 64 for v in value.values())):
                 return self.send(400, {"reason": "Exact binding and decision hash required"})

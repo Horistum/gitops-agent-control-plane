@@ -18,12 +18,21 @@ def validate_usage(value):
 
 
 def usage_report(store):
-    """Caller holds the writer lock for a consistent state/receipt snapshot."""
+    """Read only receipt identities reachable from one atomic state snapshot.
+
+    A pending receipt may become durable while reading. It can replace that
+    snapshot's unknown reservation, never add a later operation to the report.
+    """
     state = store.state
     calls = []
     totals = {name: 0 for name in TOKEN_FIELDS}
     observations = {name: 0 for name in TOKEN_FIELDS}
-    for path in sorted((store.root / "receipts").glob("*.json")):
+    identities = set(state.get("receipts", {}))
+    for intent in [*state.get("abandoned_effects", []), state.get("pending")]:
+        if intent and (store.root / "receipts" / (intent["id"] + ".json")).exists():
+            identities.add(intent["id"])
+    for identity in sorted(identities):
+        path = store.root / "receipts" / (identity + ".json")
         receipt = store.read_receipt(path.stem)
         request = receipt["request"]
         if request.get("kind") != "model":
@@ -48,7 +57,7 @@ def usage_report(store):
     reserved = state["model_calls"]
     if len(calls) + len(uncertain) != reserved:
         raise Closed("Model reservations and durable receipt/intent accounting differ")
-    return {"schema": 1, "run_id": state["run_id"], "reserved_calls": reserved,
+    return {"schema": 1, "run_id": state["run_id"], "revision": state.get("revision", 0), "reserved_calls": reserved,
         "recorded_calls": len(calls), "unknown_outcomes": len(uncertain),
         "protocol_errors": sum(row["status"] == "protocol_error" for row in calls),
         "reported_tokens": totals, "token_observations": observations,
