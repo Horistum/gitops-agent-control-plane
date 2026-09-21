@@ -173,6 +173,27 @@ existing `start`/`resume` exit codes are unchanged. The example systemd timer in
 `examples/operations` is a **single-host** supervisor, not a distributed queue,
 webhook receiver or scheduler with tenant fairness.
 
+### Several runs
+
+An owner running more than one goal keeps one run directory per goal, as
+before; `agent_runtime/registry.py` only adds a read-only status view across
+them, never a shared store or a second writer.
+
+```bash
+agent-control registry --root /var/lib/agent-control/runs
+```
+
+`--root` is either one run directly, or a flat directory whose immediate
+subdirectories are runs (a natural layout for a supervisor that already
+iterates that same directory). Discovery does not recurse and does not follow
+symlinked children, and is bounded to 512 runs. Each run's existing
+`status()` projection is read without taking its writer lock, exactly as
+`agent-control status` already does for one run; a run whose `state.json` is
+missing or unreadable is reported as `"readable": false` with a reason,
+never allowed to hide or crash the rest of the report. This is a status view,
+not a control plane: pause, approve and the other owner actions still operate
+on one `--state RUN` at a time.
+
 ## Local decision review
 
 ```bash

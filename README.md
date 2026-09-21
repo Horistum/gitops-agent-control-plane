@@ -145,6 +145,7 @@ consumer compatibility gate.
 5. [Adoption](docs/ADOPTION.md): public API, generated contracts, compatibility tests and consumer responsibilities.
 6. [Middleware integration](docs/MIDDLEWARE.md): provider/credential contracts, one-tick service API, usage and local review.
 7. [Deployment scope](docs/HOSTING.md): supported local storage, per-run concurrency and consumer ownership.
+8. [Writing an adapter](docs/ADAPTERS.md): command-protocol checklist, credential naming registry and self-certification.
 
 [Review remediation and validation scope](docs/REMEDIATION.md) records the changes
 made after architectural review. Historical document links remain as navigation

@@ -19,6 +19,7 @@ from .verification import (EVIDENCE_CONTRACT, acceptance_evidence,
                            validate_goal_conditions, validate_predicates)
 
 from .schema import SchemaValidationError, SUPPORTED_SCHEMA_KEYWORDS, validate_instance, validate_schema
+from .usage import TOKEN_FIELDS, validate_usage
 from .workflow import (WORKFLOW_CONTRACT, graph_level, required_reviews,
                        workflow_transition, require_workflow_evidence)
 
@@ -40,4 +41,5 @@ __all__ = [
     "retry_preconditions", "risk_rank", "test_criteria", "test_failure_kind",
     "trusted_checks_pass", "upgrade_boundary", "validate_bindings",
     "validate_goal_conditions", "validate_predicates", "verification_transition",
+    "TOKEN_FIELDS", "validate_usage",
 ]
