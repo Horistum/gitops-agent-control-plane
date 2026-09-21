@@ -64,3 +64,19 @@ or demonstrated reasoning quality. Git fixture identities can vary between runs.
 Provider cache effectiveness must be measured using returned cached-token usage
 on the actual selected model. No acceptance evidence, hashes, role independence,
 policy or execution gates are removed to reduce prompts.
+
+## 1.8.1: precise source observation provenance
+
+Context checkpoints now retain truncation, omission, excerpt line ranges and the
+full-file/blob identity. `observed_sha256` and `observed_bytes` describe only the
+UTF-8 text actually delivered, independently of the full file hash. Omitted or
+binary files get no invented observed-text hash. Source text is not duplicated
+into memory. Retained nested metadata is copied so later projections cannot
+mutate previous checkpoints. Existing revision, role and repeated-request guards
+remain in force; this metadata grants no evidence or execution authority.
+
+The paired Flow 0.9.1 dispatch fix validates discovery and ordinary requests
+before fresh reservations, rechecks unstarted operations, and bypasses rendering
+for verified receipt replay. Its real lifecycle now constructs each source
+context once: 9 reads for 9 calls, compared with 17 reads in Flow 0.9.0.
+This reduces controller retrieval work, not the required independent role count.

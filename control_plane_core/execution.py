@@ -39,9 +39,17 @@ def context_checkpoint(previous, *, revision, phase, summary, sources, requests,
     if turn_id is not None and old.get("turn_id") == turn_id:
         return copy.deepcopy(old)
     rows = copy.deepcopy(old.get("entries", []))
-    index = dict(old.get("sources", {}))
+    index = copy.deepcopy(old.get("sources", {}))
     for path, value in sources.items():
-        index[path] = {k: value[k] for k in ("sha256", "missing", "omitted", "binary", "excerpt") if k in value}
+        # File identity alone does not describe the excerpt the model actually saw.
+        # Preserve omission/truncation and range metadata without retaining source text.
+        index[path] = {k: copy.deepcopy(value[k]) for k in (
+            "path", "sha256", "git_blob", "missing", "omitted", "binary", "excerpt",
+            "truncated", "line_start", "line_end", "total_lines", "bytes", "reason") if k in value}
+        text = value.get("text", value.get("content"))
+        if isinstance(text, str) and not any(value.get(k) for k in ("missing", "omitted", "binary")):
+            observed = text.encode("utf-8")
+            index[path].update(observed_sha256=hashlib.sha256(observed).hexdigest(), observed_bytes=len(observed))
     request_hash = fingerprint({"requests": requests, "facts": facts, "sources": sources})
     repeats = old.get("repeats", 0) + 1 if old.get("request_hash") == request_hash else 0
     rows.append({"phase": phase, "summary": str(summary)[:2400],
