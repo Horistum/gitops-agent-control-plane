@@ -13,6 +13,7 @@ dependencies = []
 [project.scripts]
 agent-control = "agent_runtime.cli:main"
 agent-reasoning-openai = "agent_runtime.openai_adapter:main"
+agent-reasoning-anthropic = "agent_runtime.anthropic_adapter:main"
 agent-verify-adapter = "agent_runtime.adapter_check:main"
 
 [tool.setuptools.packages.find]

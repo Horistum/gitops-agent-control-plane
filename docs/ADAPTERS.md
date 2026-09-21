@@ -88,12 +88,13 @@ you add a bundled adapter:
 |---|---|---|---|
 | Codex CLI | `reasoning.kind=codex` (separate transport, not `command`) | n/a | Authenticates via `codex_home`, not a credential reference |
 | OpenAI Chat Completions | `agent_runtime/openai_adapter.py` (`agent-reasoning-openai`) | `OPENAI_API_KEY` | Reads only this target from its environment; see `examples/operational/policy.openai.example.json` |
+| Anthropic Messages | `agent_runtime/anthropic_adapter.py` (`agent-reasoning-anthropic`) | `ANTHROPIC_API_KEY` | Reads only this target; see `examples/operational/policy.anthropic.example.json` and the caching note below |
 
 A custom, non-bundled adapter does not need an entry here, but should still
 pick a target name that would not collide with this table (for example
-`ANTHROPIC_API_KEY`, `COMPANY_MODEL_TOKEN`) so a policy can name more than one
-provider without ambiguity, and so a future bundled adapter for that provider
-can adopt the same name your deployments already use.
+`COMPANY_MODEL_TOKEN`) so a policy can name more than one provider without
+ambiguity, and so a future bundled adapter for that provider can adopt the
+same name your deployments already use.
 
 ## Transport and error behavior
 
@@ -127,6 +128,19 @@ can adopt the same name your deployments already use.
   Actual provider caching depends on its rendered prefix, model and eligibility;
   message ordering alone does not establish a cache hit or monetary saving.
   See [measured prompt fixtures](RECOVERY-180.md).
+- Providers differ in how caching is invoked. The bundled OpenAI adapter relies
+  on that provider's automatic prefix matching; ordering alone is enough. The
+  bundled Anthropic adapter instead marks explicit `cache_control: {"type":
+  "ephemeral"}` breakpoints (`agent_runtime/prompts.py:anthropic_messages`) at
+  the end of the stable system block and the end of the stable user block,
+  because the Messages API caches only what is explicitly marked. If you write
+  an adapter for a provider with its own caching mechanism, use that provider's
+  actual primitive; do not assume prefix ordering alone is sufficient.
+- The Anthropic adapter has no JSON-object response mode: it forces structured
+  output through a single pinned tool (`tool_choice` naming one declared tool)
+  and reads the result from that tool's `input`. The output schema is carried
+  once as the tool's `input_schema`, not repeated as prompt text, mirroring the
+  Codex `--output-schema` rule above.
 
 ## Self-certifying an adapter
 

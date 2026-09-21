@@ -77,9 +77,11 @@ el("load").addEventListener("click", async () => {
       for (const finding of review.findings || []) details("findings", finding.severity || "Finding", finding);
     }
     for (const [name, evidence] of Object.entries(value.evidence)) details("evidence", name, evidence);
+    const ACTION_LABELS = {"retry-effect": "Retry unknown model call (possible additional cost)",
+      "reconcile-effect": "Reconcile restored receipt (no new call)"};
     for (const name of value.actions) {
       const button = document.createElement("button"); button.type = "button";
-      button.textContent = name === "retry-effect" ? "Retry unknown model call (possible additional cost)" : name;
+      button.textContent = ACTION_LABELS[name] || name;
       button.addEventListener("click", async () => {
         if (!shown) return;
         if (name === "retry-effect" && !window.confirm("The previous model call may already have been charged. Authorize another call?")) return;

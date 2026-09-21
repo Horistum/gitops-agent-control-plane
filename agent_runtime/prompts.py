@@ -33,3 +33,26 @@ def codex_request(envelope):
     # Codex receives the full, original contract through --output-schema.
     # Do not repeat it inside stdin as well. All task data is preserved.
     return canonical({"instructions": envelope["instructions"], "input": envelope["input"]})
+
+
+def anthropic_messages(envelope):
+    """Native Anthropic layout: explicit cache_control breakpoints, not automatic
+    prefix matching like the OpenAI transport. The output schema is not repeated
+    here as prompt text; the adapter carries it once as the forced tool's
+    input_schema, mirroring the Codex --output-schema lesson above."""
+    instructions = envelope["instructions"]
+    shared = SHARED_INSTRUCTIONS
+    payload = envelope["input"]
+    if instructions.startswith(shared + "\n") and isinstance(payload, dict):
+        stable = {key: payload[key] for key in STABLE_FIELDS if key in payload}
+        volatile = {key: value for key, value in payload.items() if key not in STABLE_FIELDS}
+        system = [{"type": "text", "text": shared, "cache_control": {"type": "ephemeral"}},
+                  {"type": "text", "text": instructions[len(shared) + 1:]}]
+        content = [{"type": "text", "text": stable_prompt_json(stable, STABLE_FIELDS),
+                    "cache_control": {"type": "ephemeral"}},
+                   {"type": "text", "text": stable_prompt_json(volatile)}]
+    else:
+        # Existing external command/v2 request producers keep their instruction semantics.
+        system = [{"type": "text", "text": instructions}]
+        content = [{"type": "text", "text": stable_prompt_json(payload, STABLE_FIELDS)}]
+    return {"system": system, "messages": [{"role": "user", "content": content}]}
