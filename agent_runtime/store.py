@@ -22,6 +22,8 @@ class Store:
         self.root = Path(root)
         self.path = self.root / "state.json"
         self.state = state if state is not None else read_json(self.path, maximum=64_000_000)
+        if not isinstance(self.state, dict):
+            raise Closed("Run state must be a JSON object")
         self.after_receipt = lambda _: None  # Fault-injection seam; never policy input.
 
     def save(self):

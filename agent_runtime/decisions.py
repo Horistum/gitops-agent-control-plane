@@ -9,7 +9,7 @@ def owner_actions(state):
     task, pending = state.get("task") or {}, state.get("pending")
     allowed = ["continue" if state["paused"] else "pause"]
     if pending:
-        allowed.append("retry-effect" if pending["kind"] == "model" else "reconcile")
+        allowed.extend(["reconcile-effect", "retry-effect"] if pending["kind"] == "model" else ["reconcile"])
         return allowed
     allowed.append("cancel")
     if task and state.get("owner_replans", {}).get(task["id"], 0) < 2:

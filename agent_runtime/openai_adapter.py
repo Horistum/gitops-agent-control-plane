@@ -2,11 +2,14 @@
 import argparse
 import json
 import os
+import re
 import sys
 from urllib import error, parse, request
 
 from .io import Closed, canonical, loads
 from .usage import validate_usage
+from .prompts import openai_messages
+from control_plane_core import stable_prompt_json
 
 # Fields the runtime holds stable across most consecutive role calls within a
 # run (the whole goal, declared path authority, the item's acceptance
@@ -20,11 +23,7 @@ STABLE_PREFIX_KEYS = ("goal", "authority", "criteria", "sources")
 
 
 def cache_friendly_json(value):
-    if not isinstance(value, dict):
-        return canonical(value).decode()
-    ordered = {key: value[key] for key in STABLE_PREFIX_KEYS if key in value}
-    ordered.update((key, item) for key, item in value.items() if key not in STABLE_PREFIX_KEYS)
-    return json.dumps(ordered, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    return stable_prompt_json(value, STABLE_PREFIX_KEYS)
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -44,11 +43,11 @@ def complete(envelope, *, url, key, timeout, max_tokens, opener=None):
     if (not isinstance(envelope, dict) or envelope.get("schema") != "command-reasoning/v2"
             or not isinstance(envelope.get("model"), str) or not envelope["model"]):
         raise Closed("Command/v2 request requires an operator-selected model")
+    if not isinstance(envelope.get("effect_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", envelope["effect_id"]):
+        raise Closed("Command/v2 request requires a valid effect identity")
     body = {"model": envelope["model"], "store": False, "stream": False, "n": 1,
             "max_completion_tokens": max_tokens, "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": envelope["instructions"] +
-                "\nReturn a JSON object matching this schema:\n" + canonical(envelope["output_schema"]).decode()},
-                {"role": "user", "content": cache_friendly_json(envelope["input"])}]}
+            "messages": openai_messages(envelope)}
     req = request.Request(endpoint(url), data=canonical(body), method="POST", headers={
         "Authorization": "Bearer " + key, "Content-Type": "application/json",
         "X-Client-Request-Id": envelope.get("effect_id", ""), "User-Agent": "agent-control-command-v2"})

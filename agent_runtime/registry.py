@@ -25,7 +25,13 @@ def discover_runs(root, *, limit=MAX_RUNS):
     an unrelated, large or symlinked tree.
     """
     root = Path(root).resolve()
-    if (root / "state.json").is_file():
+    if type(limit) is not int or not 0 <= limit <= MAX_RUNS:
+        raise Closed("Registry limit must be an integer between 0 and 512")
+    def known_run(path):
+        return (path / "state.json").exists() or (path / "initialization.json").is_file()
+    if known_run(root):
+        if limit == 0:
+            raise Closed("Registry root exceeds the bounded run count")
         return [root]
     if not root.is_dir():
         raise Closed("Registry root is not an existing run or directory of runs")
@@ -33,7 +39,7 @@ def discover_runs(root, *, limit=MAX_RUNS):
     for child in sorted(root.iterdir()):
         if not child.is_dir() or child.is_symlink():
             continue
-        if (child / "state.json").is_file():
+        if known_run(child):
             if len(found) >= limit:
                 raise Closed("Registry root exceeds the bounded run count")
             found.append(child)

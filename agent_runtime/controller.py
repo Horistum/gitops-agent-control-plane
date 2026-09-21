@@ -90,6 +90,48 @@ class Controller:
             self.task.update(resume_phase=self.task["phase"], phase="await_human", hold_kind=kind,
                              approvable=approvable, retryable=kind == "FAILED")
 
+    def reconcile_model(self, binding):
+        """Restore only a held call's execution frame; the next tick consumes its receipt."""
+        pending = self.state.get("pending")
+        if not pending or pending.get("kind") != "model" or pending.get("id") != binding:
+            raise Closed("Model reconciliation must name the exact pending effect")
+        receipt = self.store.read_receipt(binding)
+        request = pending["request"]
+        task = self.task or {}
+        expected = {"kind": "model", "policy_hash": self.state["policy_hash"],
+                    "runtime_hash": self.state["runtime_hash"], "run_id": self.state["run_id"],
+                    "epoch": self.state["effect_epoch"], "item": task.get("id"),
+                    "attempt": task.get("attempt"), "turn": task.get("turn", 0)}
+        if (receipt["request"] != request or fingerprint(request) != binding
+                or any(request.get(key) != value for key, value in expected.items())):
+            raise Closed("Pending model receipt authority or attempt differs")
+        payload = request["payload"]
+        phase = payload.get("phase")
+        if phase not in ROLE_SCHEMAS or payload.get("goal") != self.goal:
+            raise Closed("Pending model request phase or goal differs")
+        holder = self.task if self.task is not None else self.state.get("discovery")
+        if not isinstance(holder, dict) or not isinstance(payload.get("task"), dict):
+            raise Closed("Pending model execution frame is missing")
+        restored = copy.deepcopy(holder)
+        # hold() changes only these fields. Never roll back source, memory,
+        # acceptance, policy or other business data to make a receipt fit.
+        if self.task and holder.get("phase") == "await_human":
+            if holder.get("resume_phase") != phase:
+                raise Closed("Held model phase differs from original request")
+            for key in ("phase", "resume_phase", "hold_kind", "approvable", "retryable"):
+                if key in payload["task"]:
+                    restored[key] = copy.deepcopy(payload["task"][key])
+                else:
+                    restored.pop(key, None)
+        if role_view(restored, phase) != payload["task"]:
+            raise Closed("Model execution frame changed; cannot reuse old evidence")
+        holder.clear()
+        holder.update(restored)
+        self.state.update(status="RUNNING", phase=phase if self.task else "reconcile")
+        self.state.pop("reason", None)
+        # Keep pending, epoch, turn and reservation. Normal dispatch validates
+        # the whole reconstructed request before replay, without provider I/O.
+
     def model(self, phase, task, extra=None):
         limits = self.policy["limits"]
         if task.get("context_rounds", 0) >= limits["context_rounds"]:
