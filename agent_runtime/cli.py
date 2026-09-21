@@ -58,12 +58,12 @@ def main(argv=None):
     p = sub.add_parser("registry")
     p.add_argument("--root", type=Path, required=True,
                    help="One run, or a flat directory whose immediate children are runs")
-    for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
+    for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name)
         p.add_argument("--state", type=Path, required=True)
-        if name in {"approve", "retry-effect"}:
+        if name in {"approve", "retry-effect", "reconcile-effect"}:
             p.add_argument("--binding", required=True)
-        if name in {"pause", "continue", "approve", "retry-effect", "retry", "reconcile", "replan", "cancel"}:
+        if name in {"pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel"}:
             p.add_argument("--reason", default="")
         if name == "upgrade":
             p.add_argument("--suspend", action="store_true")

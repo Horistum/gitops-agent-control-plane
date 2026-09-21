@@ -112,6 +112,8 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             if task and task["phase"] == "await_human":
                 task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"
+        elif name == "reconcile-effect":
+            engine.reconcile_model(binding)
         elif name == "retry-effect":
             pending = state.get("pending")
             if not pending or pending["kind"] != "model" or pending["id"] != binding:

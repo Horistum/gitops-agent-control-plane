@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.7.0"
+version = "1.8.1"
 description = "Provider-neutral trust and governance for bounded software delivery"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
@@ -13,6 +13,7 @@ dependencies = []
 [project.scripts]
 agent-control = "agent_runtime.cli:main"
 agent-reasoning-openai = "agent_runtime.openai_adapter:main"
+agent-verify-adapter = "agent_runtime.adapter_check:main"
 
 [tool.setuptools.packages.find]
 include = ["control_plane_core*", "agent_runtime*", "reference_runtime*"]

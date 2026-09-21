@@ -3,11 +3,19 @@
 **A provider-neutral trust and governance layer for bounded software delivery
 through Git, maintained by the Horistum project.**
 
-Version 1.7.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.8.1 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
 The shared `control_plane_core` owns the phase, authority and acceptance decisions.
+
+The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
+faults and verifier limits. They do not establish AI reasoning quality. Operational
+integration tests execute real Git and processes with controlled reasoning/HTTP
+peers. CI also executes the lifecycle in actual rootless Podman and tests installed
+package bytes. A live authenticated model turn and a particular product deployment
+require their own host evidence; neither is inferred from those tests.
+
 
 Embed the pure core above an existing agent, or use the supplied operational
 controller. The primary integration is `reasoning.kind=command`: your adapter
@@ -25,15 +33,12 @@ Version 1.7 adds recoverable initialization, pre-dispatch credential checks,
 nonblocking observation, a local supervisor, complete owner controls, checked backups,
 and an optional installed OpenAI command adapter. Both runtimes share the same
 model dispatch/replay rule. See [recovery and operations](docs/RECOVERY-170.md).
+Version 1.8 adds exact-receipt reconciliation, strict adapter certification,
+isolated registry errors and lossless prompt optimization with measured fixtures.
+See [recovery and prompts](docs/RECOVERY-180.md).
 These integrations preserve that deployment model. See
 [deployment scope](docs/HOSTING.md) for storage, concurrency and consumer ownership.
 
-The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
-faults and verifier limits. They do not establish AI reasoning quality. Operational
-integration tests execute real Git and processes with controlled reasoning/HTTP
-peers. CI also executes the lifecycle in actual rootless Podman and tests installed
-package bytes. A live authenticated model turn and a particular product deployment
-require their own host evidence; neither is inferred from those tests.
 
 ## Run on your product
 

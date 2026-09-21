@@ -11,7 +11,7 @@ class CoreConformance(unittest.TestCase):
     def test_public_package_covers_every_supported_decision_module(self):
         import control_plane_core as core
         exported = {"CONTRACT", "__version__"}
-        for name in ("decisions", "execution", "acceptance", "verification", "workflow", "schema", "usage"):
+        for name in ("decisions", "execution", "acceptance", "verification", "workflow", "schema", "usage", "prompting"):
             module = importlib.import_module("control_plane_core." + name)
             self.assertEqual(len(module.__all__), len(set(module.__all__)))
             for symbol in module.__all__:
@@ -20,6 +20,23 @@ class CoreConformance(unittest.TestCase):
             exported.update(module.__all__)
         self.assertEqual(set(core.__all__), exported)
         self.assertEqual(len(core.__all__), len(exported))
+
+    def test_prompt_helpers_preserve_data_and_required_constraints(self):
+        import json
+        from . import stable_prompt_json, compact_prompt_schema
+        payload = {"phase": "reviewer", "goal": {"text": "ž"}, "head": "a" * 40}
+        encoded = stable_prompt_json(payload, ("goal",))
+        self.assertEqual(json.loads(encoded), payload)
+        self.assertTrue(encoded.startswith('{"goal":'))
+        schema = {"type": "array", "minItems": 0, "maxItems": 4,
+                  "items": {"type": "string", "minLength": 1},
+                  "default": [{"type": "string", "minLength": 0}]}
+        compact = compact_prompt_schema(schema)
+        self.assertNotIn("minItems", compact)
+        self.assertEqual(compact["items"], schema["items"])
+        self.assertEqual(compact["default"], schema["default"])
+        self.assertEqual(compact["maxItems"], 4)
+        self.assertEqual(schema["minItems"], 0)
 
     def test_dependency_ready_selection_and_progress(self):
         items = [{"id": "A", "dependencies": [], "ready": True},

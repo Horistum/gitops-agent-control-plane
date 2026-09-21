@@ -33,6 +33,41 @@ class ExecutionConformance(unittest.TestCase):
         for i in range(20): value = self.checkpoint(value, summary=str(i))
         self.assertEqual(len(value["entries"]), 8)
 
+    def test_context_provenance_preserves_partial_observation_without_source_text(self):
+        import copy, hashlib
+        source = {"part.py#L2-L4": {"path": "part.py", "sha256": "whole-file",
+            "text": "ž\n", "excerpt": True, "truncated": True,
+            "line_start": 2, "line_end": 2, "total_lines": 100}}
+        original = copy.deepcopy(source)
+        row = self.checkpoint(sources=source)["sources"]["part.py#L2-L4"]
+        self.assertEqual(source, original)
+        self.assertEqual(row["sha256"], "whole-file")
+        self.assertEqual(row["observed_sha256"], hashlib.sha256("ž\n".encode()).hexdigest())
+        self.assertEqual(row["observed_bytes"], len("ž\n".encode()))
+        self.assertTrue(row["truncated"]); self.assertEqual(row["line_start"], 2)
+        self.assertEqual(row["line_end"], 2); self.assertEqual(row["total_lines"], 100)
+        self.assertNotIn("text", row)
+        omitted = self.checkpoint(sources={"part.py": {"omitted": True, "bytes": 500,
+            "git_blob": "blob", "content": "not delivered"}})["sources"]["part.py"]
+        self.assertNotIn("observed_sha256", omitted)
+        self.assertEqual(omitted["git_blob"], "blob")
+
+    def test_reference_excerpt_and_observed_digest_are_independent_from_full_file_identity(self):
+        source = {"part.py#L1-L2": {"sha256": "whole-file", "content": "a\n",
+                  "excerpt": {"start": 1, "end": 1, "total_lines": 2}}}
+        first = self.checkpoint(sources=source)
+        source["part.py#L1-L2"]["excerpt"]["end"] = 2
+        source["part.py#L1-L2"]["content"] = "a\nb\n"
+        second = self.checkpoint(first, sources=source)
+        a = first["sources"]["part.py#L1-L2"]; b = second["sources"]["part.py#L1-L2"]
+        self.assertEqual(a["sha256"], b["sha256"])
+        self.assertNotEqual(a["observed_sha256"], b["observed_sha256"])
+        self.assertEqual(a["excerpt"]["end"], 1)
+        self.assertEqual(b["observed_bytes"], 4)
+        retained = self.checkpoint(second, sources={})
+        retained["sources"]["part.py#L1-L2"]["excerpt"]["end"] = 99
+        self.assertEqual(second["sources"]["part.py#L1-L2"]["excerpt"]["end"], 2)
+
     def test_revision_and_role_boundaries_never_import_stale_or_correlated_notes(self):
         value = self.checkpoint()
         self.assertEqual(context_view({"architect": value}, "reviewer", "rev1"), {})

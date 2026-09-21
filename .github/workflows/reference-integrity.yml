@@ -75,7 +75,8 @@ jobs:
             test_operational_runtime.OperationalRuntimeTests.test_real_subprocess_provider_git_tests_two_item_goal_and_retained_regressions \
             test_governance_middleware.MiddlewareTests.test_v2_real_provider_credentials_usage_and_complete_goal \
             test_governance_middleware.MiddlewareTests.test_review_http_auth_origin_host_snapshot_and_approval \
-            test_recovery_operations test_owner_operations -v
+            test_recovery_operations test_owner_operations test_recovery_certification test_prompt_layout test_registry \
+            control_plane_core.execution_conformance -v
       - name: Check the actual Codex CLI contract without model credentials
         run: |
           npm install --global @openai/codex@0.153.4

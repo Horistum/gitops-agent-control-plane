@@ -47,8 +47,7 @@ version that carries usage into `agent-control usage` and the review UI.
 
 ## Readiness handshake
 
-`doctor` and `Reasoning.preflight(readiness=True)` invoke `check_argv` (falling
-back to `argv` for a legacy adapter with no separate check command) with:
+`doctor` and `Reasoning.preflight(readiness=True)` invoke an explicitly configured `check_argv` with:
 
 ```json
 {"schema": "command-reasoning/check/v1", "model": "configured-model"}
@@ -59,6 +58,9 @@ The adapter must exit 0 and print exactly one line:
 ```json
 {"schema": "command-reasoning/check/v1", "ready": true, "protocol": 2, "model_called": false}
 ```
+
+Without `check_argv`, readiness reports `adapter: not_checked`; it never invokes
+the normal inference command as a fallback. Certification then fails.
 
 `protocol` matches the adapter's advertised protocol version. This handshake
 must not call the model, spend quota, or make a network request beyond what
@@ -102,7 +104,7 @@ can adopt the same name your deployments already use.
   identity inside the adapter — the controller's dispatch/receipt boundary
   already governs retry, and a hidden adapter-level retry defeats its
   uncertain-outcome accounting.
-- On any failure (transport, malformed upstream response, refusal), exit
+- On a transport failure or an unreadable upstream response, exit
   nonzero and print a short diagnostic to stderr **without echoing the
   request, the response body, or any resolved credential value**. The
   controller records that the call did not produce a usable result; it does
@@ -115,31 +117,41 @@ can adopt the same name your deployments already use.
   for the latter.
 - Never write partial JSON, log lines, or trailing text to stdout. Stdout is
   parsed as exactly one JSON document.
-- If your provider supports prefix-based prompt caching, serialize `input`
-  with the run/item-stable fields (`goal`, `authority`, `criteria`, `sources`)
-  first and the call-volatile fields (`task`, `phase`, `memory`,
-  `omitted_paths`) last, instead of an alphabetical or insertion-order dump.
-  Key order carries no meaning to the controller or to a JSON parser; nothing
-  here hashes or compares this specific string. It only changes how much of
-  the prompt a caching-aware provider can reuse across the several role calls
-  a single item typically makes. `agent_runtime/openai_adapter.py`'s
-  `cache_friendly_json()` is a reusable reference implementation of this.
+- The bundled HTTP adapter sends shared instructions first, stable input fields
+  (`goal`, `authority`, `criteria`, `sources`) as user data next, then trusted
+  role/schema instructions and volatile user data. External producers with custom
+  instructions retain the two-message form. Source data never becomes a system
+  message. `stable_prompt_json` orders keys without dropping fields;
+  `compact_prompt_schema` removes only redundant zero-length lower bounds from
+  prompt copies. Original validators and Codex `--output-schema` stay unchanged.
+  Actual provider caching depends on its rendered prefix, model and eligibility;
+  message ordering alone does not establish a cache hit or monetary saving.
+  See [measured prompt fixtures](RECOVERY-180.md).
 
 ## Self-certifying an adapter
 
-`scripts/verify_adapter.py` drives a configured command adapter through the
-readiness handshake and a synthetic request for each role, and validates the
-response against the same schemas the controller enforces
-(`schemas/command-reasoning-response.schema.json` plus the role's own schema).
-Run it against your adapter before wiring it into a real policy:
+`agent-verify-adapter` (or the source wrapper `scripts/verify_adapter.py`)
+uses the same transport and role validators as the controller. By default it
+checks only configuration, credentials and the explicit local readiness handshake:
 
 ```bash
-python3 scripts/verify_adapter.py --policy /absolute/policy.json
+agent-verify-adapter --policy /absolute/policy.json
 ```
 
-It never spends a real model call unless your adapter's own logic does so
-when answering a synthetic request; inspect your adapter's behavior under
-test before pointing it at a paid account. A pass is evidence of protocol
-conformance, not of reasoning quality or production readiness — see
-[verification and limits](VERIFICATION.md) for what a passing gate does and
-does not establish.
+To authorize a paid synthetic probe, opt in explicitly:
+
+```bash
+agent-verify-adapter --policy /absolute/policy.json --live --phase discovery
+# All roles, each at most once in this invocation:
+agent-verify-adapter --policy /absolute/policy.json --live --phase all
+```
+
+`--live` defaults to discovery. Each selected phase gets a fresh 64-hex effect ID;
+duplicate selections are collapsed. A failed phase produces a structured failed
+report and stops subsequent probes. No automatic retry occurs. Re-running the
+command is a **new probe**, potentially spending quota again; this diagnostic is
+not the controller's durable receipt ledger. A lost response can have an unknown
+outcome, so inspect provider evidence before invoking it again.
+
+A readiness pass is not a live role-contract pass. Neither proves reasoning
+quality or production readiness; see [verification limits](VERIFICATION.md).
