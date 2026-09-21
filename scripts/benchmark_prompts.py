@@ -31,8 +31,7 @@ def measure(payloads):
     for payload in payloads:
         phase = payload['phase']; schema = ROLE_SCHEMAS[phase]
         old = {'instructions': ROLE_INSTRUCTIONS[phase] + BASELINE_SUFFIX, 'input': payload, 'output_schema': schema}
-        new = {**old, 'instructions': SHARED_INSTRUCTIONS + '\n' + ROLE_INSTRUCTIONS[phase],
-               'shared_instructions': SHARED_INSTRUCTIONS}
+        new = {**old, 'instructions': SHARED_INSTRUCTIONS + '\n' + ROLE_INSTRUCTIONS[phase]}
         # Command/v2 canonical wire serialization happens before the old adapter.
         old_input = json.loads(canonical(payload))
         ordered = {key: old_input[key] for key in STABLE_FIELDS if key in old_input}

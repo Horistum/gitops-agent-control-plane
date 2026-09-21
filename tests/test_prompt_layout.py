@@ -22,7 +22,7 @@ def envelope(phase='discovery'):
         'task': {'context': ['app.py']}, 'eligible_items': ['TASK-1'], 'effect_id': 'a' * 64}
     return {'schema': 'command-reasoning/v2', 'model': 'fixture', 'effect_id': payload['effect_id'],
         'instructions': SHARED_INSTRUCTIONS + '\n' + ROLE_INSTRUCTIONS[phase],
-        'shared_instructions': SHARED_INSTRUCTIONS, 'output_schema': ROLE_SCHEMAS[phase], 'input': payload}
+        'output_schema': ROLE_SCHEMAS[phase], 'input': payload}
 
 
 class PromptLayoutTests(unittest.TestCase):
@@ -45,6 +45,20 @@ class PromptLayoutTests(unittest.TestCase):
             self.assertIn(ROLE_INSTRUCTIONS[phase], messages[2]['content'])
         self.assertEqual(captured[0][:2], captured[1][:2])
         self.assertNotEqual(captured[0][2:], captured[1][2:])
+
+    def test_command_v2_wire_shape_remains_compatible(self):
+        value = envelope()
+        def run(argv, **kwargs):
+            request = json.loads(kwargs['data'])
+            self.assertEqual(set(request), {'instructions', 'input', 'output_schema',
+                'schema', 'model', 'effect_id', 'response_schema'})
+            response = {'schema': 'command-reasoning/v2', 'result': proposal(request['input']),
+                        'usage': {}, 'provider': {'id': 'fixture', 'model': 'fixture', 'request_id': ''}}
+            return subprocess.CompletedProcess(argv, 0, canonical(response), b'')
+        with patch('agent_runtime.reasoning.run', side_effect=run):
+            result = Reasoning({'kind': 'command', 'argv': ['fixture'], 'protocol': 2,
+                                'model': 'fixture', 'timeout': 1}).execute(value['input'])
+        self.assertNotIn('protocol_error', result)
 
     def test_custom_instructions_keep_two_message_authority(self):
         value = envelope(); value['instructions'] = 'Custom trusted adapter instructions'

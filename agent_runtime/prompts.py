@@ -14,10 +14,9 @@ STABLE_FIELDS = ("goal", "authority", "criteria", "sources")
 def openai_messages(envelope):
     instructions = envelope["instructions"]
     schema = canonical(compact_prompt_schema(envelope["output_schema"])).decode()
-    shared = envelope.get("shared_instructions")
+    shared = SHARED_INSTRUCTIONS
     payload = envelope["input"]
-    if (shared == SHARED_INSTRUCTIONS and instructions.startswith(shared + "\n")
-            and isinstance(payload, dict)):
+    if instructions.startswith(shared + "\n") and isinstance(payload, dict):
         stable = {key: payload[key] for key in STABLE_FIELDS if key in payload}
         volatile = {key: value for key, value in payload.items() if key not in STABLE_FIELDS}
         return [{"role": "system", "content": shared},

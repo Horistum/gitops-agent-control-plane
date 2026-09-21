@@ -110,7 +110,6 @@ class Reasoning:
                                    else self.credentials.provider_environment(self.config))
                 if self.config.get("protocol", 1) == 2:
                     request.update(schema="command-reasoning/v2", model=self.config["model"],
-                        shared_instructions=SHARED_INSTRUCTIONS,
                         effect_id=payload.get("effect_id"), response_schema={**PROVIDER_RESPONSE_SCHEMA,
                             "properties": {**PROVIDER_RESPONSE_SCHEMA["properties"], "result": schema}})
                 result = run(self.config["argv"], cwd=root, env=environment, data=canonical(request),
