@@ -1,5 +1,6 @@
-"""Anthropic Messages command/v2 adapter: usage math, tool-use extraction,
-explicit cache_control placement and full certification wiring."""
+"""Anthropic Messages command/v2 adapter: usage math, output_config.format
+text-block extraction, unsupported-JSON-Schema-keyword stripping and explicit
+cache_control placement, plus full certification wiring."""
 import copy
 import io
 import json
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 from agent_runtime.adapter_check import verify
-from agent_runtime.anthropic_adapter import complete, endpoint
+from agent_runtime.anthropic_adapter import complete, endpoint, _strict_output_schema, _UNSUPPORTED_SCHEMA_KEYWORDS
 from agent_runtime.io import Closed, canonical
 from agent_runtime.prompts import SHARED_INSTRUCTIONS, anthropic_messages
 from agent_runtime.reasoning import ROLE_INSTRUCTIONS
@@ -43,6 +44,20 @@ class Opener:
         return Response(canonical(self.body))
 
 
+def text_block(value):
+    return {'type': 'text', 'text': json.dumps(value)}
+
+
+def _walk_schema(node):
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _walk_schema(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _walk_schema(value)
+
+
 class AnthropicAdapterTests(unittest.TestCase):
     def test_endpoint_validation_matches_shared_rules(self):
         for url in ('http://example.com', 'https://token@example.com', 'https://example.com?secret=x'):
@@ -59,8 +74,8 @@ class AnthropicAdapterTests(unittest.TestCase):
                      key='k', timeout=1, max_tokens=10, opener=Opener({}))
 
     def test_complete_sums_cache_counters_into_input_tokens_as_a_true_subset(self):
-        body = {'id': 'msg_1', 'stop_reason': 'tool_use', 'content': [
-            {'type': 'tool_use', 'name': 'submit_role_result', 'input': proposal(envelope()['input'])}],
+        body = {'id': 'msg_1', 'stop_reason': 'end_turn',
+            'content': [text_block(proposal(envelope()['input']))],
             'usage': {'input_tokens': 50, 'output_tokens': 20,
                       'cache_creation_input_tokens': 30, 'cache_read_input_tokens': 400}}
         opener = Opener(body)
@@ -73,31 +88,32 @@ class AnthropicAdapterTests(unittest.TestCase):
         self.assertLessEqual(result['usage']['cached_input_tokens'], result['usage']['input_tokens'])
         self.assertEqual(result['usage']['output_tokens'], 20)
         self.assertEqual(result['provider'], {'id': 'anthropic-messages', 'model': 'fixture', 'request_id': 'msg_1'})
+        sent = json.loads(opener.calls[0].data)
+        self.assertEqual(sent['output_config']['format']['type'], 'json_schema')
 
     def test_complete_omits_missing_counters_instead_of_inventing_zero(self):
-        body = {'id': '', 'stop_reason': 'tool_use', 'content': [
-            {'type': 'tool_use', 'name': 'submit_role_result', 'input': {}}], 'usage': {'output_tokens': 5}}
+        body = {'id': '', 'stop_reason': 'end_turn', 'content': [text_block({})], 'usage': {'output_tokens': 5}}
         result = complete(envelope(), url='https://api.anthropic.com/v1/messages', key='k',
                           timeout=1, max_tokens=10, opener=Opener(body))
         self.assertEqual(result['usage'], {'output_tokens': 5})
 
-    def test_complete_extracts_result_only_from_the_pinned_tool_and_falls_back_otherwise(self):
+    def test_complete_extracts_result_only_from_a_clean_end_turn_text_block_and_falls_back_otherwise(self):
         base_usage = {'input_tokens': 1, 'output_tokens': 1}
         cases = [
-            {'id': 'x', 'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'no tool call'}], 'usage': base_usage},
-            {'id': 'x', 'stop_reason': 'max_tokens', 'content': [{'type': 'tool_use', 'name': 'submit_role_result', 'input': {'a': 1}}], 'usage': base_usage},
-            {'id': 'x', 'stop_reason': 'tool_use', 'content': [{'type': 'tool_use', 'name': 'wrong_tool', 'input': {'a': 1}}], 'usage': base_usage},
-            {'id': 'x', 'stop_reason': 'tool_use', 'content': [
-                {'type': 'tool_use', 'name': 'submit_role_result', 'input': {'a': 1}},
-                {'type': 'tool_use', 'name': 'submit_role_result', 'input': {'b': 2}}], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'max_tokens', 'content': [text_block({'selected_item': 'TASK-1'})], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'refusal', 'content': [{'type': 'text', 'text': 'I cannot help with that.'}], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'end_turn', 'content': [], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'not json'}], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'end_turn',
+             'content': [text_block({'a': 1}), text_block({'b': 2})], 'usage': base_usage},
+            {'id': 'x', 'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': '[1,2,3]'}], 'usage': base_usage},
         ]
         for body in cases:
             with self.subTest(stop_reason=body['stop_reason'], blocks=len(body['content'])):
                 result = complete(envelope(), url='https://api.anthropic.com/v1/messages', key='k',
                                   timeout=1, max_tokens=10, opener=Opener(body))
                 self.assertEqual(result['result'], {})
-        good = {'id': 'x', 'stop_reason': 'tool_use', 'content': [
-            {'type': 'tool_use', 'name': 'submit_role_result', 'input': {'selected_item': 'TASK-1'}}], 'usage': base_usage}
+        good = {'id': 'x', 'stop_reason': 'end_turn', 'content': [text_block({'selected_item': 'TASK-1'})], 'usage': base_usage}
         result = complete(envelope(), url='https://api.anthropic.com/v1/messages', key='k',
                           timeout=1, max_tokens=10, opener=Opener(good))
         self.assertEqual(result['result'], {'selected_item': 'TASK-1'})
@@ -137,6 +153,54 @@ class AnthropicAdapterTests(unittest.TestCase):
         self.assertEqual(len(layout['messages'][0]['content']), 1)
         self.assertEqual(json.loads(layout['messages'][0]['content'][0]['text']), value['input'])
 
+    def test_strict_output_schema_drops_only_unsupported_keywords(self):
+        schema = {'type': 'object', 'properties': {
+            'summary': {'type': 'string', 'minLength': 1, 'maxLength': 4000},
+            'empty_ok': {'type': 'string', 'minLength': 0, 'maxLength': 64},
+            'tags': {'type': 'array', 'items': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+                     'minItems': 0, 'maxItems': 8},
+            'exactly_one': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'maxItems': 3},
+            'must_have_five': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 5, 'maxItems': 10},
+            'nested': {'type': 'object', 'properties': {'x': {'type': 'boolean'}}, 'required': ['x']}},
+            'required': ['summary', 'empty_ok', 'tags', 'exactly_one', 'must_have_five', 'nested'],
+            'additionalProperties': False}
+        original = copy.deepcopy(schema)
+        result = _strict_output_schema(schema)
+        self.assertEqual(schema, original)  # never mutates its input
+
+        for node in _walk_schema(result):
+            for keyword in _UNSUPPORTED_SCHEMA_KEYWORDS:
+                self.assertNotIn(keyword, node)
+            if 'minItems' in node:
+                self.assertIn(node['minItems'], (0, 1))
+            if node.get('type') == 'object' and 'properties' in node:
+                self.assertIs(node['additionalProperties'], False)
+
+        props = result['properties']
+        self.assertIn('maxLength=4000', props['summary']['description'])
+        self.assertIn('minLength=1', props['summary']['description'])
+        self.assertNotIn('minLength', props['empty_ok']['description'])  # minLength=0 is a no-op hint
+        self.assertIn('maxLength=64', props['empty_ok']['description'])
+        self.assertIn('maxItems=8', props['tags']['description'])
+        self.assertNotIn('minItems', props['exactly_one']['description'])  # minItems=1 is a supported value
+        self.assertIn('maxItems=3', props['exactly_one']['description'])
+        self.assertIn('minItems=5', props['must_have_five']['description'])
+        self.assertIn('maxItems=10', props['must_have_five']['description'])
+        self.assertNotIn('description', props['nested'])
+        self.assertEqual(props['nested']['additionalProperties'], False)
+
+    def test_strict_output_schema_makes_every_real_role_schema_400_safe(self):
+        for phase, schema in ROLE_SCHEMAS.items():
+            with self.subTest(phase=phase):
+                stripped = _strict_output_schema(schema)
+                for node in _walk_schema(stripped):
+                    for keyword in _UNSUPPORTED_SCHEMA_KEYWORDS:
+                        self.assertNotIn(keyword, node)
+                    if 'minItems' in node:
+                        self.assertIn(node['minItems'], (0, 1))
+                    if node.get('type') == 'object':
+                        self.assertIs(node.get('additionalProperties'), False)
+
     def _shim_policy(self, root, *, fail_check=False):
         import agent_runtime
         installed = str(Path(agent_runtime.__file__).resolve().parents[1])
@@ -151,12 +215,15 @@ class AnthropicAdapterTests(unittest.TestCase):
             '  assert req.get_header("Anthropic-version")\n'
             '  assert len(req.get_header("X-client-request-id")) == 64\n'
             '  body=json.loads(req.data)\n'
-            '  assert body["tool_choice"]=={"type":"tool","name":"submit_role_result"}\n'
+            '  schema=body["output_config"]["format"]\n'
+            '  assert schema["type"]=="json_schema"\n'
+            '  assert schema["schema"]["additionalProperties"] is False\n'
+            '  assert \'"maxLength":\' not in json.dumps(schema["schema"])\n'
             '  value={"verdict":"ready","summary":"fixture","risk":"low","requested_files":[],'
             '"requested_searches":[],"requested_facts":[],"findings":[],"acceptance_evidence":[],'
             '"selected_item":"SELF-CERT-001"}\n'
-            '  reply={"id":"msg_fixture","stop_reason":"tool_use",'
-            '"content":[{"type":"tool_use","name":"submit_role_result","input":value}],'
+            '  reply={"id":"msg_fixture","stop_reason":"end_turn",'
+            '"content":[{"type":"text","text":json.dumps(value)}],'
             '"usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":9}}\n'
             '  return io.BytesIO(json.dumps(reply).encode())\n'
             'adapter.request.build_opener=lambda *args: Opener()\n'

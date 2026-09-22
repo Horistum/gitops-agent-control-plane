@@ -136,11 +136,23 @@ same name your deployments already use.
   because the Messages API caches only what is explicitly marked. If you write
   an adapter for a provider with its own caching mechanism, use that provider's
   actual primitive; do not assume prefix ordering alone is sufficient.
-- The Anthropic adapter has no JSON-object response mode: it forces structured
-  output through a single pinned tool (`tool_choice` naming one declared tool)
-  and reads the result from that tool's `input`. The output schema is carried
-  once as the tool's `input_schema`, not repeated as prompt text, mirroring the
-  Codex `--output-schema` rule above.
+- The Anthropic adapter uses the native `output_config: {"format": {"type":
+  "json_schema", "schema": ...}}` structured-output mechanism (stable, no
+  `anthropic-beta` header) and reads the result from the response's single
+  `text` content block. The output schema is carried there once, not repeated
+  as prompt text, mirroring the Codex `--output-schema` rule above. Anthropic's
+  structured-output schema compiler only accepts a limited JSON Schema subset
+  (no `minLength`/`maxLength`/`minimum`/`maximum`/`multipleOf`/`maxItems`;
+  `minItems` only 0 or 1; every object needs `additionalProperties: false`) and
+  returns a 400 for anything else. This project's role schemas use those
+  bounds throughout (`agent_runtime/contracts.py`), so the adapter strips them
+  before sending (`_strict_output_schema` in `agent_runtime/anthropic_adapter.py`,
+  folding each stripped bound into the field's description as a hint instead),
+  the same transformation the official SDKs perform client-side for callers who
+  use a schema outside that subset. The original, unstripped schema stays the
+  sole validation authority: the controller re-checks every returned result
+  against it regardless of what the provider enforced during generation, so
+  this only loosens generation-time constraints, never final acceptance.
 
 ## Self-certifying an adapter
 

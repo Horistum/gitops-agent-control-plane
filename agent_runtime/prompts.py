@@ -38,8 +38,8 @@ def codex_request(envelope):
 def anthropic_messages(envelope):
     """Native Anthropic layout: explicit cache_control breakpoints, not automatic
     prefix matching like the OpenAI transport. The output schema is not repeated
-    here as prompt text; the adapter carries it once as the forced tool's
-    input_schema, mirroring the Codex --output-schema lesson above."""
+    here as prompt text; the adapter carries it once as output_config.format.schema,
+    mirroring the Codex --output-schema lesson above."""
     instructions = envelope["instructions"]
     shared = SHARED_INSTRUCTIONS
     payload = envelope["input"]

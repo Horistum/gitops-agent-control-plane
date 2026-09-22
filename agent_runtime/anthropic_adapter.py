@@ -1,20 +1,31 @@
 """Opt-in Anthropic Messages command/v2 adapter. One HTTP attempt, no fallback.
 
-Structured output uses forced tool use (tool_choice pinned to one declared
-tool), not a text-based JSON mode: the Messages API has no equivalent of
-OpenAI's response_format=json_object. The controller still strictly validates
-the returned role contract; this adapter only has to produce well-formed JSON
-through the tool's input, not a semantically correct one.
+Structured output uses the native output_config.format=json_schema mechanism
+(stable, no anthropic-beta header required), not forced tool use. This
+project's own role schemas (agent_runtime/contracts.py's text()/array()
+helpers) use minLength/maxLength/maxItems bounds on nearly every field, and
+Anthropic's structured-output schema compiler rejects those outright with a
+400 if sent as-is: its documented supported keyword set is limited to
+type/properties/required/enum/const/$ref/$def/anyOf/allOf/format/items plus
+additionalProperties=false; minLength, maxLength, minimum, maximum,
+multipleOf and maxItems are explicitly unsupported, and minItems accepts only
+0 or 1. The official SDKs paper over this by stripping those keywords
+client-side before the request (folding each into the field's description
+instead) and then validating the real response against the original,
+unstripped schema themselves. This raw-HTTP adapter has no SDK to do that, so
+_strict_output_schema() below performs the same transformation by hand. The
+controller still re-validates every returned role result against the
+original, unstripped envelope["output_schema"] regardless of what the
+provider enforced during generation, so this stripping only loosens
+generation-time constraints; it never changes what is accepted as a final
+answer.
 
 Prompt caching here uses explicit cache_control breakpoints (see
 agent_runtime/prompts.py:anthropic_messages), because the Messages API caches
 only what is explicitly marked, unlike automatic prefix caching elsewhere.
-This targets the documented Messages API request/response shape and does not
-send an anthropic-beta header; verify header/field names against the current
-API reference for your account before relying on this in production, and run
-`agent-verify-adapter --live` against it first.
 """
 import argparse
+import copy
 import os
 import re
 import sys
@@ -23,10 +34,51 @@ from urllib import error, parse, request
 from .io import Closed, canonical, loads
 from .usage import validate_usage
 from .prompts import anthropic_messages
-from control_plane_core import compact_prompt_schema
 
 ANTHROPIC_VERSION = "2023-06-01"
-TOOL_NAME = "submit_role_result"
+# Keywords not in Anthropic's documented structured-output support list
+# (platform.claude.com/docs/en/build-with-claude/structured-outputs); sending
+# any of these causes a 400, so they are stripped, never enforced by the
+# provider. minItems is separate below because 0 and 1 remain valid.
+_UNSUPPORTED_SCHEMA_KEYWORDS = (
+    "minLength", "maxLength", "minimum", "maximum", "multipleOf",
+    "maxItems", "minProperties", "maxProperties")
+
+
+def _strict_output_schema(schema):
+    """Strip JSON Schema keywords Anthropic's output_config compiler 400s on,
+    folding each into the field description as a hint instead of an enforced
+    bound. Never use the result as anything but a generation-time hint: the
+    original schema stays the sole validation authority."""
+    if not isinstance(schema, dict):
+        return copy.deepcopy(schema)
+    result = copy.deepcopy(schema)
+    hints = []
+    for keyword in _UNSUPPORTED_SCHEMA_KEYWORDS:
+        if keyword in result:
+            value = result.pop(keyword)
+            # A zero lower bound is the schema-implied default (as compact_prompt_schema
+            # already treats it elsewhere); noting it would just spend tokens for nothing.
+            if keyword in ("minLength", "minProperties") and value == 0:
+                continue
+            hints.append(f"{keyword}={value}")
+    if isinstance(result.get("minItems"), int) and result["minItems"] not in (0, 1):
+        hints.append(f"minItems={result.pop('minItems')}")
+    if hints:
+        note = "Not enforced at generation time, only checked after: " + ", ".join(hints)
+        result["description"] = (result.get("description", "").rstrip() + " " + note).strip()
+    if result.get("type") == "object" and isinstance(result.get("properties"), dict):
+        result["additionalProperties"] = False
+        result["properties"] = {name: _strict_output_schema(value) for name, value in result["properties"].items()}
+    for key in ("$defs", "definitions", "patternProperties"):
+        if isinstance(result.get(key), dict):
+            result[key] = {name: _strict_output_schema(value) for name, value in result[key].items()}
+    if isinstance(result.get("items"), dict):
+        result["items"] = _strict_output_schema(result["items"])
+    for key in ("allOf", "anyOf", "prefixItems"):
+        if isinstance(result.get(key), list):
+            result[key] = [_strict_output_schema(value) for value in result[key]]
+    return result
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -69,9 +121,8 @@ def complete(envelope, *, url, key, timeout, max_tokens, opener=None):
     layout = anthropic_messages(envelope)
     body = {"model": envelope["model"], "max_tokens": max_tokens, "stream": False,
             "system": layout["system"], "messages": layout["messages"],
-            "tools": [{"name": TOOL_NAME, "description": "Submit the structured role result.",
-                       "input_schema": compact_prompt_schema(envelope["output_schema"])}],
-            "tool_choice": {"type": "tool", "name": TOOL_NAME}}
+            "output_config": {"format": {"type": "json_schema",
+                "schema": _strict_output_schema(envelope["output_schema"])}}}
     req = request.Request(endpoint(url), data=canonical(body), method="POST", headers={
         "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json",
         "X-Client-Request-Id": envelope.get("effect_id", ""), "User-Agent": "agent-control-command-v2"})
@@ -84,12 +135,18 @@ def complete(envelope, *, url, key, timeout, max_tokens, opener=None):
     usage = _usage(value.get("usage") or {})
     result = {}
     blocks = value.get("content")
-    if value.get("stop_reason") == "tool_use" and isinstance(blocks, list):
-        uses = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == TOOL_NAME]
-        if len(uses) == 1 and isinstance(uses[0].get("input"), dict):
-            result = uses[0]["input"]
-    # Finished but invalid/truncated/refused answers are recorded by the
-    # controller's bounded protocol repair path, with usage when available.
+    # output_config.format guarantees a well-formed JSON text block on a clean
+    # end_turn; any other stop_reason (max_tokens, refusal, ...) means an
+    # incomplete or unusable answer, left as result={} for the controller's
+    # bounded protocol repair path rather than parsed as if it were real.
+    if value.get("stop_reason") == "end_turn" and isinstance(blocks, list):
+        texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"
+                 and isinstance(b.get("text"), str)]
+        if len(texts) == 1:
+            try:
+                result = loads(texts[0])
+            except (Closed, ValueError, TypeError, KeyError):
+                result = {}
     return {"schema": "command-reasoning/v2", "result": result if isinstance(result, dict) else {},
             "usage": usage, "provider": {"id": "anthropic-messages", "model": envelope["model"],
                 "request_id": str(value.get("id", ""))[:500]}}
