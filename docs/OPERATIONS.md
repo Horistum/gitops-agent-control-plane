@@ -153,6 +153,12 @@ An approval is invalid after the candidate, base, risk, goal, policy or runtime
 changes. Replanning does not reset the run's model-call budget. A post-merge failure
 blocks subsequent work; this runtime does not automatically roll back a product.
 
+For a hold before any item is selected, inspect `agent-control decision --state RUN`
+before paying for another discovery. `status` and `decision` include discovery's
+verdict, selected ID, eligible IDs, summary and context requests; `decision` also
+includes its findings and feedback. These commands are read-only and call no model.
+See [discovery recovery](RECOVERY-182.md) for diagnosis, upgrade and retry steps.
+
 Pause the old runtime before changing its installed source. At a quiescent boundary:
 
 ```bash

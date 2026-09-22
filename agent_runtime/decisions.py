@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 from control_plane_core import fingerprint, recovery_actions
+from .discovery import can_replan_discovery, discovery_document
 
 
 def owner_actions(state):
@@ -12,7 +13,7 @@ def owner_actions(state):
         allowed.extend(["reconcile-effect", "retry-effect"] if pending["kind"] == "model" else ["reconcile"])
         return allowed
     allowed.append("cancel")
-    if task and state.get("owner_replans", {}).get(task["id"], 0) < 2:
+    if (task and state.get("owner_replans", {}).get(task["id"], 0) < 2) or can_replan_discovery(state):
         allowed.append("replan")
     if recovery_actions({**task, "pending": pending, "agent_calls": state["model_calls"]},
             {"max_agent_calls_per_task": state["policy"]["limits"]["model_calls"]})["retry"]:
@@ -29,6 +30,7 @@ def approval_binding(state):
 
 def decision_document(state):
     task = state.get("task") or {}
+    frame = task or state.get("discovery") or {}
     item = next((row for row in state["goal"]["items"] if row["id"] == task.get("id")), None)
     binding = approval_binding(state) if task else None
     document = {"schema": 1, "run_id": state["run_id"], "status": state["status"],
@@ -40,7 +42,9 @@ def decision_document(state):
         "approvable": bool(task.get("approvable") and state["status"] == "NEEDS_DECISION"
             and task.get("approval_required") == binding and not state.get("pending")
             and not state.get("owner_intent")),
-        "reviews": task.get("role_results", {}), "feedback": task.get("feedback", []),
+        "reviews": frame.get("role_results", {}), "feedback": frame.get("feedback", []),
+        "discovery": discovery_document(state),
+        "previous_discovery": state.get("discovery_retry"),
         "evidence": {key: task[key] for key in ("candidate_evidence", "independent_baseline",
             "independent_evidence", "candidate_obligations", "integration_obligations",
             "obligations", "acceptance", "ci_evidence", "integration_evidence") if key in task},

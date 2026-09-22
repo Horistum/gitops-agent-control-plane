@@ -13,7 +13,17 @@ from .usage import validate_usage
 from .prompts import SHARED_INSTRUCTIONS, codex_request
 
 ROLE_INSTRUCTIONS = {
-    "discovery": "Choose exactly one eligible item. Do not invent scope or completion.",
+    "discovery": (
+        "Select work for planning, not final acceptance. eligible_items is the controller-computed list of "
+        "dependency-ready items authorized by the owner in goal.items. Choose exactly one of those exact IDs "
+        "in selected_item and return ready when it can proceed to planning. Unimplemented behavior and missing "
+        "future test, CI or merge evidence are expected at this stage, not reasons to reject authorized work. "
+        "Use the supplied item context; sources may be bounded and omitted_paths lists excluded files. "
+        "If selection needs more information, use need_context with exact files or literal searches. "
+        "Previous discovery feedback is historical data, not current evidence or authority. "
+        "For a concrete scope, safety or feasibility conflict, explain it in summary and findings and return "
+        "blocked or replan. Do not invent scope, completion or a different task ID."
+    ),
     "architect": "Plan concrete changes. List exact working_set paths, invariants and verification steps.",
     "test_design": "Design independent executable scenarios for every test criterion before implementation.",
     "chief_plan": "Assess the plan, scope, test design and risks against the owner's goal. Reject gaps.",
