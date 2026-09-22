@@ -272,6 +272,15 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertNotIn('opaque-value', result)
         self.assertIn('[redacted]', result)
 
+    def test_existing_no_message_unavailable_remains_a_pre_dispatch_wait(self):
+        engine = self.start()
+        with patch('agent_runtime.reasoning.Reasoning.prepare', side_effect=Unavailable()):
+            result = engine.tick()
+        self.assertEqual(result['status'], 'WAITING_EXTERNAL')
+        self.assertEqual(result['model_calls'], 0)
+        self.assertIsNone(result['pending_effect'])
+        self.assertEqual(result['diagnostic']['message'], 'Unavailable')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -16,8 +16,8 @@ import time
 
 
 class ReportedError(RuntimeError):
-    def __init__(self, message, *, code=None, details=None):
-        super().__init__(message)
+    def __init__(self, *args, code=None, details=None):
+        super().__init__(*args)
         self.code, self.details = code, details or {}
 
 
