@@ -58,9 +58,11 @@ def main(argv=None):
     p = sub.add_parser("registry")
     p.add_argument("--root", type=Path, required=True,
                    help="One run, or a flat directory whose immediate children are runs")
-    for name in ("status", "tick", "decision", "usage", "review", "pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
+    for name in ("status", "tick", "decision", "usage", "diagnostics", "review", "pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name)
         p.add_argument("--state", type=Path, required=True)
+        if name == "diagnostics":
+            p.add_argument("--limit", type=int, default=20)
         if name in {"approve", "retry-effect", "reconcile-effect"}:
             p.add_argument("--binding", required=True)
         if name in {"pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel"}:
@@ -109,9 +111,10 @@ def main(argv=None):
         elif args.command == "registry":
             from .registry import registry_status
             print(json.dumps(registry_status(args.root), ensure_ascii=False))
-        elif args.command in {"tick", "decision", "usage"}:
+        elif args.command in {"tick", "decision", "usage", "diagnostics"}:
             from .service import RunService
-            print(json.dumps(getattr(RunService(args.state), args.command)(), ensure_ascii=False))
+            method = getattr(RunService(args.state), args.command)
+            print(json.dumps(method(args.limit) if args.command == "diagnostics" else method(), ensure_ascii=False))
         elif args.command == "review":
             from .review import create_server
             if not 1 <= args.port <= 65535:
@@ -131,8 +134,9 @@ def main(argv=None):
             print(json.dumps(action(args.state, args.command, getattr(args, "binding", None),
                                     decision_hash=getattr(args, "decision_hash", None), reason=getattr(args, "reason", ""))))
         return 0
-    except (Closed, Unavailable, ValueError, OSError) as exc:
-        print(json.dumps({"status": "BLOCKED", "reason": str(exc)}), file=sys.stderr)
+    except Exception as exc:
+        from .diagnostics import error_response
+        print(json.dumps(error_response(getattr(args, "state", None), exc, operation=args.command), ensure_ascii=False), file=sys.stderr)
         return 2
 
 

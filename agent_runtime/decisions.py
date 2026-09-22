@@ -4,10 +4,15 @@ from __future__ import annotations
 import copy
 from control_plane_core import fingerprint, recovery_actions
 from .discovery import can_replan_discovery, discovery_document
+from .diagnostics import current_diagnostic
 
 
-def owner_actions(state):
+def owner_actions(state, diagnostic=None):
     task, pending = state.get("task") or {}, state.get("pending")
+    if (diagnostic or {}).get("code") == "AUTHORITY_CHANGED":
+        return []
+    if (diagnostic or {}).get("code") == "RUNTIME_CHANGED":
+        return [] if state["paused"] else ["pause"]
     allowed = ["continue" if state["paused"] else "pause"]
     if pending:
         allowed.extend(["reconcile-effect", "retry-effect"] if pending["kind"] == "model" else ["reconcile"])
@@ -33,6 +38,8 @@ def decision_document(state):
     frame = task or state.get("discovery") or {}
     item = next((row for row in state["goal"]["items"] if row["id"] == task.get("id")), None)
     binding = approval_binding(state) if task else None
+    diagnostic = current_diagnostic(state)
+    drift = (diagnostic or {}).get("code") in {"RUNTIME_CHANGED", "AUTHORITY_CHANGED"}
     document = {"schema": 1, "run_id": state["run_id"], "status": state["status"],
         "paused": state["paused"], "phase": task.get("phase", state["phase"]),
         "reason": state.get("reason"), "item": item, "attempt": task.get("attempt"),
@@ -41,7 +48,8 @@ def decision_document(state):
         "runtime_hash": state["runtime_hash"], "binding": binding,
         "approvable": bool(task.get("approvable") and state["status"] == "NEEDS_DECISION"
             and task.get("approval_required") == binding and not state.get("pending")
-            and not state.get("owner_intent")),
+            and not state.get("owner_intent") and not drift),
+        "diagnostic": diagnostic,
         "reviews": frame.get("role_results", {}), "feedback": frame.get("feedback", []),
         "discovery": discovery_document(state),
         "previous_discovery": state.get("discovery_retry"),
@@ -49,7 +57,7 @@ def decision_document(state):
             "independent_evidence", "candidate_obligations", "integration_obligations",
             "obligations", "acceptance", "ci_evidence", "integration_evidence") if key in task},
         "pull_request": task.get("pr")}
-    document["actions"] = owner_actions(state)
+    document["actions"] = owner_actions(state, diagnostic)
     document["pending_effect"] = (state.get("pending") or {}).get("id")
     document["recent_actions"] = state.get("human_actions", [])[-30:]
     document["decision_hash"] = fingerprint(document)

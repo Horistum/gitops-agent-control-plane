@@ -9,7 +9,8 @@ from .controller import Controller
 from .decisions import approval_binding, decision_document
 from .discovery import remember_discovery
 from .io import Closed, locked
-from .store import Store, runtime_fingerprint
+from .store import Store, runtime_fingerprint, validate_authority
+from .observations import status_document
 
 
 def close_unmerged(engine):
@@ -71,6 +72,7 @@ def retire_attempt(engine):
         remember_discovery(state)
     state.update(task=None, discovery=None, status="CANCELLED" if name == "cancel" else "RUNNING", phase="reconcile")
     state.pop("reason", None)
+    state.pop("diagnostic", None)
     state["effect_epoch"] += 1
     state.pop("owner_intent")
 
@@ -78,14 +80,18 @@ def retire_attempt(engine):
 def action(root, name, binding=None, *, decision_hash=None, reason=""):
     root = root.resolve()
     with locked(root):
-        engine = Controller(root)
-        state, task = engine.state, engine.task
+        # Pause is a stop-only owner action. Do not instantiate a controller
+        # whose changed executable identity prevents reaching the upgrade gate.
+        engine = None if name == "pause" else Controller(root)
+        store = Store(root) if engine is None else engine.store
+        state, task = store.state, store.state.get("task")
+        validate_authority(state)
         document = decision_document(state)
         if decision_hash is not None and decision_hash != document["decision_hash"]:
             raise Closed("Displayed decision changed; reload before acting")
         if not isinstance(reason, str) or len(reason) > 1000:
             raise Closed("Owner reason must be a bounded string")
-        before = engine.summary()
+        before = status_document(state)
         if name == "pause":
             state["paused"] = True
         elif name == "continue":
@@ -139,25 +145,29 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             if task and name == "replan" and state.get("owner_replans", {}).get(task["id"], 0) >= 2:
                 raise Closed("Owner replan budget exhausted")
             if not task and name == "replan" and state["model_calls"] >= engine.policy["limits"]["model_calls"]:
-                raise Closed("Model call budget exhausted; discovery replan cannot reset it")
+                raise Closed("Model call budget exhausted; discovery replan cannot reset it", code="MODEL_BUDGET_EXHAUSTED")
             state["owner_intent"] = name
             engine.store.save()
             retire_attempt(engine)
         else:
             raise Closed("Unknown owner action")
+        if name in {"approve", "retry", "reconcile", "reconcile-effect", "retry-effect"}:
+            state.pop("reason", None)
+            state.pop("diagnostic", None)
         state.setdefault("human_actions", []).append({"action": name, "binding": binding,
             "decision_hash": document["decision_hash"], "authority": "local-owner",
             "action_id": uuid.uuid4().hex, "at": datetime.now(timezone.utc).isoformat(),
             "reason": reason, "before": {key: before[key] for key in ("status", "phase", "head")},
-            "after": {key: engine.summary()[key] for key in ("status", "phase", "head")}})
-        engine.store.save()
-        return engine.summary()
+            "after": {key: status_document(state)[key] for key in ("status", "phase", "head")}})
+        store.save()
+        return status_document(state)
 
 
 def upgrade(root, *, suspend=False):
     with locked(root):
         store = Store(root)
         state, task = store.state, store.state.get("task")
+        validate_authority(state)
         if state.get("pending") or state.get("owner_intent"):
             raise Closed("Upgrade cannot cross a pending effect or owner intent")
         view = {"paused": state["paused"], "active": task["id"] if task else None,

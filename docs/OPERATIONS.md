@@ -159,7 +159,12 @@ verdict, selected ID, eligible IDs, summary and context requests; `decision` als
 includes its findings and feedback. These commands are read-only and call no model.
 See [discovery recovery](RECOVERY-182.md) for diagnosis, upgrade and retry steps.
 
-Pause the old runtime before changing its installed source. At a quiescent boundary:
+Pause before changing the installed runtime when possible. Version 1.8.3 also
+permits the stop-only `pause` action after runtime drift: it checks the saved
+authority and exact displayed decision under the writer lock, but does not
+accept the new runtime or alter pending effects. See
+[failure diagnostics and recovery](RECOVERY-183.md).
+At a quiescent boundary:
 
 ```bash
 agent-control pause --state /absolute/agent-runs/my-goal

@@ -15,7 +15,8 @@ from .git import GitRepository
 from .github import GitHub
 from .io import Closed, Unavailable, canonical, locked, read_json
 from .reasoning import Reasoning
-from .store import Store, runtime_fingerprint
+from .store import Store, runtime_fingerprint, validate_authority
+from .diagnostics import record, safe_text
 from .verification import Verification
 
 
@@ -24,11 +25,10 @@ class Controller:
         self.root = Path(root).resolve()
         self.store = Store(self.root)
         self.policy, self.goal = self.store.state["policy"], self.store.state["goal"]
-        validate_configuration(self.policy, self.goal)
-        if self.store.state["policy_hash"] != fingerprint({"policy": self.policy, "goal": self.goal}):
-            raise Closed("Saved authority snapshot changed")
+        validate_authority(self.store.state)
         if self.store.state["runtime_hash"] != runtime_fingerprint():
-            raise Closed("Runtime changed; use the explicit quiescent upgrade command")
+            raise Closed("Runtime changed; use the explicit quiescent upgrade command", code="RUNTIME_CHANGED",
+                         details={"saved_runtime_hash": self.state["runtime_hash"], "current_runtime_hash": runtime_fingerprint()})
         self.repo = GitRepository(self.root / "product.git", self.policy["base_branch"])
         self.reasoning = reasoning or Reasoning(self.policy["reasoning"])
         self.verification = verification or Verification(self.policy["execution"])
@@ -85,8 +85,11 @@ class Controller:
         from .workflow import transition
         transition(self, {"kind": "advance"}, old)
 
-    def hold(self, reason, *, kind="FAILED", approvable=False):
-        self.state.update(status="NEEDS_DECISION" if approvable else kind, reason=reason)
+    def hold(self, reason, *, kind="FAILED", approvable=False, exc=None, phase=None):
+        status = "NEEDS_DECISION" if approvable else kind
+        self.state.update(status=status, reason=safe_text(reason))
+        self.state["diagnostic"] = record(self.root, self.state, exc=exc, message=reason,
+                                          operation="tick", phase=phase, kind=status)
         if self.task:
             self.task.update(resume_phase=self.task["phase"], phase="await_human", hold_kind=kind,
                              approvable=approvable, retryable=kind == "FAILED")
@@ -136,7 +139,7 @@ class Controller:
     def model(self, phase, task, extra=None):
         limits = self.policy["limits"]
         if task.get("context_rounds", 0) >= limits["context_rounds"]:
-            raise Closed("Context/protocol round budget exhausted")
+            raise Closed("Context/protocol round budget exhausted", code="CONTEXT_LIMIT")
         revision = fingerprint({key: task.get(key) for key in ("head", "base", "spec_hash", "goal_hash")} |
                                {"authority": self.state["policy_hash"]})
         memory = task.setdefault("memory", {})
@@ -158,7 +161,7 @@ class Controller:
                    "authority": {key: self.policy[key] for key in ("allowed_paths", "test_paths", "protected_paths")},
                    "criteria": criteria(self.item()) if self.task else [], **(extra or {})}
         if len(canonical(payload)) > limits["context_bytes"] + 200_000:
-            raise Closed("Complete model input exceeds prompt limit")
+            raise Closed("Complete model input exceeds prompt limit", code="CONTEXT_LIMIT")
         try:
             result = self.store.effect("model", payload,
                 lambda identity: self.reasoning.execute({**payload, "effect_id": identity}),
@@ -171,6 +174,9 @@ class Controller:
         if result.get("protocol_error"):
             task["context_rounds"] = task.get("context_rounds", 0) + 1
             task.setdefault("feedback", []).append({"kind": "protocol", "detail": result["protocol_error"]})
+            exc = Closed(result["protocol_error"], code="PROVIDER_PROTOCOL_ERROR",
+                         details={"validation": result.get("protocol_detail"), "provider": result.get("provider", {})})
+            self.state["diagnostic"] = record(self.root, self.state, exc=exc, operation="model", phase=phase)
             return None
         output = normalize_role_output(result["result"])
         # Validate here too: alternative in-process adapters have no privileged bypass.
@@ -184,7 +190,7 @@ class Controller:
             turn_id=str(task["turn"]))
         if output["verdict"] == "need_context":
             if memory[phase]["repeats"] >= 2:
-                raise Closed("Context request makes no progress")
+                raise Closed("Context request makes no progress", code="CONTEXT_LIMIT")
             try:
                 requested_context(self, task, output)
             except Closed as exc:
@@ -225,7 +231,7 @@ class Controller:
             raise Closed("Discovery did not select eligible authorized work: "
                 f"verdict={output['verdict']}, selected_item={output['selected_item']!r}, "
                 f"eligible_items={projection['eligible_items']!r}. "
-                f"Model summary: {output['summary']}")
+                f"Model summary: {output['summary']}", code="DISCOVERY_NOT_SELECTED")
         item = next(row for row in self.goal["items"] if row["id"] == output["selected_item"])
         attempt = self.state["attempts"].get(item["id"], 1)
         head = discovery["head"]
@@ -244,13 +250,14 @@ class Controller:
             self.store.state = Store(self.root).state
             if (self.state["policy_hash"] != fingerprint({"policy": self.policy, "goal": self.goal})
                     or self.state["policy_hash"] != fingerprint({"policy": self.state["policy"], "goal": self.state["goal"]})):
-                raise Closed("Authority changed during this run")
+                raise Closed("Authority changed during this run", code="AUTHORITY_CHANGED")
             if self.state["runtime_hash"] != runtime_fingerprint():
-                raise Closed("Runtime changed during this run")
+                raise Closed("Runtime changed during this run", code="RUNTIME_CHANGED")
             if self.state["paused"] or (not self.state.get("owner_intent") and self.state["status"] in {"COMPLETED", "CANCELLED", "NEEDS_DECISION", "FAILED", "BLOCKED_POLICY"}):
                 return self.summary()
             self.state["status"] = "RUNNING"
             self.state.pop("reason", None)
+            self.state.pop("diagnostic", None)
             phase = self.task["phase"] if self.task else "reconcile"
             try:
                 if self.state.get("owner_intent"):
@@ -265,11 +272,17 @@ class Controller:
                 else:
                     lifecycle_step(self)
             except Unavailable as exc:
-                self.state.update(status="WAITING_EXTERNAL", reason=str(exc))
+                self.state.update(status="WAITING_EXTERNAL", reason=safe_text(exc))
+                self.state["diagnostic"] = record(self.root, self.state, exc=exc, operation="tick", phase=phase)
             except (Closed, CoreError, SchemaValidationError, ValueError) as exc:
-                self.hold(str(exc), kind="BLOCKED_POLICY")
+                self.hold(str(exc), kind="BLOCKED_POLICY", exc=exc, phase=phase)
+            except Exception as exc:
+                # Unknown bugs must be diagnosable and stop further effects.
+                # BaseException crash/termination signals retain their semantics.
+                self.hold(str(exc), kind="BLOCKED_POLICY", exc=exc, phase=phase)
             self.state["phase"] = self.task["phase"] if self.task else self.state.get("phase", "reconcile")
-            self.state["history"].append({"phase": phase, "next": self.state["phase"], "status": self.state["status"]})
+            self.state["history"].append({"phase": phase, "next": self.state["phase"], "status": self.state["status"],
+                                         "diagnostic_id": (self.state.get("diagnostic") or {}).get("id")})
             self.store.save()
             return self.summary()
 

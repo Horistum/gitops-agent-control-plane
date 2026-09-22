@@ -5,6 +5,7 @@ from .github import GitHub
 from .io import Closed, Unavailable
 from .reasoning import Reasoning
 from .verification import Verification
+from .diagnostics import describe
 
 
 def diagnose(policy, goal):
@@ -28,9 +29,10 @@ def diagnose(policy, goal):
             result[name] = probe()
             subchecks = (result[name] or {}).get("checks", {})
             result["checks"][name] = "passed" if all(v == "passed" for v in subchecks.values()) else "not_checked"
-        except (Closed, Unavailable, OSError, ValueError):
+        except Exception as exc:
             result["checks"][name] = "failed"
-            result[name] = {"reason": "Readiness failed; inspect this adapter's local configuration"}
+            diagnostic = describe(exc=exc, operation="doctor:" + name)
+            result[name] = {"reason": diagnostic["message"], "diagnostic": diagnostic}
     result["checks"]["live_model"] = "not_checked"
     result["ready"] = all(result["checks"][name] == "passed" for name in probes)
     return result

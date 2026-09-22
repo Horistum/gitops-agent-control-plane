@@ -11,6 +11,7 @@ from .credentials import CredentialResolver, validate_provider_credentials
 from .io import Closed, InvalidJSON, Unavailable, canonical, isolated_environment, loads, read_json, run
 from .usage import validate_usage
 from .prompts import SHARED_INSTRUCTIONS, codex_request
+from .diagnostics import command_failure, safe_text
 
 ROLE_INSTRUCTIONS = {
     "discovery": (
@@ -46,12 +47,14 @@ class Reasoning:
         """Local/broker preparation only; no model dispatch or persisted secrets."""
         self._prepared_environment = None
         if not shutil.which(self.config["argv"][0]):
-            raise Unavailable("Reasoning executable is unavailable before dispatch")
+            raise Unavailable("Reasoning executable is unavailable before dispatch", code="REASONING_EXECUTABLE_UNAVAILABLE",
+                              details={"executable": self.config["argv"][0]})
         if self.config["kind"] == "command":
             try:
                 self._prepared_environment = self.credentials.provider_environment(self.config)
-            except (Closed, Unavailable, OSError):
-                raise Unavailable("Reasoning credentials unavailable before dispatch") from None
+            except (Closed, Unavailable, OSError) as exc:
+                raise Unavailable("Reasoning credentials unavailable before dispatch", code="CREDENTIALS_UNAVAILABLE",
+                                  details={"cause": safe_text(exc), "environment_targets": sorted(self.config.get("credentials", {}))}) from None
 
     def discard_preparation(self):
         self._prepared_environment = None
@@ -59,7 +62,8 @@ class Reasoning:
     def preflight(self, *, readiness=False):
         validate_provider_credentials(self.config)
         if not shutil.which(self.config["argv"][0]):
-            raise Closed("Reasoning executable is unavailable")
+            raise Closed("Reasoning executable is unavailable", code="REASONING_EXECUTABLE_UNAVAILABLE",
+                         details={"executable": self.config["argv"][0]})
         if self.config["kind"] != "codex":
             report = {"kind": "command", "protocol": self.config.get("protocol", 1),
                     "authentication": "not-checked", "model_called": False,
@@ -101,8 +105,8 @@ class Reasoning:
     def execute(self, payload):
         try:
             return self._execute(payload)
-        except (InvalidJSON, SchemaValidationError, json.JSONDecodeError, UnicodeDecodeError):
-            return {"protocol_error": "Provider response violates the JSON contract"}
+        except (InvalidJSON, SchemaValidationError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            return {"protocol_error": "Provider response violates the JSON contract", "protocol_detail": safe_text(exc)}
         finally:
             self.discard_preparation()
 
@@ -125,7 +129,8 @@ class Reasoning:
                 result = run(self.config["argv"], cwd=root, env=environment, data=canonical(request),
                              timeout=self.config["timeout"], check=False)
                 if result.returncode:
-                    raise Unavailable("Reasoning command failed; no success inferred")
+                    secrets = [environment[name] for name in self.config.get("credentials", {}) if name in environment]
+                    raise command_failure(result, executable=self.config["argv"][0], secrets=secrets)
                 value = loads(result.stdout)
                 usage = {}
                 if self.config.get("protocol", 1) == 2:
@@ -151,7 +156,7 @@ class Reasoning:
                 result = run(argv + ["-"], cwd=root, env=environment, data=codex_request(request),
                              timeout=self.config["timeout"], check=False)
                 if result.returncode:
-                    raise Unavailable("Codex failed or has no available ChatGPT quota; no API fallback")
+                    raise command_failure(result, executable=self.config["argv"][0])
                 complete, usage = False, {}
                 for line in result.stdout.splitlines():
                     event = loads(line)
@@ -168,7 +173,7 @@ class Reasoning:
         value = normalize_role_output(value)
         try:
             validate_instance(value, schema)
-        except SchemaValidationError:
+        except SchemaValidationError as exc:
             return {"protocol_error": "Provider result violates the role contract",
-                    "usage": usage, "provider": provider}
+                    "protocol_detail": safe_text(exc), "usage": usage, "provider": provider}
         return {"result": value, "usage": usage, "provider": provider}

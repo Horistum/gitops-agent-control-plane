@@ -130,7 +130,8 @@ class OperationalRuntimeTests(unittest.TestCase):
         self.assertIn('Base moved',result['reason'])
 
     def test_crash_after_each_recorded_effect_reuses_receipt(self):
-        class Crash(RuntimeError): pass
+        # A hard interruption must bypass ordinary exception diagnostics.
+        class Crash(BaseException): pass
         provider=InProcessProvider(); engine=self.start(provider)
         crashed=set()
         def crash(identity):
@@ -152,7 +153,7 @@ class OperationalRuntimeTests(unittest.TestCase):
         self.assertEqual(len([row for row in provider.calls if row['phase']=='developer']),1)
 
     def test_indeterminate_model_call_requires_explicit_bounded_retry(self):
-        class Crash(RuntimeError): pass
+        class Crash(BaseException): pass
         class Interrupted:
             def execute(self,_): raise Crash()
         engine=self.start(Interrupted())

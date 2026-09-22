@@ -110,6 +110,11 @@ same name your deployments already use.
   request, the response body, or any resolved credential value**. The
   controller records that the call did not produce a usable result; it does
   not need — and must not receive — raw provider output in its persisted state.
+  Bundled adapters emit `provider-error/v1` JSON with a bounded message and
+  selected HTTP status/error/request-ID fields. Version 1.8.3 preserves these
+  details in the run diagnostic and UI; other adapters receive a bounded,
+  redacted stderr excerpt. These are explanations, never execution evidence.
+  See [failure diagnostics](RECOVERY-183.md).
 - A finished-but-unusable upstream answer (refusal, truncation, tool call
   instead of content) should still make your adapter exit 0 with `result: {}`
   and whatever `usage`/`provider` you can report. The controller's bounded

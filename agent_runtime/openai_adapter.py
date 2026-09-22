@@ -9,6 +9,7 @@ from urllib import error, parse, request
 from .io import Closed, canonical, loads
 from .usage import validate_usage
 from .prompts import openai_messages
+from .diagnostics import provider_error
 from control_plane_core import stable_prompt_json
 
 # Fields the runtime holds stable across most consecutive role calls within a
@@ -88,6 +89,7 @@ def main(argv=None):
     parser.add_argument("--max-output-tokens", type=int, default=8192)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
+    key = ""
     try:
         endpoint(args.endpoint)
         if not 1 <= args.timeout <= 7200 or not 1 <= args.max_output_tokens <= 1_000_000:
@@ -107,8 +109,8 @@ def main(argv=None):
             value = complete(envelope, url=args.endpoint, key=key, timeout=args.timeout, max_tokens=args.max_output_tokens)
         sys.stdout.buffer.write(canonical(value) + b"\n")
         return 0
-    except (Closed, error.URLError, OSError, ValueError, KeyError, TypeError):
-        print("Provider request failed; no automatic retry or billing fallback. Inspect the pending effect.", file=sys.stderr)
+    except Exception as exc:
+        print(canonical(provider_error(exc, provider="openai-chat-completions", key=key)).decode(), file=sys.stderr)
         return 2
 
 

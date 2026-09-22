@@ -7,6 +7,7 @@ import re
 
 from .io import Busy, Closed, Unavailable, canonical, loads
 from .service import RunService
+from .diagnostics import error_response
 
 PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -18,6 +19,10 @@ The controller rechecks evidence and repository identity before merging.</p>
 <label>Local review token <input id="token" type="password" autocomplete="off"></label>
 <button id="load" type="button">Load decision</button>
 <p id="message" role="status">Enter the token configured on the controller host.</p>
+<section id="diagnostic-panel" hidden aria-live="polite"><h2>What happened</h2>
+<p id="diagnostic-message"></p><p id="diagnostic-meta"></p>
+<h3>Next steps</h3><ul id="diagnostic-steps"></ul>
+<details><summary>Technical details and error location</summary><pre id="diagnostic-details"></pre></details></section>
 <section><h2>Current decision</h2><dl id="facts"></dl>
 <p>Inspect the complete decision below, including findings and verification evidence.</p>
 <button id="approve" type="button" disabled>Approve this exact decision</button></section>
@@ -27,6 +32,7 @@ The controller rechecks evidence and repository identity before merging.</p>
 <section><h2>Run controls</h2><p id="blocked-reason"></p>
 <label>Reason for action <input id="reason" maxlength="1000"></label><div id="actions"></div>
 <h2>Usage and recent activity</h2><pre id="usage"></pre><pre id="health"></pre></section>
+<details><summary>Recent diagnostic log</summary><pre id="diagnostic-history"></pre></details>
 <details open><summary>Complete human-decision.json</summary><pre id="document"></pre></details>
 <p>The token is kept only in this page's memory. Reloading clears it.
 This interface provides local owner authority, not named enterprise identities.</p>
@@ -40,14 +46,33 @@ async function api(path, options = {}) {
   const response = await fetch(path, {...options, cache: "no-store", credentials: "omit",
     headers: {"Authorization": "Bearer " + el("token").value, "Content-Type": "application/json"}});
   const value = await response.json();
-  if (!response.ok) throw new Error(value.reason || "Request failed");
+  if (!response.ok) {
+    const error = new Error(value.reason || "Request failed");
+    error.diagnostic = value.diagnostic; throw error;
+  }
   return value;
+}
+function renderDiagnostic(value) {
+  el("diagnostic-panel").hidden = !value;
+  if (!value) return;
+  el("diagnostic-message").textContent = value.message;
+  el("diagnostic-meta").textContent = [value.code, "Phase: " + (value.phase || "-"),
+    "Operation: " + value.operation, "ID: " + value.id, value.at || "Current observation"].join(" | ");
+  el("diagnostic-steps").replaceChildren();
+  for (const step of value.next_steps || []) {
+    const row = document.createElement("li"); row.textContent = step; el("diagnostic-steps").append(row);
+  }
+  el("diagnostic-details").textContent = JSON.stringify(value, null, 2);
+}
+function showError(error) {
+  el("message").textContent = error.message + " Reload before acting.";
+  if (error.diagnostic) renderDiagnostic(error.diagnostic);
 }
 el("token").addEventListener("input", () => { shown = null; el("approve").disabled = true; });
 el("load-diff").addEventListener("click", async () => {
   if (!shown) return;
   try { const value = await api("/api/diff/" + shown.decision_hash); el("diff").textContent = value.diff; }
-  catch (error) { el("message").textContent = error.message; }
+  catch (error) { showError(error); }
 });
 function details(target, title, value) {
   const box = document.createElement("details"), label = document.createElement("summary"), text = document.createElement("pre");
@@ -57,11 +82,13 @@ function details(target, title, value) {
 el("load").addEventListener("click", async () => {
   shown = null; el("approve").disabled = true; el("document").textContent = "";
   el("facts").replaceChildren(); el("message").textContent = "Loading...";
+  renderDiagnostic(null); el("diagnostic-history").textContent = "";
   for (const id of ["findings", "evidence", "actions"]) el(id).replaceChildren();
   el("diff").textContent = ""; el("load-diff").disabled = true;
   try {
     const value = await api("/api/decision");
     el("document").textContent = JSON.stringify(value, null, 2);
+    renderDiagnostic(value.diagnostic);
     for (const name of ["run_id", "status", "phase", "paused", "head", "base", "risk", "binding", "decision_hash"]) {
       const term = document.createElement("dt"), detail = document.createElement("dd");
       term.textContent = name; detail.textContent = value[name] ?? "-";
@@ -92,7 +119,7 @@ el("load").addEventListener("click", async () => {
             binding: current.pending_effect, decision_hash: current.decision_hash,
             reason: el("reason").value, accept_duplicate_cost: name === "retry-effect"})});
           el("load").click();
-        } catch (error) { el("message").textContent = error.message + " Reload before acting."; }
+        } catch (error) { showError(error); }
       });
       el("actions").append(button);
     }
@@ -102,8 +129,10 @@ el("load").addEventListener("click", async () => {
       .catch(error => { el("usage").textContent = error.message; });
     api("/api/status").then(status => { el("health").textContent = JSON.stringify(status, null, 2); })
       .catch(error => { el("health").textContent = error.message; });
+    api("/api/diagnostics").then(report => { el("diagnostic-history").textContent = JSON.stringify(report, null, 2); })
+      .catch(error => { el("diagnostic-history").textContent = error.message; });
     el("message").textContent = value.approvable ? "Waiting for your decision." : "No approvable decision in this state.";
-  } catch (error) { el("message").textContent = error.message; }
+  } catch (error) { showError(error); }
 });
 el("approve").addEventListener("click", async () => {
   if (!shown || !shown.approvable) return;
@@ -111,7 +140,7 @@ el("approve").addEventListener("click", async () => {
   try {
     await api("/api/approve", {method: "POST", body: JSON.stringify({binding: current.binding, decision_hash: current.decision_hash})});
     el("message").textContent = "Approval recorded. The supervisor can continue and recheck gates.";
-  } catch (error) { el("message").textContent = error.message + " Reload the decision before trying again."; }
+  } catch (error) { showError(error); }
 });'''
 
 STYLE = b'''body{margin:0;background:#101923;color:#e6edf3;font:16px/1.6 system-ui,sans-serif}
@@ -120,7 +149,9 @@ h1{font-size:36px;line-height:1.2}section,details{padding:20px;margin:24px 0;bac
 input,button{font:inherit;padding:10px 14px;margin:8px 8px 8px 0;border-radius:6px;border:1px solid #668291}
 input{background:#101923;color:white}button{background:#65ddbc;color:#10251e;cursor:pointer}button:disabled{opacity:.45;cursor:default}
 dt{font-weight:bold;color:#9eafbd}dd{margin:0 0 12px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
-#message{color:#65ddbc}summary{cursor:pointer}'''
+#message{color:#65ddbc}summary{cursor:pointer}[hidden]{display:none!important}
+#diagnostic-panel{border-color:#e5a458}#diagnostic-message{font-size:18px}
+#diagnostic-meta{color:#b8c5ce;font-size:13px;overflow-wrap:anywhere}'''
 
 
 def create_server(root, token, *, port=8765):
@@ -166,7 +197,7 @@ def create_server(root, token, *, port=8765):
                 return self.send(401, {"reason": "Review token required"})
             if self.command == "GET" and self.path == "/api/decision":
                 return self.send(200, service.decision())
-            if self.command == "GET" and self.path in {"/api/status", "/api/usage"}:
+            if self.command == "GET" and self.path in {"/api/status", "/api/usage", "/api/diagnostics"}:
                 return self.send(200, getattr(service, self.path.rsplit("/", 1)[-1])())
             if self.command == "GET" and re.fullmatch(r"/api/diff/[0-9a-f]{64}", self.path):
                 return self.send(200, service.diff(self.path.rsplit("/", 1)[-1]))
@@ -201,12 +232,9 @@ def create_server(root, token, *, port=8765):
                 self.dispatch()
             except Busy:
                 self.send(409, {"reason": "Run busy; retry after the active tick"})
-            except (Closed, ValueError):
-                self.send(409, {"reason": "Decision unavailable or changed; reload and inspect controller status"})
-            except Unavailable:
-                self.send(503, {"reason": "External service unavailable"})
-            except (OSError, KeyError, TypeError):
-                self.send(500, {"reason": "Cannot read the run; inspect controller status"})
+            except Exception as exc:
+                status = 503 if isinstance(exc, Unavailable) else 409 if isinstance(exc, (Closed, ValueError)) else 500
+                self.send(status, error_response(root, exc, operation="review:" + self.command + " " + self.path, secrets=(token,)))
 
         do_GET = handle_operation
         do_POST = handle_operation
