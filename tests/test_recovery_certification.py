@@ -55,6 +55,34 @@ class RecoveryCertificationTests(unittest.TestCase):
         self.assertEqual(service.usage()['recorded_calls'], before['recorded_calls'])
         with self.assertRaises(Closed): service.act('reconcile-effect', document['decision_hash'], binding=pending['id'])
 
+    def test_reconcile_effect_before_any_hold_observation_still_restores(self):
+        """No tick observed the crash yet: the task is still at its original
+        phase, never marked await_human. reconcile-effect must restore from
+        this state too, not only from an already-held BLOCKED_POLICY task."""
+        engine = Controller.start(self.root / 'run', self.policy, goal(), trusted_local=True)
+        peer = InProcessProvider(); engine.reasoning = peer
+        engine.tick(); engine.tick()
+        class Crash(BaseException): pass
+        engine.store.after_receipt = lambda _: (_ for _ in ()).throw(Crash())
+        with self.assertRaises(Crash): engine.tick()
+        pending = Store(engine.root).state['pending']
+        path = engine.root / 'receipts' / (pending['id'] + '.json')
+        data = path.read_bytes(); path.unlink()
+        calls_before = len(peer.calls)
+        state = Store(engine.root).state
+        original_phase = (state.get('task') or {}).get('phase')
+        self.assertNotEqual(original_phase, 'await_human')
+        self.assertEqual(state['status'], 'RUNNING')
+        with self.assertRaises(Closed): action(engine.root, 'reconcile-effect', pending['id'])
+        path.write_bytes(data)  # owner restores the receipt from a backup
+        action(engine.root, 'reconcile-effect', pending['id'])
+        restored = Store(engine.root).state
+        self.assertEqual(restored['task']['phase'], original_phase)
+        self.assertEqual(restored['status'], 'RUNNING')
+        result = Controller(engine.root, reasoning=peer).tick()
+        self.assertEqual(result['status'], 'RUNNING')
+        self.assertEqual(len(peer.calls), calls_before)
+
     def test_restored_discovery_receipt_replays_after_restart(self):
         root, peer, pending, _ = self.held_receipt(False)
         from agent_runtime.cli import main
