@@ -31,6 +31,10 @@ class RunService:
     def usage(self):
         return usage_report(Store(self.root))
 
+    def diagnostics(self, limit=20):
+        from .diagnostics import recent_events
+        return recent_events(self.root, limit)
+
     def approve(self, binding, decision_hash):
         return action(self.root, "approve", binding, decision_hash=decision_hash)
 

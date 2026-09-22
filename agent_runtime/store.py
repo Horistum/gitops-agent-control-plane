@@ -17,6 +17,13 @@ def runtime_fingerprint():
     return fingerprint(files)
 
 
+def validate_authority(state):
+    from .contracts import validate_configuration
+    validate_configuration(state["policy"], state["goal"])
+    if state["policy_hash"] != fingerprint({"policy": state["policy"], "goal": state["goal"]}):
+        raise Closed("Saved authority snapshot changed", code="AUTHORITY_CHANGED")
+
+
 class Store:
     def __init__(self, root, state=None):
         self.root = Path(root)
@@ -40,7 +47,7 @@ class Store:
         try:
             value = read_json(self.root / "receipts" / (identity + ".json"))
         except FileNotFoundError:
-            raise Closed("Recorded effect receipt is missing; restore evidence before continuing") from None
+            raise Closed("Recorded effect receipt is missing; restore evidence before continuing", code="RECEIPT_MISSING") from None
         if not isinstance(value, dict):
             raise Closed("Effect receipt must be an object")
         request = value.get("request")
@@ -68,13 +75,13 @@ class Store:
             result = value["output"]
         else:
             if identity in self.state.get("receipts", {}):
-                raise Closed("Recorded effect receipt is missing; restore it instead of repeating the effect")
+                raise Closed("Recorded effect receipt is missing; restore it instead of repeating the effect", code="RECEIPT_MISSING")
             if kind == "model" and model_call_action(receipt_available=False,
                     dispatch_state="dispatched" if pending else "not_started") == "hold":
-                raise Closed("Indeterminate model call; explicit retry-effect must name " + identity)
+                raise Closed("Indeterminate model call; explicit retry-effect must name " + identity, code="MODEL_OUTCOME_UNKNOWN")
             if not pending:
                 if kind == "model" and self.state["model_calls"] >= self.state["policy"]["limits"]["model_calls"]:
-                    raise Closed("Model call budget exhausted")
+                    raise Closed("Model call budget exhausted", code="MODEL_BUDGET_EXHAUSTED")
                 # No provider can be called during preparation. Resolve credentials
                 # before reserving; a receipt replay never needs current credentials.
                 if prepare is not None:

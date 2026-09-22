@@ -34,6 +34,7 @@ from urllib import error, parse, request
 from .io import Closed, canonical, loads
 from .usage import validate_usage
 from .prompts import anthropic_messages
+from .diagnostics import provider_error
 
 ANTHROPIC_VERSION = "2023-06-01"
 # Keywords not in Anthropic's documented structured-output support list
@@ -159,6 +160,7 @@ def main(argv=None):
     parser.add_argument("--max-output-tokens", type=int, default=8192)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
+    key = ""
     try:
         endpoint(args.endpoint)
         if not 1 <= args.timeout <= 7200 or not 1 <= args.max_output_tokens <= 1_000_000:
@@ -178,8 +180,8 @@ def main(argv=None):
             value = complete(envelope, url=args.endpoint, key=key, timeout=args.timeout, max_tokens=args.max_output_tokens)
         sys.stdout.buffer.write(canonical(value) + b"\n")
         return 0
-    except (Closed, error.URLError, OSError, ValueError, KeyError, TypeError):
-        print("Provider request failed; no automatic retry or billing fallback. Inspect the pending effect.", file=sys.stderr)
+    except Exception as exc:
+        print(canonical(provider_error(exc, provider="anthropic-messages", key=key)).decode(), file=sys.stderr)
         return 2
 
 

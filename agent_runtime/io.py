@@ -15,11 +15,17 @@ import tempfile
 import time
 
 
-class Closed(RuntimeError):
+class ReportedError(RuntimeError):
+    def __init__(self, *args, code=None, details=None):
+        super().__init__(*args)
+        self.code, self.details = code, details or {}
+
+
+class Closed(ReportedError):
     """A policy, identity or evidence gate is closed."""
 
 
-class Unavailable(RuntimeError):
+class Unavailable(ReportedError):
     """An external observation is temporarily unavailable; never infer success."""
 
 
@@ -102,8 +108,9 @@ def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, chec
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True)
-    except OSError:
-        raise NotDispatched("Process could not be started; no dispatch occurred") from None
+    except OSError as exc:
+        raise NotDispatched("Process could not be started; no dispatch occurred", code="PROCESS_NOT_STARTED",
+                            details={"executable": Path(argv[0]).name, "errno": exc.errno}) from None
     buffers = {"out": bytearray(), "err": bytearray()}
     incoming = memoryview(data)
     deadline = time.monotonic() + timeout
@@ -119,7 +126,8 @@ def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, chec
         try:
             while selector.get_map():
                 if time.monotonic() >= deadline:
-                    raise Unavailable("Process deadline exceeded: " + Path(argv[0]).name)
+                    raise Unavailable("Process deadline exceeded: " + Path(argv[0]).name, code="PROCESS_TIMEOUT",
+                                      details={"timeout_seconds": timeout})
                 for key, _ in selector.select(0.1):
                     stream, kind = key.fileobj, key.data
                     if kind == "in":
@@ -138,7 +146,8 @@ def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, chec
                         else:
                             buffers[kind].extend(chunk)
                             if sum(map(len, buffers.values())) > limit:
-                                raise Closed("Process output exceeds limit")
+                                raise Closed("Process output exceeds limit", code="PROCESS_OUTPUT_LIMIT",
+                                             details={"limit_bytes": limit})
             process.wait(timeout=max(0.1, deadline - time.monotonic()))
         except BaseException as exc:
             try:
@@ -147,7 +156,8 @@ def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, chec
                 pass
             process.wait()
             if isinstance(exc, subprocess.TimeoutExpired):
-                raise Unavailable("Process deadline exceeded: " + Path(argv[0]).name) from None
+                raise Unavailable("Process deadline exceeded: " + Path(argv[0]).name, code="PROCESS_TIMEOUT",
+                                  details={"timeout_seconds": timeout}) from None
             raise
         finally:
             for stream in (process.stdin, process.stdout, process.stderr):
@@ -155,7 +165,10 @@ def run(argv, *, cwd=None, env=None, data=b"", timeout=60, limit=2_000_000, chec
                     stream.close()
     result = subprocess.CompletedProcess(argv, process.returncode, bytes(buffers["out"]), bytes(buffers["err"]))
     if check and result.returncode:
-        raise Closed(f"{Path(argv[0]).name} exited {result.returncode}; raw output is not public evidence")
+        from .diagnostics import safe_text, secret_values
+        raise Closed(f"{Path(argv[0]).name} exited {result.returncode}; raw output is not public evidence",
+                     code="PROCESS_FAILED", details={"executable": Path(argv[0]).name, "exit_code": result.returncode,
+                     "stderr_excerpt": safe_text(result.stderr.decode("utf-8", "replace"), secrets=secret_values(env))})
     return result
 
 

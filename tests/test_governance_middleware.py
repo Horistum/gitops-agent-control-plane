@@ -161,7 +161,8 @@ class MiddlewareTests(unittest.TestCase):
                 validate_usage(usage)
 
     def test_recorded_crash_is_accounted_once_and_replayed_without_call(self):
-        class Crash(RuntimeError): pass
+        # Simulate process termination, outside the diagnostic Exception boundary.
+        class Crash(BaseException): pass
         engine = self.start()
         provider = InProcessProvider()
         engine.reasoning = provider
@@ -179,7 +180,9 @@ class MiddlewareTests(unittest.TestCase):
             def execute(self, _): raise RuntimeError('crash before receipt')
         engine = self.start()
         engine.reasoning = Interrupted()
-        with self.assertRaises(RuntimeError): engine.tick()
+        failure = engine.tick()
+        self.assertEqual(failure['status'], 'BLOCKED_POLICY')
+        self.assertEqual(failure['diagnostic']['code'], 'UNEXPECTED_ERROR')
         service = RunService(engine.root)
         report = service.usage()
         self.assertEqual((report['reserved_calls'], report['recorded_calls'], report['unknown_outcomes']), (1, 0, 1))

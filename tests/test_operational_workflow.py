@@ -75,7 +75,8 @@ class WorkflowRuntimeTests(unittest.TestCase):
                                          "content": "# concurrent independent change\n"}], "concurrent",
                                   allowed=["*.py"], protected=[])
         engine.repo.text("update-ref", "refs/heads/main", moved, base)
-        class Crash(RuntimeError): pass
+        # Exercise persisted receipt replay after a hard process interruption.
+        class Crash(BaseException): pass
         def crash(_):
             if engine.state["pending"]["kind"] == "refresh-base": raise Crash()
         engine.store.after_receipt = crash

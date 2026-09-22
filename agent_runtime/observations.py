@@ -2,6 +2,7 @@
 from control_plane_core import recovery_actions
 from .discovery import can_replan_discovery, discovery_document
 from .io import Closed
+from .diagnostics import current_diagnostic
 
 
 def status_document(state):
@@ -24,6 +25,7 @@ def status_document(state):
             "merge_sha": task.get("merge_sha", (state["archive"][-1].get("merge_sha") if state["archive"] else None)),
             "completed": state["completed"], "model_calls": state["model_calls"],
             "reason": state.get("reason"), "approval": task.get("approval_required"),
+            "diagnostic": current_diagnostic(state),
             "pending_effect": (state.get("pending") or {}).get("id"),
             "discovery": discovery,
             "recovery": recovery_actions({**task, "agent_calls": state["model_calls"], "pending": state.get("pending")},
