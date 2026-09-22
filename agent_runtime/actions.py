@@ -7,6 +7,7 @@ import uuid
 from control_plane_core import fingerprint, recovery_actions, require_merge_identity, retirement, upgrade_boundary
 from .controller import Controller
 from .decisions import approval_binding, decision_document
+from .discovery import remember_discovery
 from .io import Closed, locked
 from .store import Store, runtime_fingerprint
 
@@ -66,7 +67,10 @@ def retire_attempt(engine):
         if name == "replan":
             count = state.setdefault("owner_replans", {}).get(task["id"], 0)
             state["owner_replans"][task["id"]] = count + 1
+    if not task and name == "replan":
+        remember_discovery(state)
     state.update(task=None, discovery=None, status="CANCELLED" if name == "cancel" else "RUNNING", phase="reconcile")
+    state.pop("reason", None)
     state["effect_epoch"] += 1
     state.pop("owner_intent")
 
@@ -134,6 +138,8 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
                 raise Closed("Reconcile pending effects before retiring an attempt")
             if task and name == "replan" and state.get("owner_replans", {}).get(task["id"], 0) >= 2:
                 raise Closed("Owner replan budget exhausted")
+            if not task and name == "replan" and state["model_calls"] >= engine.policy["limits"]["model_calls"]:
+                raise Closed("Model call budget exhausted; discovery replan cannot reset it")
             state["owner_intent"] = name
             engine.store.save()
             retire_attempt(engine)
@@ -163,6 +169,8 @@ def upgrade(root, *, suspend=False):
             state["archive"].append(result["previous"])
             state["attempts"][task["id"]] = result["next_attempt"]
             state.update(task=None, discovery=None, phase="reconcile", status="RUNNING")
+        if not task:
+            remember_discovery(state)
         state["runtime_hash"] = runtime_fingerprint()
         state["effect_epoch"] += 1
         state["discovery"] = None

@@ -10,6 +10,7 @@ from control_plane_core import (CoreError, context_checkpoint, context_files, co
 from control_plane_core.schema import SchemaValidationError
 from .context import requested_context, role_view
 from .contracts import ROLE_SCHEMAS, criteria, validate_configuration, normalize_role_output
+from .discovery import initial_discovery
 from .git import GitRepository
 from .github import GitHub
 from .io import Closed, Unavailable, canonical, locked, read_json
@@ -143,8 +144,14 @@ class Controller:
         required = task.get("context", [])
         if phase in {"reviewer", "challenge_review", "architect_accept", "chief_accept"}:
             required = list(dict.fromkeys(required + self.repo.changed(task["base"], task["head"])))
+        retained = list(previous.get("sources", {}))
+        if phase == "discovery":
+            # Seed selection from eligible items, but let explicit retrieval
+            # replace seeds when the union is larger than the context window.
+            retained = required + retained
+            required = []
         paths, omitted = context_files(required, task.get("requested_files", []),
-                                       list(previous.get("sources", {})), limits["context_files"])
+                                       retained, limits["context_files"])
         sources = self.repo.context(task["head"], paths, limits["context_bytes"])
         payload = {"phase": phase, "goal": self.goal, "task": role_view(task, phase),
                    "sources": sources, "omitted_paths": omitted, "memory": previous,
@@ -169,6 +176,8 @@ class Controller:
         # Validate here too: alternative in-process adapters have no privileged bypass.
         from control_plane_core.schema import validate_instance
         validate_instance(output, ROLE_SCHEMAS[phase])
+        if phase == "discovery":
+            task["last_result"] = {key: output[key] for key in ("verdict", "summary", "selected_item")}
         memory[phase] = context_checkpoint(previous, revision=revision, phase=phase,
             summary=output["summary"], sources=sources, requests={key: output[key] for key in ("requested_files", "requested_searches", "requested_facts")},
             facts=task.get("external_facts", {}),
@@ -187,6 +196,8 @@ class Controller:
                                                      "verdict": output["verdict"], "base": task["base"],
                 "spec_hash": task.get("spec_hash"), "acceptance_evidence": output["acceptance_evidence"],
                 "findings": output["findings"], "risk": output["risk"]}
+        if phase == "discovery":
+            task["role_results"][phase]["selected_item"] = output["selected_item"]
         return output
 
     def reconcile(self):
@@ -205,13 +216,16 @@ class Controller:
             head = self.repo.remote_base() if self.github else self.repo.resolve(self.policy["base_branch"])
             if self.github:
                 self.repo.text("update-ref", "refs/heads/" + self.policy["base_branch"], head)
-            self.state["discovery"] = {"head": head, "base": head, "context": [], "turn": 0}
+            self.state["discovery"] = initial_discovery(self.state, head, projection["eligible_items"])
         discovery = self.state["discovery"]
         output = self.model("discovery", discovery, {"eligible_items": projection["eligible_items"]})
         if output is None:
             return
         if output["verdict"] != "ready" or output["selected_item"] not in projection["eligible_items"]:
-            raise Closed("Discovery did not select eligible authorized work")
+            raise Closed("Discovery did not select eligible authorized work: "
+                f"verdict={output['verdict']}, selected_item={output['selected_item']!r}, "
+                f"eligible_items={projection['eligible_items']!r}. "
+                f"Model summary: {output['summary']}")
         item = next(row for row in self.goal["items"] if row["id"] == output["selected_item"])
         attempt = self.state["attempts"].get(item["id"], 1)
         head = discovery["head"]
@@ -221,6 +235,7 @@ class Controller:
             "feedback": [], "memory": {}, "role_results": {}, "working_set": [], "completed_phases": [],
             "frozen_tests": self.state.get("carried_tests", {}).get(item["id"])}
         self.state["discovery"] = None
+        self.state.pop("discovery_retry", None)
 
     def tick(self):
         from .roles import role_step, apply_step
