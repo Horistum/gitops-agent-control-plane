@@ -5,7 +5,26 @@ from .io import Closed
 from .diagnostics import current_diagnostic
 
 
-def status_document(state):
+def product_document(root, state):
+    """Observe only the run-owned local ref; never fetch or touch the checkout."""
+    from pathlib import Path
+    from .git import GitRepository
+    from .diagnostics import safe_text
+    policy = state["policy"]
+    repository = Path(root).resolve() / "product.git"
+    ref = "refs/heads/" + policy["base_branch"]
+    result = {"source_checkout": policy["product"], "repository": str(repository),
+              "base_ref": ref, "base_ref_sha": None, "inspection_error": None,
+              "publication": policy["publication"]["kind"],
+              "note": "The source checkout is unchanged. This is the run-owned local ref, not a live remote observation."}
+    try:
+        result["base_ref_sha"] = GitRepository(repository, policy["base_branch"]).resolve(ref)
+    except Exception as exc:
+        result["inspection_error"] = safe_text(exc)
+    return result
+
+
+def status_document(state, root=None):
     if not isinstance(state, dict):
         raise Closed("Run state must be a JSON object")
     for name in ("task", "pending", "discovery"):
@@ -18,7 +37,7 @@ def status_document(state):
         raise Closed("Invalid run state history or policy")
     task = state.get("task") or {}
     discovery = discovery_document(state)
-    return {"run_id": state["run_id"], "status": state["status"],
+    result = {"run_id": state["run_id"], "status": state["status"],
             "phase": task.get("phase", state["phase"]), "paused": state["paused"],
             "revision": state.get("revision", 0), "updated_at": state.get("updated_at"),
             "item": task.get("id"), "head": task.get("head", (discovery or {}).get("head", state["base"])),
@@ -31,3 +50,6 @@ def status_document(state):
             "recovery": recovery_actions({**task, "agent_calls": state["model_calls"], "pending": state.get("pending")},
                 {"max_agent_calls_per_task": state["policy"]["limits"]["model_calls"]}) if task else
                 {"retry": False, "replan": can_replan_discovery(state)}}
+    if root is not None:
+        result["product"] = product_document(root, state)
+    return result

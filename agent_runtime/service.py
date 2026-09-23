@@ -23,7 +23,7 @@ class RunService:
 
     def status(self):
         from .observations import status_document
-        return status_document(Store(self.root).state)
+        return status_document(Store(self.root).state, self.root)
 
     def decision(self):
         return decision_document(Store(self.root).state)
@@ -34,6 +34,10 @@ class RunService:
     def diagnostics(self, limit=20):
         from .diagnostics import recent_events
         return recent_events(self.root, limit)
+
+    def explain(self, limit=10):
+        from .explain import explanation_document
+        return explanation_document(Store(self.root), limit)
 
     def approve(self, binding, decision_hash):
         return action(self.root, "approve", binding, decision_hash=decision_hash)
