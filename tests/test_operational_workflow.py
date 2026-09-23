@@ -107,6 +107,16 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertNotIn("role_results", reviewer["task"])
         self.assertEqual(reviewer["memory"], {})
 
+    def test_architect_working_set_cannot_claim_a_test_path(self):
+        def overreach(payload, value, _):
+            if payload["phase"] == "architect":
+                value["working_set"] = value["working_set"] + ["tests/test_extra.py"]
+        engine = self.start(InProcessProvider(overreach))
+        result = self.drive(engine)
+        self.assertEqual(result["status"], "BLOCKED_POLICY", result)
+        self.assertIn("Architect working set exceeds source authority", result["reason"])
+        self.assertEqual(engine.task["working_set"], [])
+
     def test_stale_spec_review_is_rejected_at_publication_boundary(self):
         engine = self.start(); self.drive(engine, "publish")
         engine.task["role_results"]["reviewer"]["spec_hash"] = "another-spec"
