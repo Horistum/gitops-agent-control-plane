@@ -41,7 +41,7 @@ def safe_text(value, *, secrets=(), limit=2000):
                         r"(?<!\w)" + literal + r"(?!\w)")
     if patterns:
         # One pass prevents one secret from rewriting another's redaction marker.
-        text = re.sub(r"\[redacted\]|" + "|".join(patterns),
+        text = re.sub("|".join(patterns) + r"|\[redacted\]",
                       lambda match: "[redacted]", text)
     # Redact complete known values before cutting a window, then bound regex
     # work even for a subprocess emitting megabytes of unbroken text.

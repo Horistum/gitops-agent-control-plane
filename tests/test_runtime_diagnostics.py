@@ -289,6 +289,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
             self.assertEqual(safe_text('prefix1suffix', secrets=('1',)), 'prefix[redacted]suffix')
             self.assertEqual(safe_text('abc and a', secrets=('abc', 'a')), '[redacted] [redacted]nd [redacted]')
             self.assertEqual(safe_text('[redacted]', secrets=('a',)), '[redacted]')
+            self.assertEqual(safe_text('[redacted]suffix', secrets=('[redacted]suffix',)), '[redacted]')
             value = safe_text('Bearer xy; password=xy; sk-longsecret123', secrets=('xy',))
             self.assertNotIn('xy', value)
             self.assertNotIn('sk-longsecret123', value)
