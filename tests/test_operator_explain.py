@@ -101,6 +101,23 @@ class OperatorExplainTests(unittest.TestCase):
                          ["--binding", engine.state["pending"]["id"]])
         self.assertEqual((engine.root / "state.json").read_bytes(), before)
 
+    def test_short_inferred_values_do_not_corrupt_cli_run_ids_or_approval_bindings(self):
+        engine = self.start(approval=True); self.drive(engine)
+        service = RunService(engine.root)
+        status, decision = service.status(), service.decision()
+        with patch("agent_runtime.diagnostics.secret_values", return_value=["1", "e", "true"]):
+            for command in ("status", "decision"):
+                output = self.cli(command, "--state", str(engine.root), "--format", "table")
+                self.assertIn(status["run_id"], output)
+                self.assertIn(status["head"], output)
+                if command == "decision":
+                    self.assertIn(decision["binding"], output)
+                    self.assertIn(decision["decision_hash"], output)
+            output = self.cli("explain", "--state", str(engine.root))
+            self.assertIn(status["run_id"], output)
+            self.assertIn(decision["binding"], output)
+            self.assertIn(decision["decision_hash"], output)
+
     def test_durable_model_receipt_selects_reconciliation_and_preserves_budget(self):
         engine = self.start()
         engine.store.after_receipt = lambda _: (_ for _ in ()).throw(Crash())
