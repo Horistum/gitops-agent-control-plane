@@ -101,11 +101,19 @@ def apply_step(engine):
     tester = role == "tester"
     edits = output["edits"]
     protected = policy["protected_paths"] + ([] if tester else policy["test_paths"])
+    allowed = policy["test_paths"] if tester else policy["allowed_paths"]
+    working_set = None if tester else task["working_set"]
+    # Reject a deterministic authority/shape violation before dispatch: once
+    # store.effect() marks this pending, only reconcile can clear it, and
+    # reconcile just replays this same call -- a proposal that will always
+    # fail the same way would wedge recovery with no replan/cancel escape.
+    if not (not edits and tester):
+        engine.repo.validate_edits(task["head"], edits, allowed=allowed, protected=protected,
+            working_set=working_set, additions_only=tester, maximum=policy["limits"]["edit_bytes"])
     request = {"parent": task["head"], "edits": edits, "role": role}
     result = engine.store.effect("commit", request, lambda identity: {"head": task["head"] if not edits and tester else engine.repo.commit(
-        task["head"], edits, identity, allowed=policy["test_paths"] if tester else policy["allowed_paths"],
-        protected=protected, working_set=None if tester else task["working_set"],
-        additions_only=tester, maximum=policy["limits"]["edit_bytes"])})
+        task["head"], edits, identity, allowed=allowed, protected=protected,
+        working_set=working_set, additions_only=tester, maximum=policy["limits"]["edit_bytes"])})
     if tester:
         task["production_head"] = task["head"]
     task["head"] = result["head"]

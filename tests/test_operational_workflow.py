@@ -117,6 +117,24 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertIn("Architect working set exceeds source authority", result["reason"])
         self.assertEqual(engine.task["working_set"], [])
 
+    def test_developer_edit_outside_authority_is_rejected_without_wedging_recovery(self):
+        def overreach(payload, value, _):
+            if payload["phase"] == "developer":
+                value["edits"] = value["edits"] + [{"path": "tests/test_extra.py", "expected_sha256": "",
+                    "delete": False, "content": "import unittest\n"}]
+        engine = self.start(InProcessProvider(overreach))
+        result = self.drive(engine)
+        self.assertEqual(result["status"], "BLOCKED_POLICY", result)
+        self.assertIn("Edit exceeds path authority", result["reason"])
+        # A deterministic pre-write rejection must never mark a durable pending
+        # effect: reconcile only replays perform(), which would fail the same
+        # way forever, and replan/cancel both refuse to run while one exists.
+        self.assertIsNone(engine.state.get("pending"))
+        from agent_runtime.decisions import decision_document
+        self.assertEqual(set(decision_document(engine.state)["actions"]), {"pause", "cancel", "replan"})
+        with self.assertRaisesRegex(Exception, "No replay-safe pending effect"):
+            action(engine.root, "reconcile")
+
     def test_stale_spec_review_is_rejected_at_publication_boundary(self):
         engine = self.start(); self.drive(engine, "publish")
         engine.task["role_results"]["reviewer"]["spec_hash"] = "another-spec"
