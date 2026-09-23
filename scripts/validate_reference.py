@@ -51,6 +51,7 @@ def validate_publication_identity() -> None:
 
 
 def validate_schemas_and_static_contracts() -> None:
+    run([sys.executable, str(ROOT / "scripts" / "generate_workflow_docs.py"), "--check"])
     run([sys.executable, str(ROOT / "scripts" / "generate_runtime_schemas.py"), "--check"])
     run([sys.executable, str(ROOT / "scripts" / "generate_contracts.py"), "--check"])
     from agent_runtime.contracts import validate_configuration

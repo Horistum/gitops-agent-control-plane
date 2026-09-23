@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.8.3"
+version = "1.9.0"
 description = "Provider-neutral trust and governance for bounded software delivery"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}

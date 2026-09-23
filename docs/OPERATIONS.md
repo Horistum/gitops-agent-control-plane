@@ -79,6 +79,11 @@ Each invocation has a step bound; `--max-steps` controls it. Exit 0 means the go
 completed; exit 2 means inspect status or continue the pending run. `status` is
 read-only. The final merge SHA and private receipts define the validation scope.
 
+For one combined explanation, run `agent-control explain --state RUN`.
+`status --format table` and `decision --format table` provide readable views
+alongside their default JSON. The [operator guide](OPERATOR-EXPERIENCE.md) explains
+the recovery verbs and state layout; the [phase map](WORKFLOW.md) shows the graph.
+
 ## Provider protocol and local operation
 
 `reasoning.kind=command` invokes the owner-provided `argv` in an empty directory

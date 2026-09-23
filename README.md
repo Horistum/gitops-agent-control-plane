@@ -3,7 +3,7 @@
 **A provider-neutral trust and governance layer for bounded software delivery
 through Git, maintained by the Horistum project.**
 
-Version 1.8.3 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.9.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
@@ -53,6 +53,7 @@ agent-control doctor --policy /absolute/policy.json --goal /absolute/goal.json
 agent-control start --policy /absolute/policy.json --goal /absolute/goal.json \
   --state /absolute/agent-runs/my-goal
 agent-control status --state /absolute/agent-runs/my-goal
+agent-control explain --state /absolute/agent-runs/my-goal
 agent-control decision --state /absolute/agent-runs/my-goal
 agent-control usage --state /absolute/agent-runs/my-goal
 agent-control resume --state /absolute/agent-runs/my-goal
@@ -92,6 +93,11 @@ Both operational runtimes call `development-workflow/v1` for advancement, repair
 risk escalation and evidence invalidation. The same release gate checks candidate,
 integration and merged-product observations against head, base and specification.
 The graph adapts to risk; independent executable verification remains mandatory.
+See the [generated phase graph](docs/WORKFLOW.md) and
+[operator guide](docs/OPERATOR-EXPERIENCE.md) for a readable explanation of progress,
+recovery commands and the location of the run-owned result. `explain` and the
+review UI combine these observations; `status --format table` and
+`decision --format table` add human-readable output while JSON remains the default.
 Critical/high-risk work uses the full planning and acceptance graph. Tests added by the independent
 tester are executed on the original code and the candidate, then retained in the
 merged product. Later items preserve earlier executed test identities and frozen

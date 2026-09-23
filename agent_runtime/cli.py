@@ -16,6 +16,7 @@ from .io import Closed, Unavailable, read_json
 from .reasoning import Reasoning
 from .store import Store
 from .verification import Verification
+from .explain import COMMAND_HELP
 
 
 def drive(engine, steps, poll):
@@ -30,10 +31,11 @@ def drive(engine, steps, poll):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+        epilog="Unsure which recovery command applies? Start with agent-control explain --state RUN.")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("start", "doctor"):
-        p = sub.add_parser(name)
+        p = sub.add_parser(name, help=COMMAND_HELP[name], description=COMMAND_HELP[name])
         p.add_argument("--policy", type=Path, required=True)
         p.add_argument("--goal", type=Path, required=True)
         if name == "start":
@@ -41,28 +43,32 @@ def main(argv=None):
             p.add_argument("--trusted-local", action="store_true")
             p.add_argument("--max-steps", type=int, default=256)
             p.add_argument("--poll-seconds", type=int, default=0)
-    p = sub.add_parser("resume")
+    p = sub.add_parser("resume", help=COMMAND_HELP["resume"], description=COMMAND_HELP["resume"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--max-steps", type=int, default=256)
     p.add_argument("--poll-seconds", type=int, default=0)
-    p = sub.add_parser("serve")
+    p = sub.add_parser("serve", help=COMMAND_HELP["serve"], description=COMMAND_HELP["serve"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--poll-seconds", type=int, default=5)
     p.add_argument("--max-backoff", type=int, default=60)
-    p = sub.add_parser("backup")
+    p = sub.add_parser("backup", help=COMMAND_HELP["backup"], description=COMMAND_HELP["backup"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("restore")
+    p = sub.add_parser("restore", help=COMMAND_HELP["restore"], description=COMMAND_HELP["restore"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--archive", type=Path, required=True)
-    p = sub.add_parser("registry")
+    p = sub.add_parser("registry", help=COMMAND_HELP["registry"], description=COMMAND_HELP["registry"])
     p.add_argument("--root", type=Path, required=True,
                    help="One run, or a flat directory whose immediate children are runs")
-    for name in ("status", "tick", "decision", "usage", "diagnostics", "review", "pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
-        p = sub.add_parser(name)
+    for name in ("status", "tick", "decision", "explain", "usage", "diagnostics", "review", "pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
+        p = sub.add_parser(name, help=COMMAND_HELP[name], description=COMMAND_HELP[name])
         p.add_argument("--state", type=Path, required=True)
-        if name == "diagnostics":
-            p.add_argument("--limit", type=int, default=20)
+        if name in {"diagnostics", "explain"}:
+            p.add_argument("--limit", type=int, default=10 if name == "explain" else 20,
+                           help="Recent entries to show (1..100)")
+        if name in {"status", "decision", "explain"}:
+            p.add_argument("--format", choices=["json", "table", "text"] if name == "explain" else ["json", "table"],
+                           default="text" if name == "explain" else "json")
         if name in {"approve", "retry-effect", "reconcile-effect"}:
             p.add_argument("--binding", required=True)
         if name in {"pause", "continue", "approve", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel"}:
@@ -111,10 +117,15 @@ def main(argv=None):
         elif args.command == "registry":
             from .registry import registry_status
             print(json.dumps(registry_status(args.root), ensure_ascii=False))
-        elif args.command in {"tick", "decision", "usage", "diagnostics"}:
+        elif args.command in {"status", "tick", "decision", "explain", "usage", "diagnostics"}:
             from .service import RunService
             method = getattr(RunService(args.state), args.command)
-            print(json.dumps(method(args.limit) if args.command == "diagnostics" else method(), ensure_ascii=False))
+            value = method(args.limit) if args.command in {"diagnostics", "explain"} else method()
+            if getattr(args, "format", "json") == "json":
+                print(json.dumps(value, ensure_ascii=False))
+            else:
+                from .formatting import status_table, decision_table, explain_text
+                print({"status": status_table, "decision": decision_table, "explain": explain_text}[args.command](value))
         elif args.command == "review":
             from .review import create_server
             if not 1 <= args.port <= 65535:
@@ -125,9 +136,6 @@ def main(argv=None):
                     server.serve_forever()
                 except KeyboardInterrupt:
                     pass
-        elif args.command == "status":
-            from .service import RunService
-            print(json.dumps(RunService(args.state).status()))
         elif args.command == "upgrade":
             print(json.dumps(upgrade(args.state, suspend=args.suspend)))
         else:

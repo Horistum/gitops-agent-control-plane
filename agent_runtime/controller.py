@@ -288,4 +288,4 @@ class Controller:
 
     def summary(self):
         from .observations import status_document
-        return status_document(self.state)
+        return status_document(self.state, self.root)

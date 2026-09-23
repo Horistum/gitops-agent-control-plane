@@ -4,6 +4,12 @@ Current wire identities are authored in [config/contract-set.json](../config/con
 and projected into the [generated contract table](../README.md#contracts).
 Library SemVer is independent of those identities.
 
-The current distribution is 1.8.3. Public release tags, when issued, use
+The current distribution is 1.9.0. Public release tags, when issued, use
 `vMAJOR.MINOR.PATCH`; a merged source revision alone does not claim a published
 registry release. V7 is breaking because it adds multi-item reconciliation, repair, human resume, release-state transitions, role protocols, and adapter surfaces. A profile change no longer automatically changes the core contract.
+
+1.9.0 adds a shared read-only operator explanation, human-readable CLI formats,
+explicit result location, a generated workflow map, and a local UI overview with
+actual transitions. Existing JSON defaults, CLI verbs, receipt/effect semantics,
+decision binding and recovery limits remain unchanged. See the
+[operator guide](OPERATOR-EXPERIENCE.md).
