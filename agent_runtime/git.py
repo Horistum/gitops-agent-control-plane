@@ -164,12 +164,17 @@ class GitRepository:
                 target.chmod(0o755 if mode == "100755" else 0o644)
             yield root
 
-    def commit(self, parent, edits, effect, *, allowed, protected, working_set=None, additions_only=False, maximum=1_000_000):
+    def validate_edits(self, parent, edits, *, allowed, protected, working_set=None, additions_only=False, maximum=1_000_000):
+        """Pure, side-effect-free rejection. Callers dispatch a durable pending
+        effect only for the actual write below; a proposal that fails this
+        check must never mark one, or a deterministic rejection (the same
+        edits will always fail the same way) permanently wedges recovery --
+        reconcile only replays perform(), and replan/cancel refuse to run
+        while a pending effect exists."""
         if not edits or len({row["path"] for row in edits}) != len(edits):
             raise Closed("Edits must be nonempty and unique")
         if sum(len(row["content"].encode()) for row in edits) > maximum:
             raise Closed("Edit byte limit exceeded")
-        tree = self.tree(parent)
         for row in edits:
             path = row["path"]
             if not path_allowed(path, allowed, protected, [".github/*", ".agent-control/*", "AGENTS.md"]):
@@ -183,6 +188,12 @@ class GitRepository:
                 raise Closed("Edit does not name the current source hash: " + path)
             if (row["delete"] and old is None) or (not row["delete"] and old == row["content"].encode()):
                 raise Closed("No-op edit")
+
+    def commit(self, parent, edits, effect, *, allowed, protected, working_set=None, additions_only=False, maximum=1_000_000):
+        # Re-validate here too: a caller that skips the pre-check has no privileged bypass.
+        self.validate_edits(parent, edits, allowed=allowed, protected=protected, working_set=working_set,
+                            additions_only=additions_only, maximum=maximum)
+        tree = self.tree(parent)
         with tempfile.TemporaryDirectory(prefix="agent-index-") as temporary:
             env = {"GIT_INDEX_FILE": str(Path(temporary) / "index")}
             self.text("read-tree", sha(parent), env=env)
