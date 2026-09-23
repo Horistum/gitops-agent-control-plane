@@ -19,18 +19,30 @@ from .io import Closed, Unavailable, canonical, loads, locked
 LOG_NAME = "diagnostics.jsonl"
 LOG_LIMIT = 1_000_000
 _SECRET_NAME = re.compile(r"key|token|secret|password|credential|authorization", re.I)
+_ENV_SECRET_NAME = re.compile(r"(?:^|_)(?:key|token|secret|password|passwd|credentials?|authorization)$", re.I)
 
 
 def secret_values(environment=None):
     return [value for name, value in (os.environ if environment is None else environment).items()
-            if _SECRET_NAME.search(name) and isinstance(value, str) and value]
+            if _ENV_SECRET_NAME.search(name) and isinstance(value, str) and value]
 
 
 def safe_text(value, *, secrets=(), limit=2000):
     text = str(value)
-    for secret in sorted(set(secret_values()) | set(secrets), key=len, reverse=True):
-        if secret:
-            text = text.replace(secret, "[redacted]")
+    explicit = {secret for secret in secrets if isinstance(secret, str) and secret}
+    values = explicit | set(secret_values())
+    patterns = []
+    for secret in sorted(values, key=lambda value: (-len(value), value)):
+        literal = re.escape(secret)
+        # Environment names are a heuristic, not proof of credential identity.
+        # Short inferred values must not corrupt a run ID, SHA or ordinary word.
+        # Resolved/explicit credentials retain exact substring masking at any size.
+        patterns.append(literal if secret in explicit or len(secret) >= 8 else
+                        r"(?<!\w)" + literal + r"(?!\w)")
+    if patterns:
+        # One pass prevents one secret from rewriting another's redaction marker.
+        text = re.sub(r"\[redacted\]|" + "|".join(patterns),
+                      lambda match: "[redacted]", text)
     # Redact complete known values before cutting a window, then bound regex
     # work even for a subprocess emitting megabytes of unbroken text.
     truncated = len(text) > max(8192, limit * 2)

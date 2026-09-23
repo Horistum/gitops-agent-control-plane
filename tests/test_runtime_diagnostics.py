@@ -272,6 +272,27 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
         self.assertNotIn('opaque-value', result)
         self.assertIn('[redacted]', result)
 
+    def test_environment_inference_ignores_switches_and_short_values_preserve_identifiers(self):
+        from agent_runtime.diagnostics import safe_text, secret_values
+        environment = {'KEYRING_ENABLED': '1', 'TOKENIZERS_PARALLELISM': 'true',
+                       'MAX_TOKENS': '4000', 'CUSTOM_API_KEY': 'abc', 'GH_TOKEN': 'opaque-secret-value'}
+        self.assertEqual(set(secret_values(environment)), {'abc', 'opaque-secret-value'})
+        identity = '275c79ffef0e4ae393c17c1743e5e18e'
+        with patch('agent_runtime.diagnostics.secret_values', return_value=['1', 'e', 'abc']):
+            self.assertEqual(safe_text(identity), identity)
+            self.assertEqual(safe_text('abcdef'), 'abcdef')
+            self.assertEqual(safe_text('value: abc; value: 1'), 'value: [redacted]; value: [redacted]')
+
+    def test_explicit_short_credentials_remain_masked_without_rewriting_markers(self):
+        from agent_runtime.diagnostics import safe_text
+        with patch('agent_runtime.diagnostics.secret_values', return_value=[]):
+            self.assertEqual(safe_text('prefix1suffix', secrets=('1',)), 'prefix[redacted]suffix')
+            self.assertEqual(safe_text('abc and a', secrets=('abc', 'a')), '[redacted] [redacted]nd [redacted]')
+            self.assertEqual(safe_text('[redacted]', secrets=('a',)), '[redacted]')
+            value = safe_text('Bearer xy; password=xy; sk-longsecret123', secrets=('xy',))
+            self.assertNotIn('xy', value)
+            self.assertNotIn('sk-longsecret123', value)
+
     def test_existing_no_message_unavailable_remains_a_pre_dispatch_wait(self):
         engine = self.start()
         with patch('agent_runtime.reasoning.Reasoning.prepare', side_effect=Unavailable()):

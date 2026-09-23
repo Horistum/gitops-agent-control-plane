@@ -4,7 +4,7 @@ Current wire identities are authored in [config/contract-set.json](../config/con
 and projected into the [generated contract table](../README.md#contracts).
 Library SemVer is independent of those identities.
 
-The current distribution is 1.9.0. Public release tags, when issued, use
+The current distribution is 1.9.1. Public release tags, when issued, use
 `vMAJOR.MINOR.PATCH`; a merged source revision alone does not claim a published
 registry release. V7 is breaking because it adds multi-item reconciliation, repair, human resume, release-state transitions, role protocols, and adapter surfaces. A profile change no longer automatically changes the core contract.
 
@@ -13,3 +13,9 @@ explicit result location, a generated workflow map, and a local UI overview with
 actual transitions. Existing JSON defaults, CLI verbs, receipt/effect semantics,
 decision binding and recovery limits remain unchanged. See the
 [operator guide](OPERATOR-EXPERIENCE.md).
+
+1.9.1 fixes environment-dependent redaction corrupting run IDs and hashes in
+human-readable output. Environment credential inference uses credential-name
+suffixes; short inferred values match whole tokens. Explicitly supplied
+credentials retain substring redaction at every length, before truncation.
+Value masking is a single pass so replacement markers cannot be corrupted.
