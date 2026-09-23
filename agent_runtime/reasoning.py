@@ -25,7 +25,14 @@ ROLE_INSTRUCTIONS = {
         "For a concrete scope, safety or feasibility conflict, explain it in summary and findings and return "
         "blocked or replan. Do not invent scope, completion or a different task ID."
     ),
-    "architect": "Plan concrete changes. List exact working_set paths, invariants and verification steps.",
+    "architect": (
+        "Plan concrete changes. List exact working_set paths, invariants and verification steps. "
+        "working_set is the developer role's future edit authority: source paths under allowed_paths "
+        "only. Never add a path under test_paths or protected_paths, or a reserved path such as "
+        ".github/*, .agent-control/* or AGENTS.md -- test_paths is the tester role's exclusive "
+        "authority later in the pipeline, not yours to plan into working_set. Describe needed test "
+        "coverage in verification steps or findings instead of adding its file path."
+    ),
     "test_design": "Design independent executable scenarios for every test criterion before implementation.",
     "chief_plan": "Assess the plan, scope, test design and risks against the owner's goal. Reject gaps.",
     "developer": "Implement the bounded plan using complete file edits and exact prior content hashes.",
