@@ -132,14 +132,14 @@ function render(report) {
     for (const finding of review.findings || []) findings.append(node("li", finding.severity + " / " + finding.kind + ": " + finding.description));
     card.append(findings); details(card, "Complete review data", review); el("findings").append(card);
   }
-  if (!Object.keys(value.reviews).length) el("findings").append(node("p", "No reviews recorded yet."));
+  if (!Object.keys(value.reviews).length) el("findings").append(node("p", "No reviews in the current execution frame."));
   el("evidence").replaceChildren();
   for (const [name, proof] of Object.entries(value.evidence)) {
     const card = document.createElement("article");
     card.append(node("h4", name), node("p", report.evidence_summaries[name]));
     details(card, "Exact verification observations", proof); el("evidence").append(card);
   }
-  if (!Object.keys(value.evidence).length) el("evidence").append(node("p", "No verification evidence recorded yet."));
+  if (!Object.keys(value.evidence).length) el("evidence").append(node("p", "No verification evidence in the current decision. Completed attempts remain in the run archive."));
   el("actions").replaceChildren();
   for (const action of report.actions) {
     if (action.id === "approve" || !value.actions.includes(action.id)) continue;
