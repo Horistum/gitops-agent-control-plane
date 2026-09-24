@@ -1,14 +1,35 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.9.1"
+version = "1.9.2"
 description = "Provider-neutral trust and governance for bounded software delivery"
+readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "TRADEMARKS.md"]
+authors = [{name = "Horistum contributors"}]
+maintainers = [{name = "Horistum project maintainers"}]
+keywords = ["gitops", "governance", "agents", "software-delivery", "verification"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Horistum/gitops-agent-control-plane"
+Documentation = "https://github.com/Horistum/gitops-agent-control-plane/tree/main/docs"
+Issues = "https://github.com/Horistum/gitops-agent-control-plane/issues"
+Changelog = "https://github.com/Horistum/gitops-agent-control-plane/blob/main/docs/RELEASES.md"
+Security = "https://github.com/Horistum/gitops-agent-control-plane/security/policy"
 
 [project.scripts]
 agent-control = "agent_runtime.cli:main"
@@ -18,6 +39,7 @@ agent-verify-adapter = "agent_runtime.adapter_check:main"
 
 [tool.setuptools.packages.find]
 include = ["control_plane_core*", "agent_runtime*", "reference_runtime*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 control_plane_core = ["*.md", "*.json"]

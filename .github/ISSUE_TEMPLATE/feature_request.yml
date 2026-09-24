@@ -1,0 +1,20 @@
+name: Feature or documentation request
+description: Describe a concrete improvement within the supported scope.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and intended outcome
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Authority and compatibility boundaries
+      description: Explain what must remain unchanged. Keep private product details out of this issue.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How the change can be verified

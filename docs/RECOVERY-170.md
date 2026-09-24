@@ -1,8 +1,9 @@
 # Recovery and operations in 1.7.0
 
 The supported persistence remains local JSON, immutable receipts, atomic replace/fsync
-and one writer per run. FlowAI-Control retains Git-backed `loop-state` and its own
-controller. Neither profile requires PostgreSQL or a distributed queue.
+and one writer per run. An existing consumer retains its own authoritative
+storage and controller. Neither adoption path requires an external database
+or a distributed queue.
 
 ## Model dispatch and repeated cost
 
@@ -13,7 +14,7 @@ identity for recovery; it is not a provider guarantee of billing idempotency.
 | Failure boundary | Behavior |
 | --- | --- |
 | Missing credentials or unavailable broker before preparation finishes | No model reservation/dispatch in the reference runtime; repair configuration and the next tick can proceed. |
-| OS refuses to spawn the provider | Proven not dispatched. The reference reservation is released durably; Flow reuses the same reserved operation. |
+| OS refuses to spawn the provider | Proven not dispatched. The operational reservation is released durably; consumers apply their documented core-compatible accounting. |
 | Durable dispatch intent, then process crash/timeout/nonzero exit with no receipt | Do not call again automatically. The provider may have processed or charged the request. |
 | Receipt durable, next state write/phase transition fails | Reuse the exact receipt without another provider call or another usage entry. Replay does not resolve credentials. |
 | Strict JSON decoder rejects a completed reference-provider response | Record a bounded protocol error. Duplicate keys and nonfinite values remain invalid. A bounded repair is a new, counted attempt. |

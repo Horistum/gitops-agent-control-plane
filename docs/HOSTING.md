@@ -39,10 +39,11 @@ single-host deployment incomplete.
 decisions without prescribing persistence, a database or a hosted service.
 Consumers retain their existing storage and scheduling.
 
-FlowAI-Control already embeds the core and owns its Git-based control state and
-runtime adapters. It should keep one authoritative controller. Adopting shared
-decisions does not require replacing its state with the standalone runtime's
-JSON files, adding another controller or introducing a database.
+An existing consumer controller retains its authoritative state and runtime
+adapters. Adopting shared decisions does not require replacing its storage with
+the standalone runtime's JSON files, adding another controller, or introducing
+a database. Consumer deployment and activation instructions remain local to
+that consumer.
 
 ## Purpose of the integration additions
 

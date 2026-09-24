@@ -27,17 +27,17 @@ class PublicationPolicyTests(unittest.TestCase):
             if key != "schema":
                 self.assertIn(value, readme)
         self.assertIn("vMAJOR.MINOR.PATCH", text)
-        self.assertIn("vMAJOR.MINOR.PATCH", text)
+        self.assertNotIn("v0.1.0", (ROOT / "docs" / "PUBLICATION.md").read_text())
 
     def test_support_policy_is_explicitly_best_effort(self):
-        text = (ROOT / "SUPPORT.md").read_text().lower()
+        text = " ".join((ROOT / "SUPPORT.md").read_text().lower().split())
         self.assertIn("best-effort", text)
         self.assertIn("no response-time guarantee", text)
 
     def test_publication_clean_room_tracks_discovered_scenarios(self):
         scenarios = list((ROOT / "examples" / "scenarios").glob("*.json"))
         self.assertGreaterEqual(len(scenarios), 20)
-        text = (ROOT / "docs" / "PUBLICATION.md").read_text()
+        text = " ".join((ROOT / "docs" / "PUBLICATION.md").read_text().split())
         self.assertIn("all documented conformance scenarios", text)
         self.assertIn("examples/scenarios/", text)
 

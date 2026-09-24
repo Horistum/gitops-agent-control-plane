@@ -1,7 +1,7 @@
 # 1.8: receipt recovery and prompt efficiency
 
 The supported deployment remains single-host JSON state with per-run flock.
-Flow retains Git-backed state. No database service or migration is required.
+Consumers retain their own authoritative state. No database service or migration is required.
 Upgrade at a quiescent boundary using the existing reviewed upgrade procedure;
 runtime identity remains part of effect authority.
 
@@ -35,8 +35,7 @@ by an external provider.
 - Packaged `agent-verify-adapter` requires an explicit readiness handshake, gives
   real probes valid identities and returns structured failures. See ADAPTERS.md.
 - Shared core 1.8 exports bounded usage validation and lossless prompt helpers.
-  The paired Flow 0.9 consumer preserves missing usage as unknown and records
-  counter observation counts, including unclassified legacy aggregates.
+  Missing usage remains unknown rather than being represented as zero cost.
 
 ## Reproducible prompt measurements
 
@@ -75,8 +74,7 @@ into memory. Retained nested metadata is copied so later projections cannot
 mutate previous checkpoints. Existing revision, role and repeated-request guards
 remain in force; this metadata grants no evidence or execution authority.
 
-The paired Flow 0.9.1 dispatch fix validates discovery and ordinary requests
-before fresh reservations, rechecks unstarted operations, and bypasses rendering
-for verified receipt replay. Its real lifecycle now constructs each source
-context once: 9 reads for 9 calls, compared with 17 reads in Flow 0.9.0.
-This reduces controller retrieval work, not the required independent role count.
+Consumers must validate new requests before reservations, recheck unstarted
+operations, and bypass provider dispatch when replaying a verified receipt.
+Retrieval optimizations must not remove required independent roles or source
+identity checks. Consumer-specific performance records remain consumer evidence.

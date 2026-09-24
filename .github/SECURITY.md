@@ -1,57 +1,46 @@
-# Security Policy
+# Security policy
 
-Security reports for this repository must be handled privately.
+**Do not open a public GitHub issue for a suspected vulnerability.** Do not attach
+credentials, private source, or raw run receipts to issues or pull requests.
 
-## Reporting a vulnerability
+## Private reporting
 
-**Do not open a public GitHub issue for a suspected vulnerability.**
+The intended public reporting route is **GitHub Private Vulnerability Reporting**:
+open the repository's Security tab, select Advisories, then Report a vulnerability.
+Maintainers must enable this route as part of the controlled public transition
+and test receipt of a benign report and notifications from an external account
+before announcing the project. Availability is not established by this file.
 
-The canonical public-reporting path for this project is **GitHub Private Vulnerability Reporting** through the repository **Security** tab and **Report a vulnerability** action.
+GitHub provides this feature for public repositories. While the repository is
+private, use an existing private maintainer/organization channel. An anonymous
+public clone and external vulnerability-report test belong after the visibility
+transition, not before it. See [publication](../docs/PUBLICATION.md).
 
-Before this repository is made public, maintainers must enable GitHub Private Vulnerability Reporting. Public visibility is a hard publication gate until that private reporting path is confirmed to work from an account outside the Horistum organization.
+If the reporting action is unavailable, do not disclose vulnerability details.
+Request a private contact route from a [maintainer](../MAINTAINERS.md), using only
+a non-sensitive contact request. Do not infer that an unlisted email address is
+monitored. A usable private route and notification delivery are launch gates.
 
-While the repository remains private and in publication preparation, security findings should be shared only with Horistum organization maintainers through an existing private organizational channel. Do not create a public disclosure path merely to make the checklist look complete.
+## Security-sensitive reports
 
-## What should be reported as security-sensitive
+Report authority or approval bypass, path traversal or workspace escape, forged
+or wrong-revision evidence, unsafe replay/duplicate effects, credential exposure,
+and supply-chain issues that violate the documented trust model. Identify the
+profile and whether the issue applies to actual operational execution or only
+to a documented deterministic fixture limitation.
 
-Examples include:
+Include the affected version/commit, minimal reproduction with synthetic data,
+expected boundary, observed result, and impact. Avoid live secrets and unrelated
+private information. Documented limits do not prevent reporting a new impact or
+a bypass outside the stated scope.
 
-- bypasses of product-authority or write-boundary enforcement;
-- path traversal, symlink, workspace-escape or arbitrary-file-write behavior;
-- evidence spoofing or acceptance of evidence bound to the wrong Git identity;
-- replay or duplicate-effect behavior after crash recovery;
-- ways to bypass a required human decision or risk gate;
-- integrity failures in the hash-linked event/evidence model;
-- secret or credential exposure in repository content, history, CI logs or release artifacts;
-- supply-chain issues in release automation or required GitHub Actions;
-- vulnerabilities in the standalone reference runtime that materially violate the documented security model.
+## Disclosure and supported versions
 
-Normal correctness bugs, documentation issues and feature proposals are not security reports and should use the normal repository issue workflow after public launch.
+Security handling is best-effort; there is no contractual response-time SLA.
+Maintainers aim to acknowledge, investigate, and coordinate remediation privately
+before disclosure. Credit and advisories should accurately describe the affected
+profile and avoid making claims about unrelated deployments.
 
-## What to include
-
-A useful report should contain, when possible:
-
-- affected commit or release;
-- affected file/component;
-- minimal reproduction steps;
-- observed behavior and expected security boundary;
-- impact assessment;
-- whether the issue is known to be exploitable outside the reference/demo environment;
-- any suggested mitigation.
-
-Please avoid including real credentials, tokens or unrelated private data in a report.
-
-## Disclosure and response expectations
-
-This is an open reference project maintained on a **best-effort basis**. There is no contractual security-response SLA.
-
-Maintainers will aim to acknowledge, triage and coordinate remediation privately before public disclosure when the report is valid. Reporters are asked to avoid public disclosure until a fix or reasonable mitigation has been prepared, unless immediate disclosure is required to protect users.
-
-Security advisories and credit should describe the reference project accurately and should not imply that this repository is a production Horistum product.
-
-## Supported versions
-
-Until the first public tagged release, only the current `main` branch is considered for security fixes.
-
-After public releases begin, the support window follows `docs/RELEASES.md` and `SUPPORT.md`.
+Before a public release, fixes target current `main`. After releases begin,
+maintainers support `main` and the latest public release; older backports are not
+guaranteed. See [support](../SUPPORT.md) and [releases](../docs/RELEASES.md).

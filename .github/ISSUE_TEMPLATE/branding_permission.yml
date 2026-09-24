@@ -1,0 +1,13 @@
+name: Branding permission request
+description: Ask a non-confidential question about project naming or branding.
+body:
+  - type: markdown
+    attributes:
+      value: This request does not grant permission. Maintainers must route it to the actual rights holder. Request a private channel before sharing confidential material.
+  - type: textarea
+    id: use
+    attributes:
+      label: Proposed use
+      description: Describe the name, distribution, territories and any logo use with non-confidential details only.
+    validations:
+      required: true

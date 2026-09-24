@@ -1,29 +1,11 @@
-# Architectural completion, 1.5
+# Architectural remediation and evidence scope
 
-The 1.4 operational runtime supplied real adapters but still duplicated Flow's
-orchestration rules. The compatibility report only proved that old Flow tests
-accepted newer utility functions; it did not prove a unified lifecycle.
-
-The correction is implemented in both repositories:
-
-- one workflow aggregate and one revision-bound release gate;
-- actual Flow event integration, authored acceptance binding and an unversioned production facade;
-- adaptive reference review, monotonic risk, CI repair, durable base refresh,
-  documentation-only delivery, bounded search/excerpts/facts and independent role inputs;
-- operational schema validation independent of fixture execution;
-- a shared real Git/process trace contract in both CIs, a direct cross-adapter gate, portable mutation cases,
-  and an AR-04C delivery regression using the pinned real authored work package.
-
-The AR-04C regression exercises the controller and identity-collision behavior in
-a disposable Python product. It is not evidence that Flow's Kotlin AR-04C
-implementation was delivered, nor that a running controller host was upgraded.
-Authenticated Codex, the actual Flow build image/seed and host activation retain
-the existing live deployment gates.
-
-The current exact-input validation record is [workflow-integration.json](../validation/workflow-integration.json).
-It distinguishes the tested Flow integration PR from its main branch and records
-installed-byte, real Git/process and provider-simulation boundaries. The older
-consumer-compatibility.json is historical package-compatibility evidence for 1.4.
+The operational runtime uses one shared workflow aggregate and exact-revision
+release gate. Its public integration tests exercise actual Git/process effects,
+bounded recovery, independent verification, typed acceptance, and owner controls.
+Historical consumer compatibility or deployment records are not current public
+release evidence. Generate exact-input reports as described in
+[validation](../validation/README.md).
 
 ## Earlier review remediation
 
@@ -56,7 +38,7 @@ deploying the operational CLI.
 
 ## Validation and remaining evidence boundaries
 
-`./scripts/agentctl validate` runs the complete unit/integration suite and 26
+`./scripts/agentctl validate` runs the complete unit/integration suite and all discovered
 deterministic conformance scenarios. Operational tests execute real edits, test
 failures, repairs, commits and merges. Reasoning and HTTP peers are controlled
 test infrastructure, explicitly located under `tests/`.
@@ -66,10 +48,9 @@ lifecycle from an installed wheel outside the checkout, and checks the actual
 pinned Codex CLI contract. These jobs must pass before merging. They do not spend
 a model subscription or publish a test PR in someone else's product repository.
 
-The repeatable consumer gate records the exact clean consumer revision and
-current core hashes in [consumer-compatibility.json](../validation/consumer-compatibility.json).
-Publishing this reference does not update Flow's source lock, merge its adoption
-PR or deploy its host. Consumer activation remains a separate operation.
+The generic consumer gate records a clean consumer revision and current core
+hashes in an operator-selected report outside the source tree. Passing it does
+not publish a consumer's adoption changes or activate a live installation.
 
 A live authenticated Codex turn and delivery to an operator's protected GitHub
 product remain installation evidence, not results of test doubles. The
@@ -88,6 +69,6 @@ declared scope. See [verification](VERIFICATION.md).
 python3 -m pip install -r requirements-test.txt
 PYTHONPATH=. python3 tests/test_schema_interoperability.py --require-reference -v
 python3 scripts/check_podman_runtime.py --image PINNED_IMAGE
-python3 scripts/check_consumer.py --consumer ../FlowAi-control \
-  --expected-commit FULL_CONSUMER_SHA --output consumer-compatibility.json
+python3 scripts/check_consumer.py --consumer /absolute/consumer-checkout \
+  --expected-commit FULL_CONSUMER_SHA --output /absolute/private-audit/consumer-compatibility.json
 ```

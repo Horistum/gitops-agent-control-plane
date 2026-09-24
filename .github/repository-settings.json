@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "repository": "Horistum/gitops-agent-control-plane",
+  "repository_id": 1369202760,
+  "branch": "main",
+  "minimum_reviews": 0,
+  "metadata": {
+    "description": "Provider-neutral governance for bounded AI-assisted software delivery through Git: explicit authority, isolated execution and verified merges.",
+    "homepage": "https://github.com/Horistum/gitops-agent-control-plane/tree/main/docs",
+    "has_issues": true,
+    "allow_merge_commit": true,
+    "allow_update_branch": true,
+    "delete_branch_on_merge": true
+  },
+  "topics": [
+    "gitops",
+    "ai-agents",
+    "governance",
+    "python",
+    "software-delivery",
+    "verification",
+    "developer-tools"
+  ],
+  "required_checks": [
+    {
+      "context": "validate-reference-py3.11",
+      "app_id": 15368
+    },
+    {
+      "context": "validate-reference-py3.12",
+      "app_id": 15368
+    },
+    {
+      "context": "validate-reference-py3.13",
+      "app_id": 15368
+    },
+    {
+      "context": "operational-rootless-podman",
+      "app_id": 15368
+    },
+    {
+      "context": "operational-installed-package",
+      "app_id": 15368
+    },
+    {
+      "context": "publication-source-and-packages",
+      "app_id": 15368
+    },
+    {
+      "context": "secret-history-scan",
+      "app_id": 15368
+    }
+  ]
+}
