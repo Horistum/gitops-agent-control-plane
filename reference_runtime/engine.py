@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from control_plane_core.execution import retry_preconditions, next_attempt as fresh_attempt
 
-from control_plane_core import CoreError, path_allowed, require_merge_identity
+from control_plane_core import path_allowed
 
 import argparse
 import json
@@ -11,14 +11,10 @@ import re
 import sys
 
 from .recovery_engine import AutonomousEngine as _RecoveryAutonomousEngine, TERMINAL_STATUSES
-from ._engine_impl import AutonomousEngine as _CoreAutonomousEngine
 from .base import InjectedCrash, PolicyConfigurationError
 from .contracts import load_json, matches_any, role_write_policy_ref, safe_relative_path
 from .scenarios import build_request
-
-
-class CandidateIdentityError(PolicyConfigurationError):
-    pass
+from .merge_receipts import CandidateIdentityError
 
 
 class AutonomousEngine(_RecoveryAutonomousEngine):
@@ -373,50 +369,6 @@ class AutonomousEngine(_RecoveryAutonomousEngine):
                 "exact merge compare-and-swap failed because Git identity changed or merge failed"
             ) from exc
 
-    def _consume_merge_effect(
-        self,
-        effect: dict,
-        merge_sha: str,
-        *,
-        recovered_existing: bool,
-    ) -> None:
-        parents = self.git("show", "-s", "--format=%P", merge_sha, check=False).split()
-        try:
-            require_merge_identity(effect.get("base_sha"), effect.get("candidate_sha"),
-                                   parents)
-        except CoreError as exc:
-            raise CandidateIdentityError(
-                "merge commit parents do not match the exact reviewed base/candidate revisions"
-            ) from exc
-        first_parent, second_parent = parents
-
-        _CoreAutonomousEngine._consume_merge_effect(
-            self,
-            effect,
-            merge_sha,
-            recovered_existing=recovered_existing,
-        )
-        value = load_json(self.evidence / "merge-evidence.json")
-        value.update({
-            "base_sha": effect["base_sha"],
-            "actual_first_parent_sha": first_parent,
-            "actual_second_parent_sha": second_parent,
-            "candidate_identity_matches": True,
-        })
-        self.write_json("merge-evidence.json", value)
-        item = self.state.get("current_item")
-        if item:
-            self.write_json(f"merge-evidence-{item.lower()}.json", value)
-
-        if self.request.get("fault_injection") == "after-merge-receipt-before-postmerge":
-            self.write_json("fault-injection.json", {
-                "schema": 1,
-                "point": self.request["fault_injection"],
-                "effect_sha": merge_sha,
-            })
-            raise InjectedCrash(
-                f"injected crash after merge receipt {merge_sha} before post-merge verification"
-            )
 
 
 def run_request(
@@ -479,7 +431,10 @@ def resume_run(
     if engine.state.get("phase") in {"POSTMERGE_VERIFY", "RECONCILE"}:
         if decision is not None:
             raise RuntimeError("human decision supplied during phase recovery")
-        return engine.recover_phase()
+        try:
+            return engine.recover_phase()
+        except CandidateIdentityError as exc:
+            return _block_identity_failure(engine, exc)
     raise RuntimeError(
         f"run is not resumable: status={engine.state.get('status')} phase={engine.state.get('phase')}"
     )

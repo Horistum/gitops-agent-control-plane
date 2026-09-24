@@ -25,6 +25,7 @@ from .contracts import (
     validate_policy,
 )
 from .events import EventLog
+from .persistence import atomic_json
 from .executor import LocalFixtureExecutor
 from .probe_dsl import ProbeContractError, validate_probe
 
@@ -179,7 +180,7 @@ class BaseEngine:
 
     def write_json(self, name: str, value: dict | list) -> Path:
         path = self.evidence / name
-        path.write_text(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+        atomic_json(path, value)
         return path
 
     def save_state(self) -> None:

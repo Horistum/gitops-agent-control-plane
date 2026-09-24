@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from .contracts import sha256_json
 
@@ -32,6 +33,7 @@ class EventLog:
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event, sort_keys=True, ensure_ascii=False) + "\n")
             stream.flush()
+            os.fsync(stream.fileno())
         self.seq = event["seq"]
         self.tip = event["hash"]
         return event

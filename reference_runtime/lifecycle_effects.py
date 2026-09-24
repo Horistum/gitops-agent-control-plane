@@ -7,6 +7,7 @@ from .acceptance import evaluate as evaluate_acceptance
 import json
 
 from .contracts import sha256_json
+from .merge_receipts import build_merge_receipt, ensure_merge_receipt, publish_merge_receipt
 
 
 class LifecycleEffectsMixin:
@@ -59,27 +60,13 @@ class LifecycleEffectsMixin:
         *,
         recovered_existing: bool,
     ) -> None:
-        commits = self._find_merge_effects(effect["request_hash"])
-        if commits != [merge_sha]:
-            raise RuntimeError(f"merge effect identity mismatch: {commits} expected {[merge_sha]}")
+        receipt = build_merge_receipt(self, effect, merge_sha,
+                                      recovered_existing=recovered_existing)
+        publish_merge_receipt(self, receipt)
         self.state["merge_sha"] = merge_sha
         self.state["pending_effect"] = None
         self.state["status"] = "RUNNING"
         self.state["phase"] = "POSTMERGE_VERIFY"
-        merge_evidence = {
-            "schema": 2,
-            "candidate_sha": effect["candidate_sha"],
-            "merge_sha": merge_sha,
-            "request_hash": effect["request_hash"],
-            "effect_occurrences": len(commits),
-            "recovered_existing_effect": recovered_existing,
-            "method": "runtime-profile-git-merge",
-        }
-        self.write_json("merge-evidence.json", merge_evidence)
-        self.write_json(
-            f"merge-evidence-{self.state['current_item'].lower()}.json",
-            merge_evidence,
-        )
         self.event("effect-consumed", {
             "kind": "merge",
             "request_hash": effect["request_hash"],
@@ -137,6 +124,7 @@ class LifecycleEffectsMixin:
         return release_commit
 
     def _postmerge_verify_and_record(self, selected: dict) -> dict | None:
+        ensure_merge_receipt(self)
         self.transition("POSTMERGE_VERIFY")
         merge_sha = self.state["merge_sha"]
         post_tests = self.run_tests("postmerge")
