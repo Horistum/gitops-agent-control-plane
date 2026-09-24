@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import html
 import json
 from pathlib import Path
 import re
@@ -19,6 +20,41 @@ REQUIRED = ("LICENSE", "NOTICE", "TRADEMARKS.md", "MAINTAINERS.md", "CONTRIBUTIN
             ".github/dependabot.yml", ".github/PULL_REQUEST_TEMPLATE.md")
 PRIVATE_DOC = re.compile(r"(?i:flowai(?:[-_/ ]?control)?)|flow_loop|AR-04C|Legion|\bFlow\b")
 LOCAL_LINK = re.compile(r"\[[^\]\n]*\]\(([^\s)]+)(?:\s+['\"][^)]*)?\)")
+
+
+def markdown_anchors(text: str) -> set[str]:
+    """Resolve headings and explicit IDs used by this repository's Markdown.
+
+    Fenced examples do not define headings. Duplicate heading IDs retain GitHub's
+    numeric suffixes. This is not a complete Markdown renderer.
+    """
+    anchors: set[str] = set()
+    fence = None
+    for line in text.splitlines():
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if marker:
+            token = marker.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        for explicit in re.findall(r'<[^>]+\b(?:id|name)=["\']([^"\']+)["\'][^>]*>', line):
+            anchors.add(explicit)
+        heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$", line)
+        if not heading:
+            continue
+        title = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", heading.group(1))
+        title = html.unescape(re.sub(r"<[^>]*>", "", title)).lower()
+        slug = re.sub(r"[^\w\s-]", "", title).replace(" ", "-")
+        candidate, suffix = slug, 0
+        while candidate in anchors:
+            suffix += 1
+            candidate = f"{slug}-{suffix}"
+        anchors.add(candidate)
+    return anchors
 
 
 def inspect_source(root: Path) -> list[str]:
@@ -75,11 +111,14 @@ def inspect_source(root: Path) -> list[str]:
             errors.append(f"Private consumer identity/deployment detail in public document: {path.relative_to(root)}")
         for link in LOCAL_LINK.findall(text):
             parsed = urlsplit(link.strip("<>"))
-            if parsed.scheme or parsed.netloc or not parsed.path:
+            if parsed.scheme or parsed.netloc or not (parsed.path or parsed.fragment):
                 continue
-            target = (path.parent / unquote(parsed.path)).resolve()
+            target = (path.parent / unquote(parsed.path)).resolve() if parsed.path else path.resolve()
             if not target.is_relative_to(root.resolve()) or not target.exists():
                 errors.append(f"Broken or outside-repository document link: {path.relative_to(root)} -> {link}")
+            elif parsed.fragment and target.is_file() and target.suffix.lower() == ".md":
+                if unquote(parsed.fragment) not in markdown_anchors(target.read_text(encoding="utf-8")):
+                    errors.append(f"Broken document heading link: {path.relative_to(root)} -> {link}")
 
     for name in ("bug_report.yml", "feature_request.yml", "branding_permission.yml"):
         path = root / ".github/ISSUE_TEMPLATE" / name
