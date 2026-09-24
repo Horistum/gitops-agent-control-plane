@@ -45,8 +45,6 @@ class CandidateAttemptMixin:
         self.save_state()
 
         catalog = self.request["work_catalog"].get(item_id, [])
-        if attempt > len(catalog):
-            return "EXHAUSTED", prior_feedback
         work = catalog[attempt - 1]
         developer = work["developer_proposal"]
         tester = work["tester_proposal"]
@@ -379,8 +377,6 @@ class CandidateAttemptMixin:
                     phase="BLOCKED_POLICY",
                     **(detail or {}),
                 )
-            if result == "EXHAUSTED":
-                break
 
         self._append_cycle(item_id, attempts_evidence, "FAILED_VERIFICATION")
         self.state["goal_status"] = "BLOCKED"

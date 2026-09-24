@@ -83,17 +83,23 @@ ARTIFACT_SCHEMA_PATTERNS = (
 )
 
 
-def validate_evidence_directory(repository_root: Path, evidence: Path) -> list[str]:
+def validate_evidence_directory(
+    repository_root: Path, evidence: Path, *, artifact_schemas=None,
+    artifact_schema_patterns=None,
+) -> list[str]:
+    """Validate one registry with exact-name precedence and ordered patterns."""
+    schemas = ARTIFACT_SCHEMAS if artifact_schemas is None else artifact_schemas
+    patterns = ARTIFACT_SCHEMA_PATTERNS if artifact_schema_patterns is None else artifact_schema_patterns
     validated: list[str] = []
-    for filename, schema_name in ARTIFACT_SCHEMAS.items():
+    for filename, schema_name in schemas.items():
         path = evidence / filename
         if path.is_file():
             validate_json_file(path, repository_root / "schemas" / schema_name)
             validated.append(filename)
     for path in sorted(evidence.glob("*.json")):
-        if path.name in ARTIFACT_SCHEMAS:
+        if path.name in schemas:
             continue
-        for pattern, schema_name in ARTIFACT_SCHEMA_PATTERNS:
+        for pattern, schema_name in patterns:
             if pattern.fullmatch(path.name):
                 validate_json_file(path, repository_root / "schemas" / schema_name)
                 validated.append(path.name)

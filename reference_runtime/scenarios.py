@@ -495,13 +495,15 @@ def _apply_goal_overrides(goal: dict, overrides: dict) -> None:
             raise ValueError(f"unsupported goal override: {key}")
 
 
-def build_request(repository_root: Path, name: str, base_goal: dict) -> dict:
-    spec = load_scenario(repository_root, name)
+def build_request_from_spec(spec: dict, base_goal: dict) -> dict:
+    """Build one request from a validated scenario without mutating its inputs."""
     goal = deepcopy(base_goal)
     goal_items = spec.get("goal_items")
-    if goal_items:
+    if "goal_items" in spec:
+        if not isinstance(goal_items, list) or not goal_items:
+            raise ValueError("explicit scenario goal_items must be a non-empty list")
         goal["items"] = list(goal_items)
-    elif name != "autonomous-two-item":
+    else:
         goal["items"] = ["EXAMPLE-001"]
     # success_condition remains user/product reasoning context. Scenarios may
     # change machine goal items/authority, but must not silently replace prose.
@@ -531,12 +533,16 @@ def build_request(repository_root: Path, name: str, base_goal: dict) -> dict:
 
     return {
         "schema": 2,
-        "label": name,
+        "label": spec["name"],
         "proposal_source": "trusted-fixture",
         "goal": goal,
         "work_catalog": catalog,
         "fault_injection": spec.get("fault_injection"),
     }
+
+
+def build_request(repository_root: Path, name: str, base_goal: dict) -> dict:
+    return build_request_from_spec(load_scenario(repository_root, name), base_goal)
 
 
 def scenario_names(repository_root: Path) -> list[str]:

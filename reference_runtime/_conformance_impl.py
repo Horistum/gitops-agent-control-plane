@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import argparse
 import json
 from pathlib import Path
@@ -12,7 +11,7 @@ import traceback
 from .contracts import REFERENCE_CONTRACT
 from .engine import run_request
 from .events import EventLog
-from .scenarios import developer_proposal, load_scenario, scenario_names, tester_proposal
+from .scenarios import build_request_from_spec, load_scenario, scenario_names
 from .schema_validation import validate_evidence_directory
 
 
@@ -21,45 +20,7 @@ def _load_summary(evidence: Path) -> dict:
 
 
 def _request_from_spec(repository_root: Path, spec: dict, base_goal: dict) -> dict:
-    goal = deepcopy(base_goal)
-    if spec.get("goal_items"):
-        goal["items"] = list(spec["goal_items"])
-    else:
-        goal["items"] = ["EXAMPLE-001"]
-    goal["success_condition"] = "Every requested item is controller-recorded complete after exact post-merge verification."
-    for key, value in spec.get("goal_overrides", {}).items():
-        if key in {"risk_ceiling", "auto_merge_ceiling"}:
-            goal[key] = value
-        elif key in {"max_cycles", "max_attempts_per_item"}:
-            goal["autonomy"][key] = value
-        else:
-            raise ValueError(f"unsupported goal override: {key}")
-
-    catalog: dict[str, list[dict]] = {}
-    if spec.get("work"):
-        for item_id, attempts in spec["work"].items():
-            catalog[item_id] = [
-                {
-                    "developer_proposal": developer_proposal(row["developer_fixture"], item_id),
-                    "tester_proposal": tester_proposal(row["tester_fixture"], item_id),
-                }
-                for row in attempts
-            ]
-    else:
-        catalog["EXAMPLE-001"] = [
-            {
-                "developer_proposal": developer_proposal(spec["developer_fixture"], "EXAMPLE-001"),
-                "tester_proposal": tester_proposal(spec["tester_fixture"], "EXAMPLE-001"),
-            }
-        ]
-    return {
-        "schema": 2,
-        "label": spec["name"],
-        "proposal_source": "trusted-fixture",
-        "goal": goal,
-        "work_catalog": catalog,
-        "fault_injection": spec.get("fault_injection"),
-    }
+    return build_request_from_spec(spec, base_goal)
 
 
 def assert_common(summary: dict, evidence: Path) -> list[str]:

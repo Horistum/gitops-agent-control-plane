@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import copy
-from control_plane_core import fingerprint, recovery_actions
+from control_plane_core import fingerprint
+from .recovery import task_recovery
 from .discovery import can_replan_discovery, discovery_document
 from .diagnostics import current_diagnostic
 
@@ -20,8 +21,7 @@ def owner_actions(state, diagnostic=None):
     allowed.append("cancel")
     if (task and state.get("owner_replans", {}).get(task["id"], 0) < 2) or can_replan_discovery(state):
         allowed.append("replan")
-    if recovery_actions({**task, "pending": pending, "agent_calls": state["model_calls"]},
-            {"max_agent_calls_per_task": state["policy"]["limits"]["model_calls"]})["retry"]:
+    if task_recovery(state)["retry"]:
         allowed.append("retry")
     return allowed
 
