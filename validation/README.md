@@ -1,12 +1,21 @@
-# Validation records
+# Validation evidence
 
-`consumer-compatibility.json` records one source compatibility run of core 1.3.0
-against the exact named FlowAi-control commit. Its `core_files` hashes identify
-what was tested; this is historical evidence, not a claim about future consumer
-commits or a live deployment. The temporary core commit itself is not published.
+Generate reports from the exact revision being evaluated. Historical consumer
+reports are not current release certification and may contain private product
+identities; keep them in the consumer's private audit storage.
 
-Reproduce with `scripts/check_consumer.py` and an exact clean consumer checkout.
-The gate runs real local tests in an isolated temporary copy, updates the temporary
-source lock and checks that the core bytes remain unchanged. It requires no live
-Codex, hosted GitHub write, Podman build or deployment. Provider responses may be
-test doubles in the consumer's suite, as documented by that consumer.
+The public baseline is `./scripts/agentctl validate`, the actual rootless Podman
+CI job, the installed operational lifecycle, and the publication source/package
+checks. Reports must identify the commit, tools, tests, outcome, known limits,
+and whether providers are controlled peers or live services.
+
+`python3 scripts/check_distribution.py --output /absolute/private-audit/package-check`
+records source/wheel hashes, backend version, license checks, installation and
+CLI/core smoke tests. The history-scan workflow records fetched refs and redacted
+findings. Neither result proves legal clearance or publication approval.
+
+For a separately trusted consumer, use `scripts/check_consumer.py` with an exact
+clean commit and an output path outside the consumer checkout. Its tests run in
+a temporary copy; the consumer's activation and live-provider validation remain
+separate. Never commit raw consumer logs, credentials, state directories, or
+private product deployment records to this reference repository.

@@ -55,7 +55,7 @@ Goal inputs distinguish executable authority from prose:
 - `forbidden_paths` is an `enforced_constraint`;
 - `objective`, `success_condition`, and `forbidden_directions` are `reasoning_context`.
 
-`success_condition` is intentionally **not** an executable predicate in the fixture contract. That engine computes `goal-evaluation.satisfied` from requested items versus controller-owned release state. The core also provides typed conditions through `verification-evidence/v1`; the public operational runtime and Flow consume them through explicit `machine_conditions`. Prose is never interpreted as executable authority.
+`success_condition` is intentionally **not** an executable predicate in the fixture contract. That engine computes `goal-evaluation.satisfied` from requested items versus controller-owned release state. The core also provides typed conditions through `verification-evidence/v1`; the public operational runtime and other consumers use them through explicit `machine_conditions`. Prose is never interpreted as executable authority.
 
 ### Reasoning-role protocols
 
@@ -82,7 +82,7 @@ A conforming controller repeatedly:
 8. retains the accepted evidence and regression obligations required by that verification profile;
 9. reconciles the outer goal again.
 
-The portable core does not require Python property probes. the verification profile (see the [generated table](../README.md#contracts)) requires case-level negative controls and probe promotion. Flow `counterfactual-regression/v1` requires executable test bindings, base/candidate counterfactuals and promotion of accepted test files; `external-cli/v1` evaluates typed process/artifact predicates outside the candidate. Capabilities must be declared and tested; these profiles are not interchangeable security guarantees.
+The portable core does not require Python property probes. the verification profile (see the [generated table](../README.md#contracts)) requires case-level negative controls and probe promotion. The `counterfactual-regression/v1` profile requires executable test bindings, base/candidate counterfactuals and promotion of accepted test files; `external-cli/v1` evaluates typed process/artifact predicates outside the candidate. Capabilities must be declared and tested; these profiles are not interchangeable security guarantees.
 
 A verification failure can feed a bounded repair attempt. A human `request_changes` decision is treated the same way: before a new candidate attempt, baseline diagnostics, regression probes, and the acceptance negative control are recomputed against the current `main` revision.
 
@@ -90,7 +90,7 @@ A verification failure can feed a bounded repair attempt. A human `request_chang
 
 A candidate is not merely a branch name. Candidate evidence records an exact Git SHA and a retained audit ref under `refs/tags/evidence/candidates/...` so rejected or superseded candidate objects remain reachable.
 
-Human approval is bound to the reviewed candidate SHA. Immediately before an approval can create a merge effect, the controller re-resolves the candidate branch and requires its current tip to equal the reviewed SHA. The durable merge intent names exact base and candidate SHAs, and the runtime builds the merge from those commits rather than from a mutable branch name. Merge evidence checks both actual merge parents.
+Human approval is bound to the reviewed candidate SHA. Immediately before an approval can create a merge effect, the controller re-resolves the mutable candidate branch and requires its current tip to equal the reviewed SHA. The durable merge intent names exact base and candidate SHAs, and the runtime builds the merge from those commits rather than from a mutable branch name. Merge evidence checks both actual merge parents.
 
 ### Durable effects and phases
 

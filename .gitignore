@@ -8,3 +8,17 @@ examples/minimal-product/build/
 /build/
 /dist/
 *.egg-info/
+
+# Local credentials and publication evidence must not become source artifacts.
+/goal.json
+.env
+.env.*
+!.env.example
+.venv/
+.secrets/
+.publication/
+.audit/
+*.pem
+*.key
+*.p12
+*.pfx

@@ -2,8 +2,8 @@
 
 Use the pure `control_plane_core` when the consumer already owns scheduling,
 storage and effects. Use `agent_runtime` when the supplied Git/GitHub/Podman
-controller matches the deployment. Do not run a second controller beside
-FlowAI-Control: it already embeds the shared core and owns its own adapters.
+controller matches the deployment. Do not run a second controller beside an
+existing service that already owns the product's state and runtime adapters.
 
 These integrations preserve the separation between proposals, operator authority,
 observed evidence and execution. Connecting an agent does not confer authority

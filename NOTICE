@@ -1,7 +1,9 @@
-GitOps Agent Control Plane Reference
+GitOps Agent Control Plane
 Copyright 2026 Horistum contributors
 
-This project was originally developed and published from the Horistum GitHub organization:
+Initiated and maintained in the Horistum GitHub organization:
 https://github.com/Horistum/gitops-agent-control-plane
 
-The project provides an implementation-neutral open reference architecture for bounded autonomous software delivery through Git.
+A provider-neutral governance core and owner-operated reference runtime for
+bounded software delivery through Git. This notice records project provenance;
+it does not assert that Horistum is a separately incorporated legal entity.

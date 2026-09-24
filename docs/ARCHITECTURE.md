@@ -21,25 +21,20 @@ post-merge machine evidence. Authentication, test interpretation and execution
 remain adapter responsibilities; neither a model statement nor a core function
 can authenticate a remote check.
 
-| Boundary | Public operational adapter | Flow adapter |
+| Boundary | Supplied operational adapter | Existing consumer controller |
 |---|---|---|
-| Owner intent | Explicit JSON goal/items/typed criteria | Goal Issue plus authored YAML invariant or typed acceptanceCriteria |
-| Domain decisions | `agent_runtime/workflow.py` → shared aggregate | `flow_loop/workflow.py` → identical locked aggregate |
-| Authoritative state | Private fsynced state and immutable receipts | Single-writer `loop-state` Git branch and event chain |
-| Provider effects | Codex/command, Git, GitHub and Podman | Existing Codex, GitHub, product, integration-log and Podman services |
-| Product completion | Retained tests and verified merge | Retained tests, completion records, roadmap/lifecycle reconciliation |
-| Operations | Owner CLI, one-tick embedding, local exact-decision review | Issue projection, owner commands, activation and reviewed upgrades |
+| Owner intent | Explicit JSON goal/items/typed criteria | Authenticated consumer-owned intent normalized into the core |
+| Domain decisions | `agent_runtime/workflow.py` and the shared aggregate | A reviewed core snapshot and actual event projection |
+| Authoritative state | Private fsynced state and immutable receipts | Consumer-owned single-writer durable state |
+| Provider effects | Command/Codex, Git, GitHub and Podman | Consumer-owned authenticated adapters |
+| Completion | Retained tests and verified exact merge | The same core obligations with actual observed evidence |
+| Operations | CLI, one-tick embedding and local exact-decision review | Consumer-owned scheduling, approval and activation |
 
-A projection is not another persisted ledger. Flow runs one controller; it does
-not launch `agent-control` beside its service. Its production entry point is
-`flow_loop.runtime.Controller`; historical versioned imports are compatibility
-aliases. The bounded context/recovery composition is no longer a chain of
-version-specific controller subclasses.
-
-The profiles deliberately differ in deployment and authority formats. Flow's
-pre-implementation high-risk approval, provider quota handling, single-writer
-handoff and integration-job provenance remain stricter product/operational rules.
-Those are explicit adapter policies, not alternative definitions of completion.
+A projection is not another ledger. An existing controller retains its own
+persistence and lifecycle; it does not run a second controller against the same
+product. Different consumers may require stronger operational approval or
+identity rules while retaining the same completion/evidence contract. Their
+private deployment details are outside this public architecture.
 
 `control_plane_core.schema` owns the shared fail-closed JSON schema vocabulary.
 The operational package does not import the fixture runtime; CI removes that

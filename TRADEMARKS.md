@@ -34,3 +34,18 @@ Unless separately authorized, do not:
 Modified distributions should use their own distinct name and branding while preserving truthful provenance and any attribution required by the license.
 
 This policy is intentionally separate from the software license. It does not state or imply that any Horistum mark is registered in any particular jurisdiction.
+
+## Permission requests and rights holders
+
+For non-confidential branding questions, open the repository's branding-permission
+issue form or contact a maintainer listed in [MAINTAINERS.md](MAINTAINERS.md).
+Describe the proposed name, context, distribution, territories, and use of logos.
+Do not include confidential launch or legal material in a public issue; request
+a private channel first. Maintainers route requests to the relevant rights holder.
+Repository administration is not itself proof of authority to grant permission.
+
+This policy is not a trademark registration or legal clearance report. Do not use
+the registered-mark symbol for Horistum without a verified registration applicable
+to the specific use. A grant of branding permission must identify the actual
+person or legal entity entitled to grant it. No corporation or ownership transfer
+is established by the repository name, NOTICE, or this policy.

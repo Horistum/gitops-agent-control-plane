@@ -3,7 +3,7 @@
 **A provider-neutral trust and governance layer for bounded software delivery
 through Git, maintained by the Horistum project.**
 
-Version 1.9.1 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.9.2 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
@@ -87,7 +87,7 @@ usage is operational accounting, not an exactly-once billing ledger.
 | `control_plane_core` | Workflow aggregate, authority, context and typed evidence decisions; no credentials, network, process or Git effects |
 | `agent_runtime` | Operational reasoning, credential resolution, GitHub, Git, verification, local persistence, embedding and owner review |
 | `reference_runtime` | Versioned deterministic fixture profile and property-probe conformance demonstrations |
-| Consumers such as `FlowAi-control` | Product-specific authority formats and service deployment; may reuse the core without running another controller |
+| Existing consumer controllers | Product-specific authority formats and service deployment; may reuse the core without running another controller |
 
 Both operational runtimes call `development-workflow/v1` for advancement, repair,
 risk escalation and evidence invalidation. The same release gate checks candidate,
@@ -164,7 +164,14 @@ aliases to these guides.
 
 ## Origin, license and branding
 
-Originally developed and published from the **Horistum GitHub organization**.
+Initiated and maintained in the **Horistum GitHub organization**.
 Source, documentation, schemas and examples are Apache-2.0 licensed. See
 [LICENSE](LICENSE), [NOTICE](NOTICE), [TRADEMARKS.md](TRADEMARKS.md),
-[release policy](docs/RELEASES.md) and [publication checklist](docs/PUBLICATION.md).
+[release policy](docs/RELEASES.md), [maintainers](MAINTAINERS.md),
+[provenance requirements](docs/PROVENANCE.md) and [publication checklist](docs/PUBLICATION.md).
+A passing CI run validates its declared scope; it does not authorize public visibility.
+
+Publication preparation in 1.9.2 adds source-policy checks, source-distribution
+round-trip testing, a redacted history scan, and explicit administrator settings.
+These changes do not change runtime authority, provider dispatch, receipt replay,
+CLI verbs, wire contracts, or the single-host storage model.
