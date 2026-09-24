@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from urllib import error, parse, request
-from control_plane_core import require_revision_identity, trusted_checks_pass
+from control_plane_core import require_revision_identity, evaluate_trusted_checks
 from .git import sha
 from .credentials import CredentialResolver
 from .io import Closed, Unavailable, canonical, loads
@@ -62,19 +62,13 @@ class GitHub:
 
     def checks(self, revision):
         rows = self.pages(self.prefix + "/commits/" + sha(revision) + "/check-runs", "check_runs")
-        if any(row.get("head_sha") != revision for row in rows):
-            raise Closed("Check observation names another revision")
-        observed = [{"id": row["id"], "name": row["name"], "app_id": row.get("app", {}).get("id"),
-                     "status": row["status"], "conclusion": row["conclusion"]} for row in rows]
-        latest = {}
-        wanted = {(row["name"], row["app_id"]) for row in self.config["required_checks"]}
-        for row in observed:
-            key = (row["name"], row["app_id"])
-            if key in wanted and row["id"] > latest.get(key, {}).get("id", -1):
-                latest[key] = row
-        failed = any(row["status"] == "completed" and row["conclusion"] != "success" for row in latest.values())
-        return {"sha": revision, "passed": trusted_checks_pass(self.config["required_checks"], observed),
-                "failed": failed, "checks": observed}
+        if any(not isinstance(row, dict) or row.get("head_sha") != revision for row in rows):
+            raise Closed("Check observation names another revision or is malformed")
+        observed = [{"id": row.get("id"), "name": row.get("name"),
+                     "app_id": row["app"].get("id") if isinstance(row.get("app"), dict) else None,
+                     "status": row.get("status"), "conclusion": row.get("conclusion")} for row in rows]
+        evaluation = evaluate_trusted_checks(self.config["required_checks"], observed)
+        return {"sha": revision, **evaluation, "checks": observed}
 
     def pull(self, number):
         if type(number) is not int or number < 1:
