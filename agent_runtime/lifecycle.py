@@ -168,7 +168,7 @@ def lifecycle_step(engine):
                 repair(engine, "developer", {"phase": "ci", "checks": task["ci_evidence"]})
                 return
             if not task["ci_evidence"]["passed"]:
-                raise Unavailable("Waiting for exact candidate trusted checks")
+                raise Unavailable(f"Waiting for exact candidate trusted checks ({task['ci_evidence'].get('status', 'pending')})")
             if any(row["kind"] == "ci" and "integration" in row["targets"] for row in criteria(engine.item())):
                 pull = engine.github.pull(task["pr"]["number"])
                 engine.github.identity(pull, task["base"], task["head"])
@@ -223,7 +223,7 @@ def lifecycle_step(engine):
                 engine.hold("Trusted merged-commit CI failed; completion remains blocked")
                 return
             if not task["postmerge_checks"]["passed"]:
-                raise Unavailable("Waiting for exact merged-commit trusted checks")
+                raise Unavailable(f"Waiting for exact merged-commit trusted checks ({task['postmerge_checks'].get('status', 'pending')})")
         receipt = observe(engine, phase, merged, external=True)
         if not receipt["passed"] or not preserved(task, receipt) or not frozen_intact(engine, merged):
             engine.hold("Merged commit failed independent verification; next item is blocked")

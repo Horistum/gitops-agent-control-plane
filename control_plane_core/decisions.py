@@ -12,7 +12,7 @@ import re
 __all__ = [
     "CoreError", "completion_transition", "goal_projection", "merge_authority",
     "path_allowed", "require_merge_identity", "require_revision_identity",
-    "risk_rank", "trusted_checks_pass",
+    "risk_rank", "trusted_checks_pass", "evaluate_trusted_checks",
 ]
 
 
@@ -167,38 +167,79 @@ def require_merge_identity(base: str, candidate: str, parents) -> None:
                               {"base": parents[0], "candidate": parents[1]})
 
 
-def trusted_checks_pass(required, observed) -> bool:
-    """Require latest successful named checks from the declared trusted provider."""
+def evaluate_trusted_checks(required, observed) -> dict:
+    """Classify one observation set without depending on provider row order.
+
+    Only explicit success passes. Conflicting identities and malformed evidence
+    must not request a code repair, even if another observation reports failure.
+    This evaluates trusted-provider observations; it does not authenticate them.
+    """
+    def result(status):
+        return {"status": status, "passed": status == "success", "failed": status == "failure"}
+
     if not isinstance(required, list) or not required or not isinstance(observed, list):
-        return False
+        return result("invalid")
     wanted = []
     for row in required:
         if (not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"]
                 or type(row.get("app_id")) is not int or row["app_id"] <= 0):
-            return False
+            return result("invalid")
         wanted.append((row["name"], row["app_id"]))
     if len(set(wanted)) != len(wanted):
-        return False
-    latest = {}
+        return result("invalid")
+    wanted = set(wanted)
+    latest, seen = {}, {}
+    invalid = conflict = False
     for row in observed:
         if not isinstance(row, dict):
-            return False
+            invalid = True
+            continue
         name, app = row.get("name"), row.get("app_id")
         if not isinstance(name, str) or type(app) is not int:
-            return False
+            invalid = True
+            continue
         key = (name, app)
         if key not in wanted:
             continue
         identity = row.get("id", 0)
-        if type(identity) is not int or identity < 0:
-            return False
+        status, conclusion = row.get("status"), row.get("conclusion")
+        if (type(identity) is not int or identity < 0
+                or not isinstance(status, str) or not status
+                or (conclusion is not None and not isinstance(conclusion, str))
+                or (status == "completed" and not conclusion)):
+            invalid = True
+            continue
+        observation_key = (key, identity)
+        if observation_key in seen and row != seen[observation_key]:
+            conflict = True
+        seen[observation_key] = row
         previous = latest.get(key)
-        if previous is not None and identity == previous.get("id", 0) and row != previous:
-            return False
         if previous is None or identity > previous.get("id", 0):
             latest[key] = row
-    return all(key in latest and latest[key].get("status") == "completed"
-               and latest[key].get("conclusion") == "success" for key in wanted)
+    # Fixed precedence makes even mixed invalid/conflicting input deterministic.
+    if invalid:
+        return result("invalid")
+    if conflict:
+        return result("conflict")
+    statuses = []
+    for key in sorted(wanted):
+        row = latest.get(key)
+        if row is None:
+            statuses.append("pending")
+            continue
+        status, conclusion = row.get("status"), row.get("conclusion")
+        if status != "completed":
+            statuses.append("pending")
+        else:
+            statuses.append("success" if conclusion == "success" else "failure")
+    if "failure" in statuses:
+        return result("failure")
+    return result("pending" if "pending" in statuses else "success")
+
+
+def trusted_checks_pass(required, observed) -> bool:
+    """Compatibility projection of the shared trusted-check evaluation."""
+    return evaluate_trusted_checks(required, observed)["passed"]
 
 
 def completion_transition(requested, completed, item: str, *, merge_sha: str,

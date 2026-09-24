@@ -8,7 +8,8 @@ from .acceptance import (acceptance_contract, refine_acceptance, evaluate_obliga
                          evidence_status_valid, test_criteria)
 from .decisions import (CoreError, completion_transition, goal_projection,
                         merge_authority, path_allowed, require_merge_identity,
-                        require_revision_identity, risk_rank, trusted_checks_pass)
+                        require_revision_identity, risk_rank, trusted_checks_pass,
+                        evaluate_trusted_checks)
 from .execution import (context_checkpoint, context_files, context_view, fingerprint, model_call_action,
                         next_attempt, next_phase, recovery_actions, repair_target,
                         retirement, retry_preconditions, upgrade_boundary,
@@ -41,7 +42,7 @@ __all__ = [
     "next_phase", "path_allowed", "recovery_actions", "repair_target",
     "require_merge_identity", "require_revision_identity", "retirement",
     "retry_preconditions", "risk_rank", "test_criteria", "test_failure_kind",
-    "trusted_checks_pass", "upgrade_boundary", "validate_bindings",
+    "trusted_checks_pass", "evaluate_trusted_checks", "upgrade_boundary", "validate_bindings",
     "validate_goal_conditions", "validate_predicates", "verification_transition",
     "TOKEN_FIELDS", "validate_usage",
 ]
