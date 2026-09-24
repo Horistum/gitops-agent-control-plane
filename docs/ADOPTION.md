@@ -120,13 +120,13 @@ For another system, preserve that separation even if role names differ. A model 
 
 ### 4. Choose a verification profile
 
-the verification profile (see the [generated table](../README.md#contracts)) supports multiple positional args, generated named kwargs, bounded generators, exception or return-equality oracles, and a generic expression language. Static validation rejects references to nonexistent args/kwargs, incompatible `length` operands, and expressions deeper than the supported bound before candidate execution begins.
+The verification profile (see the [generated table](../README.md#contracts)) supports multiple positional args, generated named kwargs, bounded generators, exception or return-equality oracles, and a generic expression language. Static validation rejects references to nonexistent args/kwargs, incompatible `length` operands, and expressions deeper than the supported bound before candidate execution begins.
 
 The DSL is intentionally limited. If a product needs richer invariants, extend or replace the verification profile rather than embedding product-specific Python callbacks in the generic control plane.
 
 ### 5. Choose a runtime profile
 
-the runtime profile (see the [generated table](../README.md#contracts)) uses local Git and trusted deterministic fixture processes. It demonstrates effect identity, resume semantics, bounded process execution, and conformance mechanics. It is not a hostile-code sandbox.
+The runtime profile (see the [generated table](../README.md#contracts)) uses local Git and trusted deterministic fixture processes. It demonstrates effect identity, resume semantics, bounded process execution, and conformance mechanics. It is not a hostile-code sandbox.
 
 A production runtime for model-generated arbitrary code needs stronger isolation such as container, VM, or remote verification boundaries and a result channel outside candidate control.
 

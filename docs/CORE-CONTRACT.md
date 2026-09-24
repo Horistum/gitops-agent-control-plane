@@ -82,7 +82,7 @@ A conforming controller repeatedly:
 8. retains the accepted evidence and regression obligations required by that verification profile;
 9. reconciles the outer goal again.
 
-The portable core does not require Python property probes. the verification profile (see the [generated table](../README.md#contracts)) requires case-level negative controls and probe promotion. Flow `counterfactual-regression/v1` requires executable test bindings, base/candidate counterfactuals and promotion of accepted test files; `external-cli/v1` evaluates typed process/artifact predicates outside the candidate. Capabilities must be declared and tested; these profiles are not interchangeable security guarantees.
+The portable core does not require Python property probes. The verification profile (see the [generated table](../README.md#contracts)) requires case-level negative controls and probe promotion. Flow `counterfactual-regression/v1` requires executable test bindings, base/candidate counterfactuals and promotion of accepted test files; `external-cli/v1` evaluates typed process/artifact predicates outside the candidate. Capabilities must be declared and tested; these profiles are not interchangeable security guarantees.
 
 A verification failure can feed a bounded repair attempt. A human `request_changes` decision is treated the same way: before a new candidate attempt, baseline diagnostics, regression probes, and the acceptance negative control are recomputed against the current `main` revision.
 
@@ -107,7 +107,7 @@ Second, after an effect has been consumed, the durable phase identifies safe con
 
 ### What the core does not claim
 
-The core contract does not make the standalone verifier a hostile-code sandbox. It does not make prose into policy, and it does not grant a reasoning role Git authority. The the verification profile (see the [generated table](../README.md#contracts)) verification profile and the runtime profile (see the [generated table](../README.md#contracts)) runtime profile supply concrete mechanisms for this repository; production adapters may replace them while preserving the core invariants above.
+The core contract does not make the standalone verifier a hostile-code sandbox. It does not make prose into policy, and it does not grant a reasoning role Git authority. The verification profile and the runtime profile (see the [generated table](../README.md#contracts)) supply concrete mechanisms for this repository; production adapters may replace them while preserving the core invariants above.
 
 ## human-authority
 
