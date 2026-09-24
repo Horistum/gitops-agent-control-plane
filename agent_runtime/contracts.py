@@ -33,6 +33,8 @@ def integer(low, high):
 
 RISK = enum("low", "medium", "high")
 PATHS = array(text(500, 1))
+# Keep legacy wire bounds; goal_projection validates ID syntax and graph integrity.
+DEPENDENCY_IDS = array(text(500, 1))
 ARGV = array(text(4000, 1), 64, 1)
 EDIT = obj({"path": text(500, 1), "expected_sha256": text(64),
             "delete": {"type": "boolean"}, "content": text(1_000_000)})
@@ -110,7 +112,7 @@ CRITERION = obj({"id": text(128, 1), "text": text(4000, 1),
 GOAL_SCHEMA = obj({"schema": {"type": "integer", "const": 1}, "id": text(128, 1),
                    "objective": text(4000, 1), "risk_ceiling": RISK,
                    "auto_merge_ceiling": enum("none", "low", "medium", "high"),
-                   "items": array(obj({"id": text(128, 1), "dependencies": PATHS,
+                   "items": array(obj({"id": text(128, 1), "dependencies": DEPENDENCY_IDS,
                                        "ready": {"type": "boolean"}, "risk": RISK,
                                        "description": text(8000, 1), "context": PATHS,
                                        "acceptance": array(CRITERION, 128, 1)}), 256, 1),
