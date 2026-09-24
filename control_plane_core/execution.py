@@ -119,7 +119,7 @@ def recovery_actions(task, limits):
     budget = task.get("agent_budget", {}).get("used", task.get("agent_calls", 0))
     exhausted = (task.get("context_rounds", 0) >= limits.get("max_context_rounds", 8) or
                  budget >= limits.get("max_agent_calls_per_task", 18) or
-                 task.get("failure_code") in {"CONTEXT_STALLED", "EVIDENCE_UNAVAILABLE", "PROMPT_LIMIT", "PROTOCOL_LIMIT"})
+                 task.get("failure_code") in {"CONTEXT_LIMIT", "CONTEXT_STALLED", "EVIDENCE_UNAVAILABLE", "PROMPT_LIMIT", "PROTOCOL_LIMIT"})
     return {"retry": bool(held and not task.get("approvable") and task.get("retryable", True) and
                           task.get("hold_kind") in {"FAILED", "BLOCKED_POLICY"} and not exhausted),
             "replan": bool(held and not task.get("merge_sha") and

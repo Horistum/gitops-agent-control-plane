@@ -27,22 +27,7 @@ ARTIFACT_SCHEMA_PATTERNS = _base.ARTIFACT_SCHEMA_PATTERNS + (
 
 
 def validate_evidence_directory(repository_root: Path, evidence: Path) -> list[str]:
-    validated: list[str] = []
-    for filename, schema_name in ARTIFACT_SCHEMAS.items():
-        path = evidence / filename
-        if path.is_file():
-            validate_json_file(path, repository_root / "schemas" / schema_name)
-            validated.append(filename)
-    for path in sorted(evidence.glob("*.json")):
-        if path.name in ARTIFACT_SCHEMAS:
-            continue
-        for pattern, schema_name in ARTIFACT_SCHEMA_PATTERNS:
-            if pattern.fullmatch(path.name):
-                validate_json_file(path, repository_root / "schemas" / schema_name)
-                validated.append(path.name)
-                break
-    events = evidence / "events.jsonl"
-    if events.is_file():
-        validate_jsonl_file(events, repository_root / "schemas" / "event.schema.json")
-        validated.append("events.jsonl")
-    return validated
+    return _base.validate_evidence_directory(
+        repository_root, evidence, artifact_schemas=ARTIFACT_SCHEMAS,
+        artifact_schema_patterns=ARTIFACT_SCHEMA_PATTERNS,
+    )

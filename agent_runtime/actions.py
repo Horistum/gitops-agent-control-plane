@@ -4,13 +4,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from control_plane_core import fingerprint, recovery_actions, require_merge_identity, retirement, upgrade_boundary
+from control_plane_core import fingerprint, require_merge_identity, retirement, upgrade_boundary
 from .controller import Controller
 from .decisions import approval_binding, decision_document
 from .discovery import remember_discovery
 from .io import Closed, locked
 from .store import Store, runtime_fingerprint, validate_authority
 from .observations import status_document
+from .recovery import task_recovery
 
 
 def close_unmerged(engine):
@@ -108,8 +109,7 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"
         elif name == "retry":
-            permitted = recovery_actions({**(task or {}), "pending": state.get("pending"),
-                "agent_calls": state["model_calls"]}, {"max_agent_calls_per_task": engine.policy["limits"]["model_calls"]})
+            permitted = task_recovery(state)
             if not task or not permitted["retry"]:
                 raise Closed("This hold is not retryable")
             task["phase"] = task["resume_phase"]

@@ -1,5 +1,5 @@
 """One read-only status projection for CLI, supervisor and embedded clients."""
-from control_plane_core import recovery_actions
+from .recovery import task_recovery
 from .discovery import can_replan_discovery, discovery_document
 from .io import Closed
 from .diagnostics import current_diagnostic
@@ -47,8 +47,7 @@ def status_document(state, root=None):
             "diagnostic": current_diagnostic(state),
             "pending_effect": (state.get("pending") or {}).get("id"),
             "discovery": discovery,
-            "recovery": recovery_actions({**task, "agent_calls": state["model_calls"], "pending": state.get("pending")},
-                {"max_agent_calls_per_task": state["policy"]["limits"]["model_calls"]}) if task else
+            "recovery": task_recovery(state) if task else
                 {"retry": False, "replan": can_replan_discovery(state)}}
     if root is not None:
         result["product"] = product_document(root, state)

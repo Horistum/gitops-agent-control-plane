@@ -418,23 +418,6 @@ class BaseEngine:
         self.write_json(f"protected-tests-{label}.json", snapshot)
         return snapshot
 
-    def select_authorized_item(self) -> dict:
-        roadmap = self.authority["roadmap"]
-        release = self.authority["release_state"]
-        completed = set(release.get("completed", []))
-        selected = next(
-            (
-                item for item in roadmap["items"]
-                if item["id"] in self.goal["items"]
-                and item["status"] == "ready"
-                and set(item.get("dependencies", [])) <= completed
-            ),
-            None,
-        )
-        if selected is None:
-            raise PolicyConfigurationError("no authorized ready item with satisfied dependencies")
-        self.acceptance_probe_ids(selected)
-        return selected
 
     def workspace_path(self, relative: str) -> Path:
         canonical = safe_relative_path(relative)
@@ -538,54 +521,3 @@ class BaseEngine:
         self.state["phase"] = phase
         self.event("run-finished", {"status": status, "phase": phase})
         return self.build_summary(**extra)
-
-    def rollback_uncommitted_candidate(self) -> None:
-        self.git("reset", "--hard", "main")
-        self.git("checkout", "main")
-        self.git("branch", "-D", "reference-candidate", check=False)
-
-    def prepare_merge_effect(self, candidate_sha: str) -> dict:
-        request = {"effect": "merge", "candidate_sha": candidate_sha, "base_sha": self.state["base_sha"]}
-        request_hash = sha256_json(request)
-        effect = {**request, "request_hash": request_hash}
-        self.state["pending_effect"] = effect
-        self.state["phase"] = "MERGE_PENDING"
-        self.state["status"] = "WAITING_EXTERNAL"
-        self.write_json("merge-intent.json", {"schema": 2, **effect})
-        self.event("effect-intent-persisted", {"kind": "merge", "request_hash": request_hash})
-        return effect
-
-    def effect_merge_commits(self, request_hash: str) -> list[str]:
-        marker = f"Effect-Id: {request_hash}"
-        out = self.git("log", "--all", "--format=%H%x00%B%x00", capture=True)
-        chunks = out.split("\x00")
-        commits: list[str] = []
-        for i in range(0, len(chunks) - 1, 2):
-            sha, body = chunks[i].strip(), chunks[i + 1]
-            trailing = [line.strip() for line in body.splitlines() if line.strip()]
-            if sha and trailing and trailing[-1] == marker:
-                commits.append(sha)
-        return commits
-
-    def perform_merge_effect(self, effect: dict) -> str:
-        existing = self.effect_merge_commits(effect["request_hash"])
-        if len(existing) > 1:
-            raise RuntimeError("duplicate merge effects detected")
-        if existing:
-            return existing[0]
-        self.git("checkout", "main")
-        message = f"Reference simulated merge\n\nEffect-Id: {effect['request_hash']}"
-        self.git("merge", "--no-ff", "reference-candidate", "-m", message)
-        return self.git("rev-parse", "HEAD")
-
-    def consume_merge_effect(self, effect: dict, merge_sha: str, *, recovered_existing: bool) -> None:
-        commits = self.effect_merge_commits(effect["request_hash"])
-        if commits != [merge_sha]:
-            raise RuntimeError(f"merge effect identity mismatch: {commits} expected {[merge_sha]}")
-        self.state["merge_sha"] = merge_sha
-        self.state["pending_effect"] = None
-        self.state["status"] = "RUNNING"
-        self.state["phase"] = "POSTMERGE_VERIFY"
-        self.write_json("merge-evidence.json", {"schema": 2, "candidate_sha": effect["candidate_sha"], "merge_sha": merge_sha, "request_hash": effect["request_hash"], "effect_occurrences": len(commits), "recovered_existing_effect": recovered_existing, "method": "local-git-no-ff"})
-        self.event("effect-consumed", {"kind": "merge", "request_hash": effect["request_hash"], "merge_sha": merge_sha, "recovered_existing_effect": recovered_existing})
-

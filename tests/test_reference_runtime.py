@@ -415,11 +415,13 @@ class ExecutorAndEvidenceTests(unittest.TestCase):
             subprocess.run(["git", "commit", "-m", "Subject", "-m", "Effect-Id: abc", "-m", "not-a-trailer"], cwd=root, check=True, capture_output=True)
             engine = BaseEngine.__new__(BaseEngine)
             engine.workspace = root
-            self.assertEqual(engine.effect_merge_commits("abc"), [])
+            from reference_runtime.adapters import LocalGitEffectAdapter
+            adapter = LocalGitEffectAdapter(engine.git)
+            self.assertEqual(adapter.find_trailer_effect("Effect-Id", "abc"), [])
             (root / "a").write_text("2")
             subprocess.run(["git", "add", "."], cwd=root, check=True)
             subprocess.run(["git", "commit", "-m", "Subject", "-m", "Effect-Id: abc"], cwd=root, check=True, capture_output=True)
-            self.assertEqual(len(engine.effect_merge_commits("abc")), 1)
+            self.assertEqual(len(adapter.find_trailer_effect("Effect-Id", "abc")), 1)
 
 
 class SchemaTests(unittest.TestCase):

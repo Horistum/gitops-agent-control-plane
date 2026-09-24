@@ -246,6 +246,8 @@ class GitRepository:
         if result.returncode:
             raise Closed("Base refresh has conflicts; no file was overwritten")
         tree = sha(result.stdout.decode().splitlines()[0])
+        # This is a candidate checkpoint incorporating a moved baseline, not
+        # the final [base, candidate] merge receipt verified by merge_local().
         return self._commit_tree(tree, [head, base], effect)
 
     def publish_branch(self, branch, head):
