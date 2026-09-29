@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from agent_runtime.controller import Controller
-from agent_runtime.io import Closed
+from agent_runtime.io import Closed, Unavailable
 from agent_worker import AppServerWorker
 from agent_worker.capabilities import inspect_cli
 from agent_worker.protocol import atomic
@@ -24,8 +24,9 @@ class WorkerAdapterTests(unittest.TestCase):
             max_tool_calls=8,max_tool_bytes=100000,max_frame_bytes=100000,max_output_bytes=1000000,
             timeout_seconds=5,smoke_attestation=str(self.root/'smoke.json'))
         self.policy['reasoning'].update(kind='codex',argv=self.argv,codex_home=str(self.root/'home'),worker=self.profile)
-        worker=AppServerWorker(self.profile,self.root/'home',self.root/'workers',argv=self.argv)
-        atomic(Path(self.profile['smoke_attestation']),{'identity':worker.smoke_identity(),'passed':True,'model_called':True})
+        from agent_runtime.worker import authority_identity
+        worker=AppServerWorker(self.profile,self.root/'home',self.root/'workers',argv=self.argv,adapter_identity=authority_identity())
+        atomic(Path(self.profile['smoke_attestation']),{'identity':worker.smoke_identity(self.policy['reasoning']['model']),'passed':True,'model_called':True})
         engine=Controller.start(self.root/'run',self.policy,goal(),trusted_local=True)
         # Planning fixture never dispatches a model; operational policy and worker
         # stay pinned throughout. The actual production reasoning resumes below.
@@ -52,6 +53,24 @@ class WorkerAdapterTests(unittest.TestCase):
         with self.assertRaises(Closed): engine.model('developer',engine.task)
         self.assertEqual(engine.state['model_calls'],before)
         self.assertFalse((self.root/'home/fixture-state.json').exists())
+
+    def test_final_json_uses_the_same_source_validation(self):
+        engine = self.engine
+        engine.reasoning.worker.transport.argv += ['--scenario', 'direct-edits']
+        result = engine.model('developer', engine.task)
+        self.assertEqual(result['edits'][0]['content'], 'value = 3\n')
+        engine.state['effect_epoch'] += 1
+        engine.reasoning.worker.transport.argv[-1] = 'direct-nul'
+        with self.assertRaises(Unavailable): engine.model('developer', engine.task)
+
+    def test_git_write_boundary_also_rejects_nul_and_malformed_deletion(self):
+        from agent_runtime.io import digest
+        engine = self.engine
+        original = engine.repo.read(engine.task['head'], 'app.py')
+        edit = dict(path='app.py', expected_sha256=digest(original), content='bad\0text', delete=False)
+        for row in (edit, {**edit, 'content': 'nonempty', 'delete': True}, {**edit, 'content': 'valid', 'delete': 1}):
+            with self.assertRaises(Closed): engine.repo.commit(engine.task['head'], [row], 'invalid',
+                allowed=engine.policy['allowed_paths'], protected=engine.policy['protected_paths'])
 
     def test_binding_change_rejected_without_provider_turn(self):
         engine=self.engine

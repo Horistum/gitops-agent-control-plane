@@ -1,6 +1,6 @@
 include LICENSE NOTICE TRADEMARKS.md *.md pyproject.toml MANIFEST.in .gitignore
 include requirements*.txt
-include CONTROL-CORE.lock.json
+include CONTROL-CORE.lock.json PORTABLE-ORIGINS.json
 recursive-include control_plane_core *.py *.md *.json
 recursive-include agent_worker *.py *.md *.json
 recursive-include agent_runtime *.py

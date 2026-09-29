@@ -42,7 +42,7 @@ making a decision.
 | Approve the displayed candidate | approve --binding ... --decision-hash ... | Authorizes only the matching candidate and decision |
 | Advance once / drive until stopped | tick / resume | Executes ready work; does not clear a hold or pause |
 | Remove a pause | continue | Unpauses; a blocked hold still needs its own recovery |
-| Retry a held, retryable task | retry | Resumes the held phase after its cause is fixed |
+| Re-observe failed verification | reverify --binding ... | Repeats completed verification on unchanged source, scope and frozen tests |
 | Recover a pending non-model effect | reconcile | Resumes a replay-safe effect; follow with a tick |
 | Recover a pending model result | reconcile-effect --binding ... | Requires the original receipt; no replacement call |
 | Explicitly replace an uncertain model call | retry-effect --binding ... | May incur duplicate cost; retains the lifetime budget |

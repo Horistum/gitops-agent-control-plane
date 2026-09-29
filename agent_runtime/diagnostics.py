@@ -100,7 +100,7 @@ def recovery_steps(code, state):
         "CONTEXT_LIMIT": "Inspect context/protocol feedback and omitted files. Remove the cause of repeated requests before a permitted replan.",
         "RECEIPT_MISSING": "Restore the original receipt from a verified backup; do not invent a result or repeat a recorded effect.",
         "APPROVAL_REQUIRED": "Review the exact candidate and evidence, then approve its binding or choose a permitted replan/cancel action.",
-        "VERIFICATION_FAILED": "Inspect the failed verification evidence. Retry only a retryable hold after fixing its cause, or use a permitted replan.",
+        "VERIFICATION_FAILED": "Inspect the failed verification evidence. Use an offered bound reverify after fixing its external cause, or a permitted replan for product changes.",
         "UNEXPECTED_ERROR": "Use the diagnostic ID, exception chain and stack locations to investigate the controller failure before resuming.",
         "EXTERNAL_UNAVAILABLE": "Restore the unavailable dependency, then run one tick to observe it again.",
     }

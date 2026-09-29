@@ -26,7 +26,8 @@ def requested_context(engine, task, output):
 
 def role_view(task, phase):
     value = copy.deepcopy({key: item for key, item in task.items()
-                           if key not in {"memory", "proposal", "frozen_tests", "role_results"}})
+                           if key not in {"memory", "proposal", "frozen_tests", "role_results",
+                                          "verification_recovery", "verification_recovery_history"}})
     if phase in {"reviewer", "challenge_review", "tester"}:
         value["feedback"] = [row for row in value.get("feedback", []) if row.get("phase") == phase]
     if phase == "challenge_review":

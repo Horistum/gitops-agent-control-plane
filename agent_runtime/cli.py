@@ -60,7 +60,7 @@ def main(argv=None):
     p = sub.add_parser("registry", help=COMMAND_HELP["registry"], description=COMMAND_HELP["registry"])
     p.add_argument("--root", type=Path, required=True,
                    help="One run, or a flat directory whose immediate children are runs")
-    for name in ("status", "tick", "decision", "explain", "usage", "diagnostics", "review", "pause", "continue", "approve", "approve-work", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel", "upgrade"):
+    for name in ("status", "tick", "decision", "explain", "usage", "diagnostics", "review", "pause", "continue", "approve", "approve-work", "retry-effect", "reconcile-effect", "retry", "reverify", "reconcile", "replan", "cancel", "upgrade"):
         p = sub.add_parser(name, help=COMMAND_HELP[name], description=COMMAND_HELP[name])
         p.add_argument("--state", type=Path, required=True)
         if name in {"diagnostics", "explain"}:
@@ -69,13 +69,13 @@ def main(argv=None):
         if name in {"status", "decision", "explain"}:
             p.add_argument("--format", choices=["json", "table", "text"] if name == "explain" else ["json", "table"],
                            default="text" if name == "explain" else "json")
-        if name in {"approve", "approve-work", "retry-effect", "reconcile-effect"}:
+        if name in {"approve", "approve-work", "retry-effect", "reconcile-effect", "reverify"}:
             p.add_argument("--binding", required=True)
-        if name in {"pause", "continue", "approve", "approve-work", "retry-effect", "reconcile-effect", "retry", "reconcile", "replan", "cancel"}:
+        if name in {"pause", "continue", "approve", "approve-work", "retry-effect", "reconcile-effect", "retry", "reverify", "reconcile", "replan", "cancel"}:
             p.add_argument("--reason", default="")
         if name == "upgrade":
             p.add_argument("--suspend", action="store_true")
-        if name in {"approve", "approve-work"}:
+        if name in {"approve", "approve-work", "reverify"}:
             p.add_argument("--decision-hash")
         if name == "review":
             p.add_argument("--port", type=int, default=8765)

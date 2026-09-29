@@ -171,7 +171,16 @@ class GitRepository:
         edits will always fail the same way) permanently wedges recovery --
         reconcile only replays perform(), and replan/cancel refuse to run
         while a pending effect exists."""
-        if not edits or len({row["path"] for row in edits}) != len(edits):
+        if not isinstance(edits, list) or not edits:
+            raise Closed("Edits must be a nonempty array")
+        for row in edits:
+            if (not isinstance(row, dict) or set(row) != {"path", "expected_sha256", "content", "delete"}
+                    or not isinstance(row["path"], str) or not isinstance(row["expected_sha256"], str)
+                    or type(row["delete"]) is not bool or not isinstance(row["content"], str)
+                    or "\0" in row["content"] or (row["delete"] and row["content"])):
+                raise Closed("Edits require bounded text and an explicit valid deletion")
+            safe_path(row["path"])
+        if len({row["path"] for row in edits}) != len(edits):
             raise Closed("Edits must be nonempty and unique")
         if sum(len(row["content"].encode()) for row in edits) > maximum:
             raise Closed("Edit byte limit exceeded")

@@ -48,7 +48,7 @@ python3 "$portable_source/scripts/sync_control_core.py" \
   --repository "$portable_origin" --commit "$portable_source_sha"
 python3 "$portable_source/scripts/sync_control_core.py" \
   --source "$portable_source" --target "$portable_target" \
-  --repository "$portable_origin" --commit "$portable_source_sha"
+  --repository "$portable_origin" --commit "$portable_source_sha" --export-only
 ```
 
 Set the three path/origin variables explicitly for the intended reviewed pair;
@@ -94,3 +94,16 @@ Package and installed-release checks remain separate gates.
 
 A product worker cannot export shared code, merge controller PRs or deploy its own
 runtime. These remain owner-operated controller maintenance actions.
+
+## Public provenance boundary
+
+`PORTABLE-ORIGINS.json` is reviewed checkout-specific configuration. The public reference permits only its public repository identity; private development origins belong only in the consumer checkout. Portable Python code never hardcodes a private origin or imports a private adapter. The consumer supplies its reviewed local `tests/workflow_adapter_driver.py`; the portable harness compares its results with the reference driver.
+
+When exporting into a public candidate, use `--export-only`. It copies committed portable bytes and leaves the old target lock untouched. The reported `record_required` means the target is deliberately not releasable yet. Commit the portable files in the target (without staging a private provenance lock), then run:
+
+```bash
+python3 scripts/sync_control_core.py --record \
+  --repository Horistum/gitops-agent-control-plane --commit "$(git rev-parse HEAD)"
+```
+
+Commit that new lock separately. The two repositories must have identical portable file hashes, package versions and contracts; their origin repository and source commit may differ. The reference pin identifies the actual committed reference bytes, while the consumer retains the private development origin. Never redact or relabel an existing commit identity. A reference import is still subject to owner review and CI before merge.

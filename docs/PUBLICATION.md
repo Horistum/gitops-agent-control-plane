@@ -94,3 +94,9 @@ a live model turn, a deployed consumer, or public launch approval.
 The reference is maintained by Horistum but is independently usable. Consumer
 source locks, deployments and private operational instructions belong to the
 consumer, not to the public reference's release claims.
+
+## Identity coverage
+
+The source gate scans tracked files and the full release inventory, including Python, JSON, workflow files and packaging metadata. The distribution gate scans the actual sdist and wheel payloads, including generated metadata. Only exact hashed lines in the detection rule and its deliberate negative fixture are exempt; changing a line or introducing another occurrence fails the gate.
+
+The public portable lock pins an actual reference-repository source commit. Private development provenance and consumer-specific matrix drivers stay in the consuming checkout. Removing current-tree references does not clean historical commits, PRs, logs or caches. Historical disclosure review remains a separate visibility gate; these repairs neither rewrite history nor authorize publication.

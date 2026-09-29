@@ -152,13 +152,12 @@ class RecoveryProjectionTests(unittest.TestCase):
         self.assertIsNotNone(engine.task)
         return engine
 
-    def test_actual_policy_limit_is_shared_by_status_decision_and_retry_action(self):
-        for limit, rounds, permitted in ((1, 0, True), (1, 1, False), (12, 8, True), (12, 12, False)):
+    def test_retired_retry_is_never_offered_or_executed_at_any_policy_limit(self):
+        for limit, rounds, permitted in ((1, 0, False), (1, 1, False), (12, 8, False), (12, 12, False)):
             with self.subTest(limit=limit, rounds=rounds), tempfile.TemporaryDirectory() as directory:
                 engine = self.start(Path(directory), limit)
                 engine.task["context_rounds"] = rounds
                 engine.hold("Fixture verification failure")
-                engine.task.update(retryable=True, recovery_kind="transport")
                 engine.store.save()
                 before = deepcopy(engine.state)
                 self.assertIs(status_document(engine.state)["recovery"]["retry"], permitted)
@@ -195,7 +194,7 @@ class RecoveryProjectionTests(unittest.TestCase):
                  "policy": {"limits": {"model_calls": 20, "context_rounds": 12}},
                  "model_calls": 1, "owner_replans": {"TASK-1": 2}}
         original = deepcopy(state)
-        self.assertEqual(task_recovery(state), {"retry": True, "replan": False})
+        self.assertEqual(task_recovery(state), {"retry": False, "replan": False})
         self.assertEqual(state, original)
         for alteration in ({"diagnostic": {"code": "CONTEXT_LIMIT"}},
                            {"pending": {"kind": "model", "id": "pending"}}, {"model_calls": 20}):

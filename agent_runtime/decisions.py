@@ -8,6 +8,7 @@ from .io import Closed
 from .discovery import can_replan_discovery, discovery_document
 from .diagnostics import current_diagnostic
 from .authorization import approval_binding, work_binding, work_critical_paths
+from .reverification import recovery_binding
 
 
 def technical_continue_allowed(state):
@@ -36,8 +37,8 @@ def owner_actions(state, diagnostic=None):
         return allowed
     if (task and state.get("owner_replans", {}).get(task["id"], 0) < 2) or can_replan_discovery(state):
         allowed.append("replan")
-    if task_recovery(state)["retry"]:
-        allowed.append("retry")
+    if recovery_binding(state):
+        allowed.append("reverify")
     return allowed
 
 
@@ -67,6 +68,8 @@ def decision_document(state):
             and not state.get("owner_intent") and not drift),
         "diagnostic": diagnostic,
         "technical_recovery": state.get("technical_recovery"),
+        "reverification_binding": recovery_binding(state),
+        "verification_recovery": task.get("verification_recovery"),
         "technical_continue_allowed": not drift and technical_continue_allowed(state),
         "reviews": frame.get("role_results", {}), "feedback": frame.get("feedback", []),
         "discovery": discovery_document(state),

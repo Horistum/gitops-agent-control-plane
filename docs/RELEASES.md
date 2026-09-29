@@ -1,6 +1,6 @@
 # Release and versioning policy
 
-Current distribution: **1.10.0**.
+Current distribution: **1.10.1**.
 
 The distribution version in `pyproject.toml` and `control_plane_core.__version__`
 is separate from wire identities authored in
@@ -62,6 +62,15 @@ Registry publication is optional and separate. Confirm ownership of the actual
 package namespace, inspect the final archives, and use a separately approved
 publication workflow/credential. The repository's CI only builds/tests artifacts;
 it does not upload to PyPI, enable public visibility or grant release authority.
+
+## 1.10.1: audited recovery and worker fixes
+
+- Exact-bound owner reverification for completed observations; the retired generic retry never grants authority.
+- Identical validation for staged/final edits, adapter/model-bound smoke attestations, safe OS locks and live subprocess output limits.
+- Source and built-archive identity scans, consumer-neutral portable transfer tooling and public-origin provenance locks.
+- Real adapter and pipe regressions preserve uncertain-call fences, frozen assertions, budgets and original receipts.
+
+This release does not rewrite prior history, publish the repository, establish legal clearance or claim a live target-host smoke. Existing experimental worker attestations require renewed commissioning after code review; unknown old turns still require explicit owner reconciliation/retry.
 
 ## 1.10.0: shared autonomy and worker integration
 

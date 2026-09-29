@@ -1,6 +1,6 @@
 """Executable external-cli/v1 reference adapter for trusted local fixtures.
 
-Production consumers must supply OS isolation (Flow uses rootless Podman).
+Production consumers must supply OS isolation, such as rootless Podman.
 Expected predicates stay in this parent; candidate output is always input data.
 """
 from __future__ import annotations

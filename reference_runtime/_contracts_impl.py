@@ -252,7 +252,7 @@ def validate_roadmap(roadmap: dict) -> None:
         except CoreError as exc:
             raise ValueError(str(exc)) from exc
         if any(r["kind"] == "ci" for r in typed):
-            raise ValueError("Local reference profile has no hosted CI adapter; use the Flow GitHub adapter for CI obligations")
+            raise ValueError("Local reference profile has no hosted CI adapter; use a configured hosted GitHub adapter for CI obligations")
         if any(r["kind"] not in {"behavior", "compatibility"} and r["probe_ids"] for r in typed):
             raise ValueError("Non-test obligations cannot borrow executable probe identities")
         if len(criterion_ids) != len(set(criterion_ids)):

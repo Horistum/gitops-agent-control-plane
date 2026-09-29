@@ -34,7 +34,8 @@ COMMAND_HELP = {
     "continue": "Remove pause or explicitly renew an exhausted technical retry episode.",
     "approve": "Authorize the exact candidate binding after reviewing its evidence.",
     "approve-work": "Authorize the accepted work plan, scenarios and source scope for this attempt.",
-    "retry": "Resume a retryable held task after its cause is fixed; not an uncertain model call.",
+    "retry": "Retired command; use a displayed bound reverify or technical continue action.",
+    "reverify": "Repeat completed verification against unchanged source, scope and frozen assertions; no model replay.",
     "reconcile": "Resume a replay-safe pending non-model effect.",
     "reconcile-effect": "Consume the original receipt of an exact pending model call; no new call.",
     "retry-effect": "Abandon an uncertain model call and allow a replacement; possible duplicate cost.",
@@ -145,7 +146,10 @@ def action_guidance(store, decision):
             args = ["--binding", decision["binding"], "--decision-hash", decision["decision_hash"]]
             condition = ("Review the plan, test scenarios and working files before authorizing work."
                          if name == "approve-work" else "Review the exact candidate, findings and evidence before approval.")
-        elif name in {"retry", "replan"}:
+        elif name == "reverify":
+            args = ["--binding", decision["reverification_binding"], "--decision-hash", decision["decision_hash"]]
+            condition = "Re-observe this exact failed verification after correcting its external cause. All lifetime budgets and old receipts are preserved."
+        elif name == "replan":
             condition = "Inspect the failure and correct its cause first. The model budget is not reset."
         elif name == "continue":
             condition = ("Explicitly renews this exhausted technical retry episode while preserving its pending effect and lifetime budgets."
@@ -195,7 +199,7 @@ def action_guidance(store, decision):
             elif state["status"] in {"RUNNING", "WAITING_EXTERNAL"}:
                 preferred = "continue" if state["paused"] else "tick"
             elif state["status"] == "FAILED":
-                preferred = "retry"
+                preferred = "reverify"
             elif code in {"DISCOVERY_NOT_SELECTED", "CONTEXT_LIMIT"}:
                 preferred = "replan"
     recommendation = next((row for row in actions if row["id"] == preferred and row["enabled"]), None)

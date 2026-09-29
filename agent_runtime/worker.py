@@ -2,9 +2,23 @@
 from __future__ import annotations
 import copy
 import hashlib
+from pathlib import Path
 from agent_worker import AppServerWorker, SourceBroker, WorkerError
+from agent_worker.protocol import source_identity
 from control_plane_core import fingerprint
 from .io import Closed, canonical
+
+
+def authority_identity():
+    return source_identity(Path(__file__).parent.parent, (
+        "agent_runtime/worker.py", "agent_runtime/git.py", "agent_runtime/io.py", "agent_runtime/contracts.py",
+        "control_plane_core/decisions.py"))
+
+
+def smoke_configuration(policy):
+    config = policy["reasoning"]
+    return {"profile": config["worker"], "home": config["codex_home"], "argv": config["argv"],
+            "models": [config["model"]], "default_model": config["model"], "adapter_identity": authority_identity()}
 
 
 def binding(engine, task, phase):
@@ -22,7 +36,8 @@ class ReferenceWorker:
     def __init__(self, reasoning, engine):
         self.reasoning = reasoning; self.engine = engine
         self.transport = AppServerWorker(reasoning.config["worker"], reasoning.config["codex_home"],
-                                         engine.root / "workers", argv=reasoning.config["argv"])
+                                         engine.root / "workers", argv=reasoning.config["argv"],
+                                         adapter_identity=authority_identity())
 
     def execute(self, payload, schema, instructions, *, recover_only=False):
         engine = self.engine; phase = payload["phase"]

@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from agent_runtime.contracts import ROLE_SCHEMAS
+from agent_runtime.context import role_view
 from agent_runtime.reasoning import ROLE_INSTRUCTIONS
 from agent_runtime.io import canonical
 from agent_runtime.prompts import SHARED_INSTRUCTIONS, codex_request, openai_messages
@@ -26,6 +27,25 @@ def envelope(phase='discovery'):
 
 
 class PromptLayoutTests(unittest.TestCase):
+    def test_recovery_history_does_not_expose_retained_assertions_to_models(self):
+        private = "retained-independent-assertion-sentinel"
+        task = {"id": "TASK-1", "head": "a" * 40, "frozen_tests": {"content": private},
+                "verification_recovery": {"observation": private},
+                "verification_recovery_history": [{"observation": private}]}
+        before = copy.deepcopy(task)
+        for phase in ("architect", "developer", "tester", "reviewer", "challenge_review"):
+            with self.subTest(phase=phase):
+                view = role_view(task, phase)
+                self.assertEqual(view["id"], task["id"])
+                self.assertEqual(view["head"], task["head"])
+                self.assertNotIn(private, json.dumps(view))
+                self.assertNotIn("verification_recovery", view)
+                self.assertNotIn("verification_recovery_history", view)
+                value = envelope(phase); value["input"]["task"] = view
+                self.assertNotIn(private, json.dumps(openai_messages(value)))
+                self.assertNotIn(private, codex_request(value).decode())
+        self.assertEqual(task, before)
+
     def test_actual_http_messages_share_prefix_without_promoting_source_to_system(self):
         captured = []
         class Opener:

@@ -120,12 +120,10 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"
         elif name == "retry":
-            permitted = task_recovery(state)
-            if not task or not permitted["retry"]:
-                raise Closed("This hold is not retryable")
-            task["phase"] = task["resume_phase"]
-            state["status"] = "RUNNING"
-            state["effect_epoch"] += 1
+            raise Closed("This hold is not retryable: generic retry is retired. Use an offered bound reverify or explicit technical continue.")
+        elif name == "reverify":
+            from .reverification import reverify
+            reverify(engine, binding)
         elif name == "reconcile":
             pending = state.get("pending")
             if not pending or pending["kind"] == "model":
@@ -164,7 +162,7 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             retire_attempt(engine)
         else:
             raise Closed("Unknown owner action")
-        if name in {"approve", "approve-work", "retry", "reconcile", "reconcile-effect", "retry-effect"}:
+        if name in {"approve", "approve-work", "reverify", "reconcile", "reconcile-effect", "retry-effect"}:
             state.pop("reason", None)
             state.pop("diagnostic", None)
         state.setdefault("human_actions", []).append({"action": name, "binding": binding,

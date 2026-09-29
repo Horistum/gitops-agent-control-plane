@@ -110,7 +110,7 @@ execution is not a sandbox for untrusted generated code.
 | `RUNNING` | Continue the bounded loop |
 | `WAITING_EXTERNAL` | No success inferred; resume observes the provider again |
 | `NEEDS_DECISION` | Review the purpose and use `approve-work` for an accepted plan or `approve` for the exact merge candidate; otherwise replan/cancel |
-| `FAILED` | Inspect concrete failed verification/CI; `retry` is available only for a retryable hold |
+| `FAILED` | Inspect concrete failed verification/CI; an offered `reverify --binding HASH` repeats only the exact completed verification |
 | `BLOCKED_POLICY` | No ordinary approval bypass; inspect the policy, identity or protocol reason |
 | `pause` / `continue` | Change authoritative pause state; in-progress effects first finish under the writer lock |
 | `replan` | Close/reconcile an unmerged PR, retire the attempt, preserve frozen tests and allocate new identities |
@@ -121,7 +121,7 @@ execution is not a sandbox for untrusted generated code.
 ```bash
 agent-control approve-work --state /absolute/agent-runs/my-goal --binding DISPLAYED_WORK_HASH
 agent-control approve --state /absolute/agent-runs/my-goal --binding DISPLAYED_MERGE_HASH
-agent-control retry --state /absolute/agent-runs/my-goal
+agent-control reverify --state /absolute/agent-runs/my-goal --binding EXACT_DISPLAYED_BINDING
 agent-control replan --state /absolute/agent-runs/my-goal
 ```
 
@@ -216,3 +216,11 @@ Official transport references: [Codex non-interactive output](https://learn.chat
 [Codex CLI options](https://learn.chatgpt.com/docs/developer-commands?surface=cli),
 [Podman execution](https://docs.podman.io/en/latest/markdown/podman-run.1.html),
 [GitHub merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request).
+
+## Re-observing completed verification
+
+`agent-control reverify --state PATH --binding BINDING` is offered only after a completed verification observation caused a FAILED hold. The displayed binding names the failed observation, current source/base/specification, goal and policy authority, runtime, approved working set and frozen assertions. No pending effect, approval decision, changed authority or stale binding can use it. At most three such owner requests are allowed per task attempt.
+
+Each request retains the failed observation and allocates a fresh verification receipt; it does not reset model, context, repair or replan budgets and cannot redispatch an uncertain model call. Product failures still use bounded repair or replan; reverification is useful after an external verification dependency has been corrected. Post-merge work remains blocked until the same merged SHA satisfies every completion gate. Old holds without a recorded verification binding do not gain one from their reason text.
+
+Generic `retry` is retired and rejected with a migration message. Technical outages continue through their persisted bounded backoff; exhaustion requires explicit owner continuation of that exact technical episode. Unknown model outcomes retain their separate reconcile-effect/retry-effect protocol.
