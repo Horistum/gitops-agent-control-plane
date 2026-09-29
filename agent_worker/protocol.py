@@ -5,6 +5,9 @@ import json
 import os
 from pathlib import Path
 import re
+import contextlib
+import fcntl
+import stat
 
 PROFILE = "codex-app-server-broker/v1"
 
@@ -22,6 +25,37 @@ def canonical(value):
 
 def fingerprint(value):
     return hashlib.sha256(canonical(value)).hexdigest()
+
+@contextlib.contextmanager
+def exclusive_lock(path: Path):
+    """Open the exact owner-controlled regular file without following symlinks."""
+    path = Path(path).absolute()
+    directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    descriptor = None
+    try:
+        for part in path.parts[1:-1]:
+            next_directory = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory); directory = next_directory
+        descriptor = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             0o600, dir_fd=directory)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_nlink != 1:
+            raise WorkerError("Worker lock must be an owner-owned regular file with one link")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise WorkerError("Another worker owns this session or commissioning lock") from exc
+        yield
+    except OSError as exc:
+        raise WorkerError("Worker lock path is unavailable or unsafe") from exc
+    finally:
+        if descriptor is not None: os.close(descriptor)
+        os.close(directory)
+
+def source_identity(root, paths):
+    """Bind reviewed adapter authority code without including local configuration."""
+    root = Path(root)
+    return fingerprint({name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(paths)})
 
 def loads(raw):
     def pairs(items):

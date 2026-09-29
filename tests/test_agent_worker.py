@@ -5,11 +5,12 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from agent_worker import AppServerWorker, SourceBroker, WorkerError, WorkerIndeterminate
 from agent_worker.capabilities import inspect_cli
-from agent_worker.protocol import atomic, fingerprint
+from agent_worker.protocol import atomic, exclusive_lock, fingerprint, source_identity
 
 FIXTURE = Path(__file__).parent / "fixtures" / "worker_app_server.py"
 SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string", "enum": ["ready"]},
@@ -154,6 +155,49 @@ class WorkerTests(unittest.TestCase):
         self.assertNotEqual(recovered["operation"], first["operation"])
         self.assertEqual(self.state()["turns"], 3)
 
+    def test_smoke_is_bound_to_model_and_adapter_and_keeps_other_model_attestations(self):
+        from agent_worker.smoke import run_smoke
+        home = self.root / "home"
+        first = run_smoke(self.profile, home, argv=self.argv, model="one", adapter_identity="adapter-a")
+        worker = AppServerWorker(self.profile, home, self.root / "workers", argv=self.argv, adapter_identity="adapter-a")
+        worker.preflight(model="one")
+        with self.assertRaisesRegex(WorkerError, "model/adapter"): worker.preflight(model="two")
+        second = run_smoke(self.profile, home, argv=self.argv, model="two", adapter_identity="adapter-a")
+        self.assertNotEqual(first["operation"], second["operation"])
+        worker.preflight(model="one"); worker.preflight(model="two")
+        worker.adapter_identity = "adapter-b"
+        with self.assertRaisesRegex(WorkerError, "model/adapter"): worker.preflight(model="one")
+        with self.assertRaisesRegex(WorkerError, "explicit --retry-smoke"):
+            run_smoke(self.profile, home, argv=self.argv, model="one", adapter_identity="adapter-b")
+        self.assertEqual(self.state()["turns"], 2)
+
+    def test_cached_capability_check_never_reuses_smoke_for_another_model(self):
+        worker = self.worker(); self.execute(worker)
+        with self.assertRaisesRegex(WorkerError, "model/adapter"):
+            worker.execute({"task": "one"}, "prompt", SCHEMA, self.broker(), "other-model", "different")
+        self.assertEqual(self.state()["turns"], 1)
+
+    def test_smoke_authority_hash_changes_with_the_authorizer_source(self):
+        root = self.root / "adapter"; root.mkdir()
+        (root / "authorize.py").write_text("old authority")
+        before = source_identity(root, ["authorize.py"])
+        (root / "authorize.py").write_text("changed authority")
+        self.assertNotEqual(before, source_identity(root, ["authorize.py"]))
+
+    def test_both_lock_entry_points_reject_symlinks_before_dispatch(self):
+        from agent_worker.smoke import run_smoke
+        worker = self.worker()
+        target = self.root / "unrelated"; target.write_text("unchanged")
+        binding = {"task": "one", "phase": "developer", "head": "exact"}
+        session = worker.state_dir / fingerprint(worker.effect_identity(binding, ""))
+        session.mkdir(parents=True); (session / "lock").symlink_to(target)
+        with self.assertRaises(WorkerError): self.execute(worker)
+        directory = Path(self.profile["smoke_attestation"] + ".worker")
+        directory.mkdir(); (directory / "commissioning.lock").symlink_to(target)
+        with self.assertRaises(WorkerError): run_smoke(self.profile, self.root / "home", argv=self.argv)
+        self.assertEqual(target.read_text(), "unchanged")
+        self.assertFalse((self.root / "home" / "fixture-state.json").exists())
+
     def test_correctable_tool_errors_are_bounded_and_fixed_within_one_turn(self):
         value = self.execute(self.worker("corrected-input"))
         self.assertEqual(value["worker"]["tool_calls"], 6)
@@ -179,3 +223,93 @@ class WorkerTests(unittest.TestCase):
                 if scenario == "startup-unknown":
                     self.assertIn("unknown/private?notice", str(failure.exception))
                 self.assertFalse((self.root / "home" / "fixture-state.json").exists())
+
+
+class WorkerBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_final_and_staged_edits_reject_the_same_malformed_proposals(self):
+        original = "old"; sha = hashlib.sha256(original.encode()).hexdigest()
+        valid = dict(path="source.py", expected_sha256=sha, delete=False, content="new")
+        invalid = [None, {}, [valid, valid], [{**valid, "path": "../source.py"}],
+            [{**valid, "expected_sha256": "stale"}], [{**valid, "delete": 1}],
+            [{**valid, "content": "bad\0text"}], [{**valid, "content": original}],
+            [{**valid, "delete": True}], [{**valid, "content": "x" * 101}],
+            [{**valid, "extra": True}]]
+        for edits in invalid:
+            for mode in ("stage", "final"):
+                with self.subTest(mode=mode, edits=edits):
+                    called = []
+                    broker = SourceBroker(lambda _: {"text": original, "sha256": sha}, lambda _: {},
+                        called.append, writable=True, max_patch_bytes=100, max_changed_files=1)
+                    with self.assertRaises(WorkerError):
+                        if mode == "stage": broker.call("stage_edits", {"edits": edits})
+                        else: broker.finalize({"verdict": "ready", "edits": edits})
+                    self.assertEqual(called, []); self.assertEqual(broker.overlay, {})
+
+    def test_lock_rejects_nonregular_hardlinked_and_symlink_parent(self):
+        fifo = self.root / "fifo"; os.mkfifo(fifo)
+        directory = self.root / "directory"; directory.mkdir()
+        target = self.root / "file"; target.touch()
+        hardlink = self.root / "hardlink"; os.link(target, hardlink)
+        linked = self.root / "linked"; linked.symlink_to(directory, target_is_directory=True)
+        for path in (fifo, directory, hardlink, linked / "lock"):
+            with self.subTest(path=path), self.assertRaises(WorkerError), exclusive_lock(path): pass
+
+    def test_lock_contention_is_enforced_by_the_os_and_released(self):
+        import subprocess
+        lock = self.root / "lock"
+        code = "from pathlib import Path; from agent_worker.protocol import exclusive_lock;\nwith exclusive_lock(Path(__import__('sys').argv[1])): pass"
+        with exclusive_lock(lock):
+            child = subprocess.run([sys.executable, "-c", code, str(lock)], capture_output=True, timeout=5)
+            self.assertNotEqual(child.returncode, 0)
+        with exclusive_lock(lock): pass
+
+    def connection(self, code, *, frame=1000, output=10000, timeout=1):
+        from agent_worker.transport import _Connection
+        return _Connection([sys.executable, "-c", code], self.root, dict(os.environ),
+            dict(timeout_seconds=timeout, max_frame_bytes=frame, max_output_bytes=output))
+
+    def test_real_split_frame_and_oversized_frame(self):
+        connection = self.connection('import os,time; os.write(1,b\'{"value":\'); time.sleep(.05); os.write(1,b\'42}\\n\')')
+        try: self.assertEqual(connection.message(), {"value": 42})
+        finally: connection.close()
+        self.assertIsNotNone(connection.process.poll())
+        for code in ('import os; os.write(1,b"x"*2000)', 'import os; os.write(1,b"x"*2000+b"\\n")'):
+            connection = self.connection(code)
+            try:
+                with self.assertRaisesRegex(WorkerError, "frame"): connection.message()
+            finally: connection.close()
+            self.assertIsNotNone(connection.process.poll())
+
+    def test_aggregate_stderr_and_read_deadline(self):
+        for code, error in [('import os; os.write(2,b"x"*11000)', 'aggregate'),
+                            ('import sys; sys.stdin.read()', 'deadline')]:
+            connection = self.connection(code)
+            try:
+                with self.assertRaisesRegex(WorkerError, error): connection.message()
+            finally: connection.close()
+            self.assertIsNotNone(connection.process.poll())
+
+    def test_large_send_and_blocked_peer_has_a_deadline_and_is_reaped(self):
+        connection = self.connection('import os; os.write(1,b"x"*1000000)', frame=200000)
+        started = time.monotonic()
+        try:
+            with self.assertRaisesRegex(WorkerError, "deadline.*writing"):
+                connection.send({"large": "x" * 100000})
+        finally: connection.close()
+        self.assertLess(time.monotonic() - started, 7)
+        self.assertIsNotNone(connection.process.poll())
+
+    def test_capability_output_is_stopped_before_the_child_can_continue(self):
+        from agent_worker.capabilities import _run
+        marker = self.root / "continued"
+        code = 'import os,sys; from pathlib import Path; os.write(1,b"x"*1000000); Path(sys.argv[1]).touch()'
+        with self.assertRaisesRegex(WorkerError, "output exceeded"):
+            _run([sys.executable, "-c", code, str(marker)], cwd=self.root, env=dict(os.environ), limit=1024)
+        self.assertFalse(marker.exists())
+        with self.assertRaisesRegex(WorkerError, "timed out"):
+            _run([sys.executable, "-c", 'import time; time.sleep(10)'], cwd=self.root,
+                 env=dict(os.environ), timeout=.1)

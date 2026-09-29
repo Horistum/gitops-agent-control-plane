@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare actual reference/Flow safety behavior with real Git and fixture processes.
+"""Compare actual reference/consumer safety behavior with real Git and fixture processes.
 
 Run from either checkout with --reference PATH --consumer PATH. Reasoning and
 GitHub observations are controlled peers; no live provider or product claim is
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ("full-route", "adaptive-low-route", "negative-control-repair",
              "stale-review-evidence", "working-set-authority", "model-receipt-replay",
              "uncertain-model-fence", "ci-newer-pending", "ci-conflicting", "ci-malformed",
-             "ci-cancelled", "ci-latest-failure", "separate-work-merge-approval")
+             "ci-cancelled", "ci-latest-failure", "separate-work-merge-approval", "bound-reverification")
 
 
 def ci_rows(name):
@@ -110,6 +110,29 @@ def reference_scenario(name):
                 if status["status"] != "RUNNING" or status["phase"] == phase:
                     return status
             raise AssertionError("Reference fixture did not converge")
+
+        if name == "bound-reverification":
+            from agent_runtime.actions import action
+            from agent_runtime.reverification import recovery_binding
+            from unittest.mock import patch
+            drive("baseline")
+            observe = engine.verification.observe
+            def failed(*args, **kwargs):
+                receipt = observe(*args, **kwargs); receipt["passed"] = False
+                receipt["commands"].append({"argv": ["controlled-dependency"], "exit_code": 2})
+                return receipt
+            with patch.object(engine.verification, "observe", side_effect=failed): engine.tick()
+            binding = recovery_binding(engine.state)
+            require(binding is not None, "Actual verification hold has no recovery binding")
+            before = copy.deepcopy(engine.state)
+            action(engine.root, "reverify", binding)
+            engine = Controller(engine.root, reasoning=provider)
+            engine.tick()
+            require(engine.task["phase"] == "architect", "Reverification did not advance")
+            require(engine.state["model_calls"] == before["model_calls"], "Reverification dispatched a model")
+            require(engine.task["verification_recovery_history"][0] == before["task"]["verification_recovery"], "Lost failed observation")
+            return {"phase": "architect", "reverifications": engine.task["reverifications"],
+                    "model_calls": 0, "failed_observation_retained": True}
 
         if name == "uncertain-model-fence":
             def interrupt(*_):
@@ -223,145 +246,26 @@ def reference_scenario(name):
         return {**result, **replay}
 
 
-def flow_scenario(name):
-    from test_verified_git_loop import VerifiedGitLoopTests
-    from flow_loop.runtime import Controller
-    from helpers import policy, command
-    fixture = VerifiedGitLoopTests()
-    fixture.setUp()
-    try:
-        fixture.p = policy(verification_profile="counterfactual-regression/v1", approved_items=["TASK-1"],
-                           adaptive_agent_graph=name == "adaptive-low-route",
-                           challenge_review={**policy().data["challenge_review"], "enabled": False})
-        state = fixture.store.load()
-        state["policy_hash"] = fixture.p.fingerprint
-        fixture.store.save(state, "adapter-conformance-activation")
-
-        def restart():
-            fixture.c = Controller(fixture.store, fixture.p, fixture.product, fixture.gh,
-                                   fixture.a, fixture.tests, fixture.root / "spool", clock=lambda: 1700000100)
-        restart()
-        if name.startswith("ci-"):
-            fixture.until("ci")
-            fixture.gh.checks = lambda *_: ci_rows(name)
-            count = len(fixture.a.calls)
-            fixture.c.tick()
-            task = fixture.store.load()["tasks"]["TASK-1"]
-            require(fixture.gh.merges == 0, "CI observation bypassed merge gate")
-            return ci_outcome(name, task["phase"], task["repairs"], count, len(fixture.a.calls))
-        if name == "negative-control-repair":
-            original = copy.deepcopy(fixture.a.responses["tester"])
-            fixture.a.responses["tester"]["edits"][0]["content"] = original["edits"][0]["content"].replace(
-                "self.assertEqual(add(-2,-3),-5)", "self.assertEqual(add(3,0),3)")
-            fixture.until("independent_baseline")
-            fixture.c.tick()
-            task = fixture.store.load()["tasks"]["TASK-1"]
-            require(task["phase"] == "tester" and task["test_receipt"]["passed"], "Rejected control lost product baseline")
-            fixture.a.responses["tester"] = original
-        if name == "working-set-authority":
-            fixture.a.responses["developer"]["edits"].append({"path": "src/other.py", "expected_sha256": "absent",
-                "delete": False, "content": "# outside the approved working set\n"})
-            fixture.until("developer")
-            fixture.c.tick()
-            task = fixture.store.load()["tasks"]["TASK-1"]
-            require(task["phase"] == "await_human", task)
-            require(task["head"] == task["base"] and not task.get("merge_sha"), "Unauthorized edit applied")
-            require(task.get("pending") is None, "Rejected edit left an unrecoverable effect")
-            return {"unauthorized_edit_blocked": True, "candidate_unchanged": True, "pending_effect": False}
-        if name == "stale-review-evidence":
-            fixture.until("publish")
-            state = fixture.store.load()
-            task = state["tasks"]["TASK-1"]
-            original = task["head"]
-            task["verdicts"]["reviewer"]["spec_hash"] = "stale-specification"
-            fixture.store.save(state, "adapter-conformance-stale-review")
-            fixture.c.tick()
-            task = fixture.store.load()["tasks"]["TASK-1"]
-            require(task["phase"] == "await_human" and task["head"] == original, task)
-            require(fixture.gh.created == fixture.gh.merges == 0, "Stale review published or merged")
-            require(fixture.product.fetch_main() == task["base"], "Stale evidence advanced main")
-            return {"stale_review_blocked": True, "product_main_unchanged": True}
-        if name == "uncertain-model-fence":
-            fixture.a.fail = Interrupted()
-            try:
-                fixture.c.tick()
-            except Interrupted:
-                pass
-            else:
-                raise AssertionError("Dispatch interruption did not fire")
-            identity = fixture.store.load()["discovery_task"]["pending"]["id"]
-            fixture.a.fail = None
-            for _ in range(3):
-                restart()
-                fixture.c.tick()
-                state = fixture.store.load()
-                require(state["discovery_task"]["pending"]["id"] == identity, "Lost uncertain effect binding")
-            require(len(fixture.a.calls) == state["daily"]["calls"] == 1, "Uncertain call repeated")
-            return {"unknown_effect_preserved": True, "automatic_redispatches": 0, "reserved_calls": 1}
-        replay = {}
-        if name == "separate-work-merge-approval":
-            fixture.a.responses["architect"]["risk"] = "high"
-            first = fixture.until("await_human")
-            require(first.get("approval_kind") == "work" and first["head"] == first["base"], "Work decision absent")
-            work_binding = fixture.p.work_approval(first)
-            calls = len(fixture.a.calls)
-            fixture.gh.command_list = [command("/loop approve TASK-1 " + work_binding, cid=11)]
-            fixture.c.tick()
-            require(len(fixture.a.calls) == calls and fixture.store.load()["tasks"]["TASK-1"]["phase"] == "await_human",
-                    "Merge command authorized work")
-            fixture.gh.command_list = [command("/loop approve-work TASK-1 " + work_binding, cid=12)]
-            fixture.c.tick()
-            second = fixture.until("await_human")
-            require(second.get("approval_kind") == "merge" and second["resume_phase"] == "merge", "Repeated work decision")
-            require(fixture.gh.merges == 0, "Missing merge decision")
-            merge_binding = fixture.p.candidate_approval(second)
-            fixture.gh.command_list = [command("/loop approve-work TASK-1 " + merge_binding, cid=13)]
-            fixture.c.tick()
-            require(fixture.gh.merges == 0, "Work command authorized merge")
-            require(work_binding != merge_binding, "Work and candidate authority were conflated")
-            fixture.gh.command_list = [command("/loop approve TASK-1 " + merge_binding, cid=14)]
-            fixture.c.tick()
-            replay = {"work_decisions": 1, "merge_decisions": 1, "wrong_purpose_rejected": True}
-        if name == "model-receipt-replay":
-            fixture.until("architect")
-            original = fixture.c.save
-            def interrupt(kind, *args, **kwargs):
-                if kind == "agent-receipt":
-                    raise Interrupted()
-                return original(kind, *args, **kwargs)
-            fixture.c.save = interrupt
-            try:
-                fixture.c.tick()
-            except Interrupted:
-                pass
-            else:
-                raise AssertionError("Receipt interruption did not fire")
-            count = len(fixture.a.calls)
-            reserved = fixture.store.load()["daily"]["calls"]
-            restart()
-            fixture.c.tick()
-            require(len(fixture.a.calls) == count and fixture.store.load()["daily"]["calls"] == reserved,
-                    "Receipt replay called or reserved the provider again")
-            replay = {"receipt_replayed": True, "duplicate_calls": 0, "duplicate_reservations": 0}
-        task = fixture.until("done")
-        result = delivery(task, task["counterfactual_receipt"], task["postmerge_machine"])
-        if name == "negative-control-repair":
-            require(task["repairs"] == 1, "Negative-control rejection did not consume one repair")
-            require(sum(phase == "tester" for _, phase in fixture.a.calls) == 2, "Rejected tests were not replaced")
-            result.update(repairs=1, tester_calls=2)
-        return {**result, **replay}
-    finally:
-        fixture.doCleanups()
+def consumer_scenario(root, name):
+    # Both checkouts are explicitly selected trusted local code, never product input.
+    import importlib.util
+    path = root / "tests/workflow_adapter_driver.py"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Consumer checkout lacks its reviewed local workflow driver")
+    spec = importlib.util.spec_from_file_location("consumer_workflow_driver", path)
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    return driver.scenario(name)
 
 
 def worker(profile, reference, consumer, scenarios):
     root = reference if profile == "reference" else consumer
-    sys.path[:0] = [str(root), str(root / "tests")]
+    sys.path[:0] = [str(root), str(root / "tests"), str(root / "scripts")]
     results = {}
     with contextlib.redirect_stdout(io.StringIO()):
         for name in scenarios:
             with trace_workflow() as transitions:
-                outcome = (reference_scenario if profile == "reference" else flow_scenario)(name)
+                outcome = reference_scenario(name) if profile == "reference" else consumer_scenario(root, name)
             results[name] = {"outcome": outcome, "transitions": transitions}
     return {"profile": profile, "scenarios": results}
 
@@ -370,7 +274,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--consumer", type=Path, required=True)
     parser.add_argument("--reference", type=Path, default=ROOT)
-    parser.add_argument("--worker", choices=("reference", "flow"))
+    parser.add_argument("--worker", choices=("reference", "consumer"))
     parser.add_argument("--scenario", action="append", choices=SCENARIOS)
     args = parser.parse_args()
     reference, consumer = args.reference.resolve(), args.consumer.resolve()
@@ -380,11 +284,12 @@ def main():
         return
     sys.path.insert(0, str(reference / "scripts"))
     from sync_control_core import check, inventory
+    check(reference)
     check(consumer)
     if inventory(reference) != inventory(consumer):
         raise SystemExit("Adapter comparison requires identical reviewed core bytes")
     profiles = []
-    for profile in ("reference", "flow"):
+    for profile in ("reference", "consumer"):
         command = [sys.executable, "-S", str(Path(__file__).resolve()), "--reference", str(reference),
                    "--consumer", str(consumer), "--worker", profile]
         for scenario in scenarios:

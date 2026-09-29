@@ -85,15 +85,27 @@ class SourceBroker:
             if len(canonical(value)) > self.max_read_bytes: raise WorkerError("Worker search response exceeds bound")
             return value
         edits = arguments["edits"]
+        staged = self._validate_edits(edits, self.overlay)
+        proposed = self._edits(staged)
+        self.authorize(copy.deepcopy(proposed))
+        self.overlay = staged
+        return {"staged": [{"path": edit["path"], "sha256": "absent" if edit["delete"] else
+                  hashlib.sha256(edit["content"].encode()).hexdigest()} for edit in edits],
+                "changed_files": len(proposed), "patch_bytes": sum(len(e["content"].encode()) for e in proposed)}
+
+    def _validate_edits(self, edits, overlay):
+        """Validate either ingress before authorization or changing the overlay."""
+        if not self.writable:
+            raise WorkerError("Read-only worker attempted edits")
         if not isinstance(edits, list) or not 1 <= len(edits) <= self.max_changed_files:
             raise WorkerError("Worker edit batch is empty or oversized")
-        staged = dict(self.overlay); seen = set()
+        staged = dict(overlay); seen = set()
         for edit in edits:
             if not isinstance(edit, dict) or set(edit) != {"path", "expected_sha256", "delete", "content"}:
                 raise ToolInputError("Malformed worker edit")
             path = safe_path(edit["path"])
             if path in seen: raise ToolInputError("Duplicate worker edit path")
-            seen.add(path); old = self._current(path)
+            seen.add(path); old = overlay[path] if path in overlay else self._original(path)
             expected_hash = hashlib.sha256(old.encode()).hexdigest() if old is not None else "absent"
             if edit["expected_sha256"] != expected_hash: raise ToolInputError("Worker edit precondition failed")
             if type(edit["delete"]) is not bool or not isinstance(edit["content"], str) or "\0" in edit["content"]:
@@ -105,11 +117,7 @@ class SourceBroker:
         proposed = self._edits(staged)
         if not proposed or len(proposed) > self.max_changed_files or sum(len(e["content"].encode()) for e in proposed) > self.max_patch_bytes:
             raise WorkerError("Worker cumulative patch bound exceeded or net patch is empty")
-        self.authorize(copy.deepcopy(proposed))
-        self.overlay = staged
-        return {"staged": [{"path": edit["path"], "sha256": "absent" if edit["delete"] else
-                  hashlib.sha256(edit["content"].encode()).hexdigest()} for edit in edits],
-                "changed_files": len(proposed), "patch_bytes": sum(len(e["content"].encode()) for e in proposed)}
+        return staged
 
     def _edits(self, overlay=None):
         edits = []
@@ -123,13 +131,17 @@ class SourceBroker:
     def finalize(self, result):
         if not isinstance(result, dict): raise WorkerError("Worker final result must be an object")
         result = copy.deepcopy(result); staged = self._edits()
+        edits = result.get("edits", [])
+        if not isinstance(edits, list): raise WorkerError("Worker final edits must be an array")
+        if edits:
+            edits = self._edits(self._validate_edits(edits, {}))
         if staged:
-            if result.get("edits") and sorted(result["edits"], key=lambda e: e["path"]) != staged:
+            if edits and edits != staged:
                 raise WorkerError("Final result contradicts staged worker edits")
             if result.get("verdict") != "ready": raise WorkerError("Staged edits require a ready final proposal")
-            result["edits"] = staged
-        edits = result.get("edits", [])
+            edits = staged
         if edits:
-            if not self.writable: raise WorkerError("Read-only worker attempted edits")
+            if result.get("verdict") != "ready": raise WorkerError("Edits require a ready final proposal")
             self.authorize(copy.deepcopy(edits))
+            result["edits"] = edits
         return result

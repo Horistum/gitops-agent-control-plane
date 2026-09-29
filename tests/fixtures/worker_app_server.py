@@ -112,7 +112,7 @@ for line in sys.stdin:
         if scenario in ("duplicate", "changed-duplicate"):
             call("read_source", {"path": source_path, "start_line": 1,
                  "end_line": 19 if scenario == "changed-duplicate" else 20}, "read")
-        if "stage_edits" in tools:
+        if "stage_edits" in tools and scenario not in {"direct-edits", "direct-nul"}:
             if scenario == "corrected-input":
                 failed = call("stage_edits", {"edits": [{"path": source_path, "expected_sha256": "stale",
                     "delete": False, "content": "value = 2\n"}]}, "stale-edit")
@@ -125,6 +125,9 @@ for line in sys.stdin:
         total["inputTokens"] += 10; total["outputTokens"] += 3
         event("thread/tokenUsage/updated", {"threadId": thread_id, "turnId": turn_id, "tokenUsage": {"total": total}})
         result = blank(params["outputSchema"])
+        if scenario in {"direct-edits", "direct-nul"}:
+            result["edits"] = [{"path": source_path, "expected_sha256": source["sha256"],
+                "delete": False, "content": "value = 3\n" + ("\0" if scenario == "direct-nul" else "")}]
         event("item/completed", {"threadId": thread_id, "turnId": turn_id,
             "item": {"id": "final", "type": "agentMessage", "phase": "final_answer", "text": json.dumps(result)}})
         state_path.write_text(json.dumps(state))

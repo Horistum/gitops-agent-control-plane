@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import selectors
+import signal
+import time
 from .protocol import WorkerError, fingerprint, loads
 
 # Disabling a tool in a prompt is not enforcement. Every key is checked again
@@ -16,19 +19,43 @@ DISABLED_FEATURES = ("shell_tool", "unified_exec", "multi_agent", "apps", "goals
                      "browser_use_full_cdp_access", "computer_use", "image_generation", "shell_snapshot",
                      "code_mode_host", "workspace_dependencies", "skill_search", "tool_suggest", "view_image")
 
-def _run(argv, *, cwd, env, limit=2_000_000):
-    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as error:
-        try:
-            proc = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                                  stdout=output, stderr=error, timeout=60, check=False)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise WorkerError("Codex capability command unavailable or timed out") from exc
-        if proc.returncode:
-            raise WorkerError("Codex capability command failed: " + " ".join(argv[1:3]))
-        if output.tell() > limit or error.tell() > limit:
-            raise WorkerError("Codex capability output exceeded bound")
-        output.seek(0)
-        return output.read()
+def _run(argv, *, cwd, env, limit=2_000_000, timeout=60):
+    """Bound aggregate output while the process runs, including stderr."""
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    except OSError as exc:
+        raise WorkerError("Codex capability command unavailable") from exc
+    output = bytearray(); total = 0; deadline = time.monotonic() + timeout
+    try:
+        with selectors.DefaultSelector() as selector:
+            for stream in (proc.stdout, proc.stderr):
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0: raise WorkerError("Codex capability command timed out")
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    raw = os.read(key.fileobj.fileno(), min(65536, limit - total + 1))
+                    if not raw:
+                        selector.unregister(key.fileobj); continue
+                    total += len(raw)
+                    if total > limit: raise WorkerError("Codex capability output exceeded bound")
+                    if key.fileobj is proc.stdout: output.extend(raw)
+            try: proc.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired as exc: raise WorkerError("Codex capability command timed out") from exc
+        if proc.returncode: raise WorkerError("Codex capability command failed")
+        return bytes(output)
+    finally:
+        # Kill the group even if its leader exited with a descendant holding a pipe.
+        try: os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError: pass
+        try: proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired: pass
+        try: os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        proc.wait()
+        proc.stdout.close(); proc.stderr.close()
 
 def inspect_cli(argv=("codex",), expected_version=None, expected_schema=None):
     with tempfile.TemporaryDirectory(prefix="worker-capabilities-") as directory:
