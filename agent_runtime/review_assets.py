@@ -21,8 +21,9 @@ PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8">
 <section><h2>Workflow</h2><p id="workflow-modifiers"></p>
 <ol id="workflow" class="route"></ol><p id="workflow-note"></p>
 <h3>Recent transitions</h3><p id="timeline-note"></p><ol id="timeline" class="timeline"></ol></section>
-<section><h2>Review the exact candidate</h2><dl id="facts" class="facts"></dl>
-<p>Approval authorizes only the displayed binding. The controller rechecks evidence and repository identity before merging.</p>
+<section><h2>Review the requested authorization</h2><dl id="facts" class="facts"></dl>
+<p>Work authorization covers the displayed plan and scope. Candidate approval separately authorizes the exact reviewed merge.</p>
+<div id="work-plan"></div>
 <button id="approve" type="button" disabled>Approve this exact decision</button>
 <h3>Review findings</h3><div id="findings"></div>
 <h3>Verification evidence</h3><div id="evidence"></div>
@@ -122,7 +123,9 @@ function render(report) {
     (row.diagnostic_id ? " | diagnostic " + row.diagnostic_id : "")));
   if (!report.timeline.length) list("timeline", ["No transitions recorded yet."]);
   facts("facts", [["Risk", value.risk], ["Base", value.base], ["Candidate head", value.head],
-    ["Binding", value.binding], ["Decision hash", value.decision_hash]]);
+    ["Approval purpose", value.approval_purpose], ["Binding", value.binding], ["Decision hash", value.decision_hash]]);
+  el("work-plan").replaceChildren();
+  if (value.approval_purpose === "work-plan") details(el("work-plan"), "Work plan, scenarios and working files", value.work_plan);
   el("document").textContent = JSON.stringify(value, null, 2);
   el("findings").replaceChildren();
   for (const [role, review] of Object.entries(value.reviews)) {
@@ -142,7 +145,7 @@ function render(report) {
   if (!Object.keys(value.evidence).length) el("evidence").append(node("p", "No verification evidence in the current decision. Completed attempts remain in the run archive."));
   el("actions").replaceChildren();
   for (const action of report.actions) {
-    if (action.id === "approve" || !value.actions.includes(action.id)) continue;
+    if (["approve", "approve-work"].includes(action.id) || !value.actions.includes(action.id)) continue;
     const card = document.createElement("article"), button = node("button", action.id);
     button.type = "button"; button.disabled = !action.enabled;
     button.addEventListener("click", () => act(action.id));
@@ -150,6 +153,7 @@ function render(report) {
     el("actions").append(card);
   }
   facts("usage", [["Reserved calls", report.usage.reserved_calls], ["Recorded calls", report.usage.recorded_calls],
+    ["Not dispatched", report.usage.not_dispatched],
     ["Unknown outcomes", report.usage.unknown_outcomes], ["Input tokens", (report.usage.reported_tokens || {}).input_tokens],
     ["Output tokens", (report.usage.reported_tokens || {}).output_tokens]]);
   list("owner-history", report.recent_actions.map(row => row.at + " | " + row.action + (row.reason ? " | " + row.reason : "")));
@@ -163,6 +167,7 @@ function render(report) {
   if (!report.diagnostics.events.length) el("diagnostic-history").append(node("p", "No diagnostic events available."));
   el("observation-note").textContent = report.observation_note;
   shown = value; el("approve").disabled = !value.approvable; el("load-diff").disabled = !value.head;
+  el("approve").textContent = value.approval_purpose === "work-plan" ? "Authorize this work plan" : "Approve this exact candidate merge";
 }
 async function load() {
   const request = ++generation; invalidate();
@@ -199,7 +204,7 @@ el("approve").addEventListener("click", async () => {
   if (!shown || !shown.approvable) return;
   const current = shown, request = ++generation; invalidate();
   try {
-    await api("/api/approve", {method: "POST", body: JSON.stringify({binding: current.binding, decision_hash: current.decision_hash})});
+    await api("/api/" + current.approval_action, {method: "POST", body: JSON.stringify({binding: current.binding, decision_hash: current.decision_hash})});
     if (request === generation) await load();
   } catch (error) { if (request === generation) showError(error); }
 });'''

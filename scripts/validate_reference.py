@@ -50,6 +50,14 @@ def validate_publication_identity() -> None:
     )
 
 
+def validate_portable_lock() -> None:
+    check((ROOT / "agent_worker" / "__init__.py").is_file(), "portable worker package missing")
+    run([sys.executable, "-S", str(ROOT / "scripts" / "sync_control_core.py"), "--check"])
+    lock = json.loads((ROOT / "CONTROL-CORE.lock.json").read_text())
+    check(lock.get("schema") == 2 and lock.get("packages") == ["control_plane_core", "agent_worker"],
+          "reference lock must bind both portable packages")
+
+
 def validate_schemas_and_static_contracts() -> None:
     run([sys.executable, str(ROOT / "scripts" / "generate_workflow_docs.py"), "--check"])
     run([sys.executable, str(ROOT / "scripts" / "generate_runtime_schemas.py"), "--check"])
@@ -237,7 +245,7 @@ def validate_authority_layout() -> None:
 
 def validate_python_and_shell() -> None:
     for base in (
-        ROOT / "reference_runtime", ROOT / "agent_runtime", ROOT / "control_plane_core", ROOT / "scripts", ROOT / "tests",
+        ROOT / "reference_runtime", ROOT / "agent_runtime", ROOT / "control_plane_core", ROOT / "agent_worker", ROOT / "scripts", ROOT / "tests",
         PRODUCT / "src", PRODUCT / "tests", PRODUCT / "ci",
     ):
         for path in base.rglob("*.py"):
@@ -272,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args(argv)
     validate_publication_identity()
+    validate_portable_lock()
     validate_schemas_and_static_contracts()
     validate_authority_layout()
     validate_python_and_shell()

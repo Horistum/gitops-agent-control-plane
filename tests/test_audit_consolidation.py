@@ -158,6 +158,7 @@ class RecoveryProjectionTests(unittest.TestCase):
                 engine = self.start(Path(directory), limit)
                 engine.task["context_rounds"] = rounds
                 engine.hold("Fixture verification failure")
+                engine.task.update(retryable=True, recovery_kind="transport")
                 engine.store.save()
                 before = deepcopy(engine.state)
                 self.assertIs(status_document(engine.state)["recovery"]["retry"], permitted)
@@ -189,7 +190,8 @@ class RecoveryProjectionTests(unittest.TestCase):
             self.assertEqual(Controller(engine.root).state["model_calls"], before_calls)
 
     def test_recovery_view_maps_failure_pending_replan_and_lifetime_budget_without_mutation(self):
-        state = {"task": {"id": "TASK-1", "phase": "await_human", "hold_kind": "FAILED", "retryable": True},
+        state = {"task": {"id": "TASK-1", "phase": "await_human", "hold_kind": "FAILED", "retryable": True,
+                           "recovery_kind": "transport"},
                  "policy": {"limits": {"model_calls": 20, "context_rounds": 12}},
                  "model_calls": 1, "owner_replans": {"TASK-1": 2}}
         original = deepcopy(state)

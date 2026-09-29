@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import control_plane_core
+import agent_worker
 from control_plane_core import fingerprint, model_call_action
 from .io import Closed, NotDispatched, atomic_json, digest, read_json
 
 
 def runtime_fingerprint():
-    roots = [Path(__file__).parent, Path(control_plane_core.__file__).parent]
+    roots = [Path(__file__).parent, Path(control_plane_core.__file__).parent, Path(agent_worker.__file__).parent]
     files = {root.name + "/" + path.relative_to(root).as_posix(): digest(path.read_bytes())
              for root in roots for path in sorted(root.rglob("*.py"))}
     return fingerprint(files)
@@ -57,7 +58,37 @@ class Store:
             raise Closed("Effect receipt provenance or content differs")
         return value
 
-    def effect(self, kind, payload, perform, *, prepare=None):
+    def recover_model_receipt(self, identity, recover):
+        """Promote an exact completed worker journal without provider preparation."""
+        pending = self.state.get("pending") or {}
+        if pending.get("kind") != "model" or pending.get("id") != identity:
+            raise Closed("Worker recovery must name the current pending model effect")
+        request = pending.get("request")
+        task = self.state.get("task") or {}
+        expected = {"kind": "model", "policy_hash": self.state["policy_hash"],
+                    "runtime_hash": self.state["runtime_hash"], "run_id": self.state["run_id"],
+                    "epoch": self.state["effect_epoch"], "item": task.get("id"),
+                    "attempt": task.get("attempt"), "turn": task.get("turn", 0)}
+        if (not isinstance(request, dict) or fingerprint(request) != identity
+                or any(request.get(key) != value for key, value in expected.items())):
+            raise Closed("Worker recovery request authority or attempt differs")
+        path = self.root / "receipts" / (identity + ".json")
+        if path.exists():
+            return self.read_receipt(identity)
+        if identity in self.state.get("receipts", {}):
+            raise Closed("Recorded effect receipt is missing; restore it instead of repeating the effect", code="RECEIPT_MISSING")
+        if not callable(recover):
+            return None
+        result = recover({**request["payload"], "effect_id": identity})
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise Closed("Recovered worker receipt output must be an object")
+        value = {"request": request, "output": result, "output_hash": fingerprint(result)}
+        atomic_json(path, value)
+        return self.read_receipt(identity)
+
+    def effect(self, kind, payload, perform, *, prepare=None, recover=None):
         task = self.state.get("task") or {}
         request = {"kind": kind, "payload": payload, "policy_hash": self.state["policy_hash"],
                    "runtime_hash": self.state["runtime_hash"], "run_id": self.state["run_id"],
@@ -68,6 +99,8 @@ class Store:
         pending = self.state.get("pending")
         if pending and pending["id"] != identity:
             raise Closed("A different effect remains pending; reconcile it first")
+        if kind == "model" and pending and not receipt.exists():
+            self.recover_model_receipt(identity, recover)
         if receipt.exists():
             value = self.read_receipt(identity)
             if value.get("request") != request:
@@ -77,7 +110,7 @@ class Store:
             if identity in self.state.get("receipts", {}):
                 raise Closed("Recorded effect receipt is missing; restore it instead of repeating the effect", code="RECEIPT_MISSING")
             if kind == "model" and model_call_action(receipt_available=False,
-                    dispatch_state="dispatched" if pending else "not_started") == "hold":
+                    dispatch_state=pending.get("dispatch_state", "legacy_unknown") if pending else "not_started") == "hold":
                 raise Closed("Indeterminate model call; explicit retry-effect must name " + identity, code="MODEL_OUTCOME_UNKNOWN")
             if not pending:
                 if kind == "model" and self.state["model_calls"] >= self.state["policy"]["limits"]["model_calls"]:
@@ -89,13 +122,19 @@ class Store:
                 if kind == "model":
                     self.state["model_calls"] += 1
                 self.state["pending"] = {"id": identity, "kind": kind, "request": request}
+                if kind == "model":
+                    self.state["pending"]["dispatch_state"] = "not_started"
+                self.save()
+            elif kind == "model" and prepare is not None:
+                prepare()
+            if kind == "model":
+                self.state["pending"]["dispatch_state"] = "dispatched"
                 self.save()
             try:
                 result = perform(identity)
             except NotDispatched:
                 if kind == "model":
-                    self.state["model_calls"] -= 1
-                    self.state["pending"] = None
+                    self.state["pending"]["dispatch_state"] = "not_started"
                     self.save()
                 raise
             value = {"request": request, "output": result, "output_hash": fingerprint(result)}

@@ -4,11 +4,45 @@ import unittest
 from .decisions import CoreError
 from .execution import (context_checkpoint, context_files, context_view, next_phase,
                         recovery_actions, repair_target, retry_preconditions, model_call_action,
-                        upgrade_boundary, verification_transition, next_attempt)
+                        upgrade_boundary, verification_transition, next_attempt, technical_recovery)
 from .acceptance import acceptance_contract, evaluate_obligations, evidence_status_valid, test_criteria
 
 
 class ExecutionConformance(unittest.TestCase):
+    def test_technical_recovery_deadline_bound_and_exhaustion_survive_projection(self):
+        first = technical_recovery({}, now=100, failure_kind="transport", maximum=2, retry_after=120)
+        self.assertEqual((first["action"], first["attempt"], first["delay"]), ("wait", 1, 120))
+        saved = first["checkpoint"]
+        self.assertEqual(technical_recovery(saved, now=219, maximum=2)["action"], "wait")
+        self.assertEqual(technical_recovery(saved, now=220, maximum=2)["action"], "retry")
+        second = technical_recovery(saved, now=220, failure_kind="not_dispatched", maximum=2)
+        final = technical_recovery(second["checkpoint"], now=280, failure_kind="transport", maximum=2)
+        self.assertEqual(final["action"], "exhausted")
+        self.assertEqual(technical_recovery(final["checkpoint"], now=10000, maximum=2)["action"], "exhausted")
+        self.assertEqual(saved["attempts"], 1)
+
+    def test_unknown_policy_and_fenced_failures_never_grant_technical_retry(self):
+        for kind in ("unknown_effect", "policy", "unclassified", "fenced"):
+            result = technical_recovery({}, now=1, failure_kind=kind)
+            self.assertEqual((result["action"], result["attempt"], result["retry"]), ("stop", 0, False))
+        for malformed in (None, [], {"attempts": True}, {"attempts": -1},
+                          {"next_attempt": False}, {"exhausted": "yes"}, {"failure_kind": []}):
+            with self.subTest(malformed=malformed), self.assertRaises(CoreError):
+                technical_recovery(malformed, now=1)
+        for bounds in ({"now": True}, {"maximum": 0}, {"maximum": 21},
+                       {"initial_delay": 0}, {"retry_after": -1}, {"failure_kind": []}):
+            with self.subTest(bounds=bounds), self.assertRaises(CoreError):
+                technical_recovery({}, **{"now": 1, **bounds})
+
+    def test_manual_retry_requires_explicit_typed_technical_failure(self):
+        task = dict(phase="await_human", hold_kind="FAILED", retryable=True, recovery_kind="transport")
+        self.assertTrue(recovery_actions(task, {})["retry"])
+        for changed in ({"recovery_kind": None}, {"retryable": False}, {"hold_kind": "BLOCKED_POLICY"},
+                        {"pending": {"id": "unknown"}}, {"approvable": True},
+                        {"agent_calls": 18}, {"context_rounds": 8}, {"failure_code": "PROTOCOL_LIMIT"}):
+            with self.subTest(changed=changed):
+                self.assertFalse(recovery_actions({**task, **changed}, {})["retry"])
+
     def test_model_dispatch_without_receipt_never_grants_automatic_retry(self):
         for state in ('dispatched', 'legacy_unknown'):
             self.assertEqual(model_call_action(receipt_available=False, dispatch_state=state), 'hold')

@@ -103,7 +103,7 @@ def workflow_transition(state, event):
         if missing and phase not in {"baseline", "architect", missing}:
             returning = state.get("return_phase") or ("developer" if phase in {"test_design", "chief_plan", "developer"} else "verify")
             result.update(phase=missing, return_phase=returning)
-            result["invalidated"] = ["candidate", "reviews", "ci", "approval"]
+            result["invalidated"] = ["candidate", "reviews", "ci", "approval", "work_authorization"]
     elif kind == "repair":
         target = event.get("target")
         if state.get("merge_sha"):
@@ -116,7 +116,7 @@ def workflow_transition(state, event):
         completed.difference_update(REVIEW_PHASES)
         if target in {"architect", "test_design"}:
             completed.difference_update({"test_design", "chief_plan"})
-            result["invalidated"].append("test_design")
+            result["invalidated"].extend(["test_design", "work_authorization"])
         if target == "architect":
             completed.discard("architect")
             result["invalidated"].append("plan")
@@ -124,7 +124,7 @@ def workflow_transition(state, event):
         if state.get("merge_sha"):
             raise CoreError("Cannot rebase a merged attempt")
         result["phase"] = "baseline"
-        result["invalidated"] = ["baseline", "candidate", "reviews", "ci", "approval", "context"]
+        result["invalidated"] = ["baseline", "candidate", "reviews", "ci", "approval", "work_authorization", "context"]
     else:
         raise CoreError("Unknown workflow event: " + str(kind))
     result["completed"] = sorted(completed)

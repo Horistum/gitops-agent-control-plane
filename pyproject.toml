@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.9.2"
+version = "1.10.0"
 description = "Provider-neutral trust and governance for bounded software delivery"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,8 +38,9 @@ agent-reasoning-anthropic = "agent_runtime.anthropic_adapter:main"
 agent-verify-adapter = "agent_runtime.adapter_check:main"
 
 [tool.setuptools.packages.find]
-include = ["control_plane_core*", "agent_runtime*", "reference_runtime*"]
+include = ["control_plane_core*", "agent_worker*", "agent_runtime*", "reference_runtime*"]
 namespaces = false
 
 [tool.setuptools.package-data]
 control_plane_core = ["*.md", "*.json"]
+agent_worker = ["*.md", "*.json"]

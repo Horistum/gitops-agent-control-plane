@@ -58,7 +58,7 @@ def create_server(root, token, *, port=8765):
                 return self.send(200, getattr(service, self.path.rsplit("/", 1)[-1])())
             if self.command == "GET" and re.fullmatch(r"/api/diff/[0-9a-f]{64}", self.path):
                 return self.send(200, service.diff(self.path.rsplit("/", 1)[-1]))
-            if self.command != "POST" or self.path not in {"/api/approve", "/api/action"}:
+            if self.command != "POST" or self.path not in {"/api/approve", "/api/approve-work", "/api/action"}:
                 return self.send(404, {"reason": "Unknown review operation"})
             lengths = self.headers.get_all("Content-Length", [])
             if (len(lengths) != 1 or not lengths[0].isdigit() or not 1 <= int(lengths[0]) <= 2048
@@ -82,7 +82,8 @@ def create_server(root, token, *, port=8765):
             if (not isinstance(value, dict) or set(value) != {"binding", "decision_hash"}
                     or any(not isinstance(v, str) or len(v) != 64 for v in value.values())):
                 return self.send(400, {"reason": "Exact binding and decision hash required"})
-            return self.send(200, service.approve(value["binding"], value["decision_hash"]))
+            approve = service.approve_work if self.path == "/api/approve-work" else service.approve
+            return self.send(200, approve(value["binding"], value["decision_hash"]))
 
         def handle_operation(self):
             try:

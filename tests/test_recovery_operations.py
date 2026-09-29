@@ -27,6 +27,7 @@ class RecoveryOperationsTests(unittest.TestCase):
 
     def test_missing_credential_and_broker_outage_do_not_dispatch_or_reserve(self):
         engine = self.start()
+        clock = [1000]; engine.clock = lambda: clock[0]
         for failure in (Closed('missing'), Unavailable('broker outage')):
             with patch('agent_runtime.credentials.CredentialResolver.provider_environment', side_effect=failure), \
                     patch('agent_runtime.reasoning.run') as provider:
@@ -34,13 +35,16 @@ class RecoveryOperationsTests(unittest.TestCase):
             self.assertEqual(result['status'], 'WAITING_EXTERNAL')
             self.assertEqual(result['model_calls'], 0)
             self.assertIsNone(result['pending_effect']); provider.assert_not_called()
+            clock[0] = engine.state['technical_recovery']['next_attempt']
         self.assertEqual(engine.tick()['status'], 'RUNNING')
         self.assertEqual(engine.state['model_calls'], 1)
 
     def test_spawn_failure_is_proven_not_dispatched_but_timeout_is_unknown(self):
         engine = self.start()
+        clock = [1000]; engine.clock = lambda: clock[0]
         with patch('agent_runtime.reasoning.run', side_effect=NotDispatched('spawn failed')):
-            self.assertEqual(engine.tick()['model_calls'], 0)
+            self.assertEqual(engine.tick()['model_calls'], 1)
+        clock[0] = engine.state['technical_recovery']['next_attempt']
         with patch('agent_runtime.reasoning.run', side_effect=Unavailable('timeout')) as provider:
             engine.tick()
             for _ in range(3):

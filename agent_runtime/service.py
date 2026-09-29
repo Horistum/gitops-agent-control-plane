@@ -42,6 +42,9 @@ class RunService:
     def approve(self, binding, decision_hash):
         return action(self.root, "approve", binding, decision_hash=decision_hash)
 
+    def approve_work(self, binding, decision_hash):
+        return action(self.root, "approve-work", binding, decision_hash=decision_hash)
+
     def act(self, name, decision_hash, *, binding=None, reason=""):
         return action(self.root, name, binding, decision_hash=decision_hash, reason=reason)
 

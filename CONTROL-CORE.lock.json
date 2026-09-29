@@ -1,0 +1,43 @@
+{
+  "commit": "d3b14876d89524305201ae7fc7e78b78f7dc9840",
+  "contract": "autonomous-control-plane/v1",
+  "files": {
+    "agent_worker/__init__.py": "0591eefe8dec869b68be70aa2183244e08da68ff6cf7904e961936a3d50e39e8",
+    "agent_worker/broker.py": "a66769ac6b039a040b0b71d7c484fb235d3828d34c307dcb9962f8aceb9f9518",
+    "agent_worker/capabilities.py": "739abd98aea5f59f4ae6b63049f40ddb102f7458efb905d406102ebc4d3f5f15",
+    "agent_worker/protocol.py": "c241b6ee676f49c6c6f8740ebf8e3caf6429a79c70f94f59c75f31407e5ebd8f",
+    "agent_worker/smoke.py": "3a8ad190e4d6a2b175639e026e5af7029e61d4722121d15c1c3b883741b85670",
+    "agent_worker/transport.py": "1d1ccb37223916ed7ab7a63ac08402a3606ace184e766b6d72133548ab640c29",
+    "control_plane_core/LICENSE.md": "50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a",
+    "control_plane_core/NOTICE.md": "94690d6e7342afe543df10397187b70284c8c3773445b07cc7c2c58eef7f05c5",
+    "control_plane_core/__init__.py": "3da08119d99ea5babc1c5286fded5abfa1d73a09d5acb65df7f1ba84e75e5aa3",
+    "control_plane_core/acceptance.py": "eb3dc4cd4623d8c92ea1a1aed65c80a61c8a0385fc9f36e26c9412b373696a1d",
+    "control_plane_core/authorization.py": "7cef094e8db44244859515255ab94124ff558ab2161f1ec93606193d969ccbce",
+    "control_plane_core/ci_conformance.py": "d8efa2ae035fdea809ac5cba623b3b632c8d849a4d0b3be62b2fe7417921cf80",
+    "control_plane_core/conformance.py": "8be81ea8a7cece262a4ce8fcdce3f031cb418751f41d71ecbfacbe1a6c6d8b7d",
+    "control_plane_core/decisions.py": "15c3773ee5f11138582740d753907faca208fe20e6e5b8a82a82ed76ae4bcd12",
+    "control_plane_core/execution.py": "34aeb6fc2ef7f7b8e836d5a0d4e90d973cb36218b938b497adcaa9869827e1da",
+    "control_plane_core/execution_conformance.py": "cfe63ccaef425a405ad5d4ef3a41a6162212e39ca15002b70c9ba9be4e213240",
+    "control_plane_core/prompting.py": "9111f90af4cdbbc34b450da54db9045ac32d4e5b521b4b22f44aeb6848ee3f2f",
+    "control_plane_core/schema.py": "1367d82de789d562a08f1118a06b3f222203ad9784a6c54a80c89ce77830d75f",
+    "control_plane_core/usage.py": "d04289d08b0ae3f6dd3efa5a1d99cf891d069afc3ca2a5332e9532f870c85526",
+    "control_plane_core/usage_conformance.py": "41824cc4b183d565b3d57d3726fbdc07a8596c62d46a6de6f70ae39f206ded0e",
+    "control_plane_core/verification.py": "b0d9b6fbd531e3372741193403bcef27c656fbaae369562afa7498e273bc64c9",
+    "control_plane_core/verification_conformance.py": "da30567471c3b901aca1962244521fb1dd2c50701d6ba705aa44f968fac0dab3",
+    "control_plane_core/workflow.py": "88c7b764eedaa35d49e1270de4c37ad3a08fb63eb013410f56279491adc63f94",
+    "control_plane_core/workflow_conformance.py": "379e513173f7944bf4b128392b91ff42d4bfbfad1412d8f02d252c7fe4227945",
+    "scripts/check_workflow_adapters.py": "b1138fbac37be95c64292151f8ca7ec4d7bd28ff4ee11464fb35addbc68e8149",
+    "scripts/sync_control_core.py": "54f768c23c40cb75c64a90fb7bb187d65a8e6e878751aa17fe461bde6d6e4e21",
+    "tests/fixtures/worker_app_server.py": "a3a83dd6dee2e6fb4937c760abdfec1e3a017df07fa6fbcc9418dd4312e79c2c",
+    "tests/test_agent_worker.py": "17d73212df7526ba400492cd174dff71f7164eb4fe531c7ef5f55da89faae081",
+    "tests/test_portable_sync.py": "b5bf006d2dfd3be4164291bc9b66f3f00ce6c5e80d7ce10f594ac8636897af8c",
+    "tests/test_workflow_adapter_matrix.py": "65e96ea02e6de96d20844da812dfe5db74cfdb902d6139f168ab8708e1a8479f"
+  },
+  "packages": [
+    "control_plane_core",
+    "agent_worker"
+  ],
+  "repository": "Horistum/FlowAi-control",
+  "schema": 2,
+  "version": "1.10.0"
+}

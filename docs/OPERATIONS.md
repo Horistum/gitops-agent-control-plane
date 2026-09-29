@@ -109,7 +109,7 @@ execution is not a sandbox for untrusted generated code.
 |---|---|
 | `RUNNING` | Continue the bounded loop |
 | `WAITING_EXTERNAL` | No success inferred; resume observes the provider again |
-| `NEEDS_DECISION` | Approve the exact displayed binding, or replan/cancel |
+| `NEEDS_DECISION` | Review the purpose and use `approve-work` for an accepted plan or `approve` for the exact merge candidate; otherwise replan/cancel |
 | `FAILED` | Inspect concrete failed verification/CI; `retry` is available only for a retryable hold |
 | `BLOCKED_POLICY` | No ordinary approval bypass; inspect the policy, identity or protocol reason |
 | `pause` / `continue` | Change authoritative pause state; in-progress effects first finish under the writer lock |
@@ -119,13 +119,17 @@ execution is not a sandbox for untrusted generated code.
 | `retry-effect --binding ID` | Explicitly accept another call after an unrecorded model outcome; lifetime budget remains consumed |
 
 ```bash
-agent-control approve --state /absolute/agent-runs/my-goal --binding DISPLAYED_HASH
+agent-control approve-work --state /absolute/agent-runs/my-goal --binding DISPLAYED_WORK_HASH
+agent-control approve --state /absolute/agent-runs/my-goal --binding DISPLAYED_MERGE_HASH
 agent-control retry --state /absolute/agent-runs/my-goal
 agent-control replan --state /absolute/agent-runs/my-goal
 ```
 
 `agent-control decision --state RUN` prints the complete `human-decision.json`
-projection, including SHA, risk, findings and verification evidence. For a decision
+projection, including approval purpose, accepted work plan, SHA, risk, findings
+and verification evidence. Work permission survives scoped implementation/test
+repairs; a replan or authority change revokes it. Work approval never permits a
+merge, and merge approval never permits unapproved high-risk implementation. For a decision
 reviewed outside the CLI, include `--decision-hash DISPLAYED_DECISION_HASH` in the
 approval command. The local `agent-control review --state RUN` UI always sends
 both hashes and rejects a changed document. It binds only to `127.0.0.1`, requires
@@ -142,10 +146,16 @@ A non-conflicting movement of the base records a durable refresh intent, merges
 without force-push, reruns the new baseline and frozen negative controls, and
 invalidates old candidate/CI/review/approval evidence. Conflicts and a base that
 already contains an unverified candidate stop for diagnosis. Refreshes and CI
-repairs are bounded by the repair policy. A failed trusted candidate check sends
-the observation to the developer; the same PR is updated only after local gates
+repairs are bounded by the repair policy. Only a latest trusted definitive
+failure or timed-out candidate check sends the observation to the developer; the same PR is updated only after local gates
 pass again. Independent assertions remain frozen. Missing or untrusted checks
-never become a successful result.
+never become a successful result. Cancelled, skipped or neutral checks wait and
+do not establish a product defect; malformed/conflicting evidence stops.
+
+Typed transport failure or proven non-dispatch uses bounded persisted backoff.
+Exhaustion requires explicit owner continuation; restarting cannot reset it.
+Normal pending CI is separate from an infrastructure failure. A dispatched model
+turn without a completed matching receipt is never retried automatically.
 
 Roles can use `requested_searches` (literal bounded terms), `requested_files`
 (including `path#L20-L100`) and `requested_facts` (`pr:N` in the authorized GitHub

@@ -105,6 +105,8 @@ POLICY_SCHEMA["properties"]["reasoning"]["properties"].update({
     "protocol": integer(1, 2),
     "check_argv": ARGV,
     "credentials": {"type": "object", "maxProperties": 16, "additionalProperties": CREDENTIAL_SCHEMA}})
+from agent_worker.protocol import PROFILE_SCHEMA
+POLICY_SCHEMA["properties"]["reasoning"]["properties"]["worker"] = PROFILE_SCHEMA
 POLICY_SCHEMA["properties"]["publication"]["properties"]["credential"] = CREDENTIAL_SCHEMA
 CRITERION = obj({"id": text(128, 1), "text": text(4000, 1),
                  "kind": enum("behavior", "compatibility", "documentation", "ci", "delivery"),
@@ -124,6 +126,14 @@ def validate_configuration(policy, goal):
     validate_instance(goal, GOAL_SCHEMA)
     from .credentials import validate_provider_credentials, validate_reference
     validate_provider_credentials(policy["reasoning"])
+    if "worker" in policy["reasoning"]:
+        from agent_worker.protocol import WorkerError, validate_profile
+        if policy["reasoning"]["kind"] != "codex":
+            raise Closed("Brokered app-server worker requires official Codex reasoning")
+        try:
+            validate_profile(policy["reasoning"]["worker"])
+        except WorkerError as exc:
+            raise Closed(str(exc)) from exc
     if policy["reasoning"]["kind"] != "command" and policy["reasoning"].get("protocol", 1) != 1:
         raise Closed("Versioned command protocol is only available for command reasoning")
     if policy["reasoning"]["kind"] != "command" and "check_argv" in policy["reasoning"]:

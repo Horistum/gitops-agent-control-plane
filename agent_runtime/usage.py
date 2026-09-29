@@ -48,16 +48,20 @@ def usage_report(store):
             "status": "protocol_error" if result.get("protocol_error") else "recorded",
             "usage": usage, "provider": result.get("provider", {})})
     recorded = {row["effect_id"] for row in calls}
-    uncertain = []
+    uncertain, unstarted = [], []
     for intent in [*state.get("abandoned_effects", []), state.get("pending")]:
         if intent and intent["kind"] == "model" and intent["id"] not in recorded:
+            if intent.get("dispatch_state") == "not_started":
+                unstarted.append({"effect_id": intent["id"], "status": "not_dispatched"})
+                continue
             uncertain.append({"effect_id": intent["id"], "status": "unknown_outcome",
                               "abandoned": intent is not state.get("pending")})
     reserved = state["model_calls"]
-    if len(calls) + len(uncertain) != reserved:
+    if len(calls) + len(uncertain) + len(unstarted) != reserved:
         raise Closed("Model reservations and durable receipt/intent accounting differ")
     return {"schema": 1, "run_id": state["run_id"], "revision": state.get("revision", 0), "reserved_calls": reserved,
         "recorded_calls": len(calls), "unknown_outcomes": len(uncertain),
+        "not_dispatched": len(unstarted), "not_dispatched_calls": unstarted,
         "protocol_errors": sum(row["status"] == "protocol_error" for row in calls),
         "reported_tokens": totals, "token_observations": observations,
         "calls_without_usage": sum(not row["usage"] for row in calls),

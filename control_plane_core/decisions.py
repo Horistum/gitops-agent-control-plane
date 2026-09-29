@@ -12,7 +12,7 @@ import re
 __all__ = [
     "CoreError", "completion_transition", "goal_projection", "merge_authority",
     "path_allowed", "require_merge_identity", "require_revision_identity",
-    "risk_rank", "trusted_checks_pass", "evaluate_trusted_checks",
+    "risk_rank", "trusted_checks_pass", "evaluate_trusted_checks", "evaluate_ci_recovery",
 ]
 
 
@@ -240,6 +240,32 @@ def evaluate_trusted_checks(required, observed) -> dict:
 def trusted_checks_pass(required, observed) -> bool:
     """Compatibility projection of the shared trusted-check evaluation."""
     return evaluate_trusted_checks(required, observed)["passed"]
+
+
+def evaluate_ci_recovery(required, observed) -> dict:
+    """Separate a failed gate from evidence that permits bounded product repair.
+
+    Observations must already be authenticated for the exact candidate by the
+    adapter. Missing, skipped, cancelled and neutral runs do not establish a
+    product defect or authorize another CI run. Invalid/conflicting observations
+    stop for diagnosis; they never become repair evidence by row ordering.
+    """
+    result = evaluate_trusted_checks(required, observed)
+    action, failures = {"success": "advance", "pending": "wait", "failure": "wait",
+                        "invalid": "stop", "conflict": "stop"}[result["status"]], []
+    if result["status"] == "failure":
+        wanted = {(row["name"], row["app_id"]) for row in required}
+        latest = {}
+        for row in observed:
+            key = (row["name"], row["app_id"])
+            if key in wanted and (key not in latest or row.get("id", 0) > latest[key].get("id", 0)):
+                latest[key] = row
+        failures = [dict(latest[key]) for key in sorted(latest)
+                    if latest[key]["status"] == "completed"
+                    and latest[key]["conclusion"] in {"failure", "timed_out"}]
+        if failures:
+            action = "repair"
+    return {**result, "action": action, "repair_checks": failures}
 
 
 def completion_transition(requested, completed, item: str, *, merge_sha: str,

@@ -39,10 +39,13 @@ def decision_table(value):
             ("Risk", value["risk"]), ("Base", value["base"]), ("Head", value["head"]),
             ("Reason", diagnostic.get("message") or value.get("reason")), ("Error code", diagnostic.get("code")),
             ("Diagnostic ID", diagnostic.get("id")), ("Approvable", value["approvable"]),
+            ("Approval purpose", value.get("approval_purpose")),
             ("Binding", value["binding"]), ("Decision hash", value["decision_hash"]),
             ("Pending effect", value["pending_effect"]),
             ("Owner actions", ", ".join(value["actions"]) or "none")]
     lines = [table(rows)]
+    if value.get("approval_purpose") == "work-plan":
+        lines.append("\nWork plan: " + _text(value["work_plan"]))
     for role, review in value["reviews"].items():
         lines.append("\n" + role + ": " + _text(review.get("verdict")) + " — " + _text(review.get("summary")))
         for finding in review.get("findings", []):

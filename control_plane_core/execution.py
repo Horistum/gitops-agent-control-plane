@@ -16,7 +16,7 @@ __all__ = [
     "context_checkpoint", "context_files", "context_view", "fingerprint",
     "next_attempt", "next_phase", "recovery_actions", "repair_target",
     "retirement", "retry_preconditions", "upgrade_boundary",
-    "verification_transition",
+    "verification_transition", "technical_recovery",
 ]
 
 
@@ -120,10 +120,63 @@ def recovery_actions(task, limits):
     exhausted = (task.get("context_rounds", 0) >= limits.get("max_context_rounds", 8) or
                  budget >= limits.get("max_agent_calls_per_task", 18) or
                  task.get("failure_code") in {"CONTEXT_LIMIT", "CONTEXT_STALLED", "EVIDENCE_UNAVAILABLE", "PROMPT_LIMIT", "PROTOCOL_LIMIT"})
-    return {"retry": bool(held and not task.get("approvable") and task.get("retryable", True) and
-                          task.get("hold_kind") in {"FAILED", "BLOCKED_POLICY"} and not exhausted),
+    return {"retry": bool(held and not task.get("approvable") and task.get("retryable") is True and
+                          task.get("recovery_kind") in {"transport", "not_dispatched"} and
+                          task.get("hold_kind") == "FAILED" and not exhausted),
             "replan": bool(held and not task.get("merge_sha") and
                            task.get("owner_replans", 0) < limits.get("max_owner_replans", 2))}
+
+
+def technical_recovery(checkpoint, *, now, failure_kind=None, maximum=6,
+                       initial_delay=30, retry_after=0):
+    """Bound retries of trusted technical failures; text never grants recovery.
+
+    Adapters must reconcile writes before retrying and classify a dispatched model
+    without a receipt as unknown_effect. None observes an existing deadline only.
+    The returned checkpoint is durable before another attempt; exhaustion is sticky.
+    """
+    if (type(maximum) is not int or not 1 <= maximum <= 20 or
+            type(initial_delay) is not int or not 1 <= initial_delay <= 1800 or
+            type(now) is not int or now < 0 or
+            type(retry_after) is not int or not 0 <= retry_after <= 3600):
+        raise CoreError("Invalid technical recovery bounds")
+    kinds = {"transport", "not_dispatched"}
+    if failure_kind is not None and (not isinstance(failure_kind, str) or failure_kind not in kinds | {
+            "unknown_effect", "policy", "unclassified", "fenced"}):
+        raise CoreError("Unknown technical recovery category")
+    if not isinstance(checkpoint, dict):
+        raise CoreError("Technical recovery checkpoint must be an object")
+    state = {"attempts": checkpoint.get("attempts", 0),
+             "next_attempt": checkpoint.get("next_attempt", 0),
+             "exhausted": checkpoint.get("exhausted", False),
+             "failure_kind": checkpoint.get("failure_kind")}
+    if (type(state["attempts"]) is not int or not 0 <= state["attempts"] <= 21 or
+            type(state["next_attempt"]) is not int or state["next_attempt"] < 0 or
+            type(state["exhausted"]) is not bool or
+            state["failure_kind"] is not None and
+            (not isinstance(state["failure_kind"], str) or state["failure_kind"] not in kinds)):
+        raise CoreError("Malformed technical recovery checkpoint")
+    # Legacy checkpoints above the current bound remain exhausted after restart.
+    state["exhausted"] = state["exhausted"] or state["attempts"] > maximum
+    if failure_kind is not None and failure_kind not in kinds:
+        action = "stop"
+    elif state["exhausted"]:
+        action = "exhausted"
+    elif failure_kind is not None:
+        state["attempts"] += 1
+        state["failure_kind"] = failure_kind
+        state["exhausted"] = state["attempts"] > maximum
+        delay = max(retry_after, min(1800, initial_delay * 2 ** min(state["attempts"] - 1, 10)))
+        state["next_attempt"] = now + delay
+        action = "exhausted" if state["exhausted"] else "wait"
+    elif state["next_attempt"] > now:
+        action = "wait"
+    else:
+        action = "retry" if state["attempts"] else "ready"
+    return {"action": action, "checkpoint": state,
+            "retry": action in {"ready", "retry", "wait"},
+            "delay": max(0, state["next_attempt"] - now) if action == "wait" else 0,
+            "attempt": state["attempts"]}
 
 
 def model_call_action(*, receipt_available, dispatch_state):

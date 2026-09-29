@@ -6,7 +6,7 @@ import uuid
 
 from control_plane_core import fingerprint, require_merge_identity, retirement, upgrade_boundary
 from .controller import Controller
-from .decisions import approval_binding, decision_document
+from .decisions import approval_binding, decision_document, work_binding
 from .discovery import remember_discovery
 from .io import Closed, locked
 from .store import Store, runtime_fingerprint, validate_authority
@@ -93,19 +93,30 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
         if not isinstance(reason, str) or len(reason) > 1000:
             raise Closed("Owner reason must be a bounded string")
         before = status_document(state)
+        if ((state.get("technical_recovery") or {}).get("exhausted")
+                and name not in {"continue", "pause", "cancel"}):
+            raise Closed("Technical retry budget exhausted; continue the exact episode before another recovery action")
         if name == "pause":
             state["paused"] = True
         elif name == "continue":
+            from .recovery import reset_technical_recovery
+            reset_technical_recovery(state)
             state["paused"] = False
-        elif name == "approve":
+        elif name in {"approve", "approve-work"}:
             document = decision_document(state)
+            work = name == "approve-work"
+            purpose = "work-plan" if work else "candidate-merge"
+            required = "work_approval_required" if work else "approval_required"
+            current = work_binding(state) if work and task else approval_binding(state) if task else None
             if (not task or not task.get("approvable") or state["status"] != "NEEDS_DECISION"
-                    or binding != task.get("approval_required") or not binding
-                    or not document["approvable"] or binding != approval_binding(state)):
-                raise Closed("Approval must name the exact current candidate binding")
+                    or task.get("approval_purpose") != purpose
+                    or not work and task.get("resume_phase") != "merge"
+                    or binding != task.get(required) or not binding
+                    or not document["approvable"] or binding != current):
+                raise Closed("Approval must name the exact current " + ("work-plan" if work else "candidate") + " binding and purpose")
             if decision_hash is not None and decision_hash != document["decision_hash"]:
                 raise Closed("Displayed decision changed; reload before approving")
-            task["approval"] = binding
+            task["work_approval" if work else "approval"] = binding
             task["phase"] = task["resume_phase"]
             state["status"] = "RUNNING"
         elif name == "retry":
@@ -126,8 +137,10 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             engine.reconcile_model(binding)
         elif name == "retry-effect":
             pending = state.get("pending")
-            if not pending or pending["kind"] != "model" or pending["id"] != binding:
+            if (not pending or pending["kind"] != "model" or pending["id"] != binding
+                    or pending.get("dispatch_state") == "not_started"):
                 raise Closed("Only an explicitly named indeterminate model call may be retried")
+            engine.store.recover_model_receipt(binding, getattr(engine.reasoning, "recover_completed", None))
             if (root / "receipts" / (binding + ".json")).exists():
                 raise Closed("A recorded model result must be reconciled, not repeated")
             state.setdefault("abandoned_effects", []).append(pending)
@@ -151,7 +164,7 @@ def action(root, name, binding=None, *, decision_hash=None, reason=""):
             retire_attempt(engine)
         else:
             raise Closed("Unknown owner action")
-        if name in {"approve", "retry", "reconcile", "reconcile-effect", "retry-effect"}:
+        if name in {"approve", "approve-work", "retry", "reconcile", "reconcile-effect", "retry-effect"}:
             state.pop("reason", None)
             state.pop("diagnostic", None)
         state.setdefault("human_actions", []).append({"action": name, "binding": binding,

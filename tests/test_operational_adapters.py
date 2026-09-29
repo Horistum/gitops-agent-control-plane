@@ -141,11 +141,15 @@ class OperationalAdapterTests(unittest.TestCase):
         service.after_publish_failure=service.after_merge_failure=True
         publication={'repository':'owner/product','token_env':'GH_TOKEN','required_checks':[{'name':'tests','app_id':15368}]}
         provider=InProcessProvider()
-        waiting=0
+        waiting=0; clock=1000
         for _ in range(100):
-            engine=Controller(engine.root,reasoning=provider,github=GitHub(publication,'main',transport=service))
+            engine=Controller(engine.root,reasoning=provider,github=GitHub(publication,'main',transport=service),
+                              clock=lambda: clock)
             result=engine.tick()
-            if result['status']=='WAITING_EXTERNAL': waiting+=1;continue
+            if result['status']=='WAITING_EXTERNAL':
+                waiting+=1
+                clock=engine.state.get('technical_recovery', {}).get('next_attempt', clock + 1)
+                continue
             if result['status']!='RUNNING':break
         self.assertEqual(result['status'],'COMPLETED',result)
         self.assertEqual(service.posts,1)

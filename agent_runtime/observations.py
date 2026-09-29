@@ -43,8 +43,11 @@ def status_document(state, root=None):
             "item": task.get("id"), "head": task.get("head", (discovery or {}).get("head", state["base"])),
             "merge_sha": task.get("merge_sha", (state["archive"][-1].get("merge_sha") if state["archive"] else None)),
             "completed": state["completed"], "model_calls": state["model_calls"],
-            "reason": state.get("reason"), "approval": task.get("approval_required"),
+            "reason": state.get("reason"), "approval": task.get("work_approval_required"
+                if task.get("approval_purpose") == "work-plan" else "approval_required"),
+            "approval_purpose": task.get("approval_purpose"),
             "diagnostic": current_diagnostic(state),
+            "technical_recovery": state.get("technical_recovery"),
             "pending_effect": (state.get("pending") or {}).get("id"),
             "discovery": discovery,
             "recovery": task_recovery(state) if task else

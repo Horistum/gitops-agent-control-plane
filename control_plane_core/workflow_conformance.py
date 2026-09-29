@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import sys
 import unittest
 from . import CoreError, workflow_transition, require_workflow_evidence, acceptance_contract, refine_acceptance
+from .authorization import candidate_authorization, work_authorization
 
 
 @contextmanager
@@ -34,6 +35,30 @@ def require_delivery_trace(trace, *, challenge=False, cycles=1):
 
 
 class WorkflowConformance(unittest.TestCase):
+    def test_owner_authority_separates_stable_work_from_exact_candidate(self):
+        task = {"id":"WORK-1", "attempt":1, "head":"a"*40, "base":"b"*40,
+                "spec_hash":"spec", "risk":"high", "plan":{"steps":["Accepted plan"]},
+                "scenarios":[{"id":"TS-1"}], "working_files":["src/a.py"]}
+        inputs = {"policy":"policy", "goal":"goal", "critical_paths":["src/a.py"]}
+        work = work_authorization(task, **inputs)
+        merge = candidate_authorization(task, **inputs)
+        changed = dict(task, head="c"*40)
+        self.assertEqual(work, work_authorization(changed, **inputs))
+        self.assertNotEqual(merge, candidate_authorization(changed, **inputs))
+        self.assertNotEqual(work, merge)
+        for key, value in {"attempt":2, "base":"d"*40, "spec_hash":"other", "risk":"medium",
+                           "plan":{"steps":["New plan"]}, "scenarios":[], "working_files":[]}.items():
+            with self.subTest(field=key):
+                self.assertNotEqual(work, work_authorization(dict(task, **{key:value}), **inputs))
+
+    def test_only_planning_repairs_revoke_work_authority(self):
+        state = {"phase":"reviewer", "risk":"high", "completed":["architect", "test_design", "chief_plan"]}
+        for target in ("developer", "tester", "architect", "test_design"):
+            decision = workflow_transition(state, {"kind":"repair", "target":target})
+            self.assertIn("approval", decision["invalidated"])
+            self.assertEqual("work_authorization" in decision["invalidated"], target in {"architect", "test_design"})
+        self.assertIn("work_authorization", workflow_transition(state, {"kind":"base_changed"})["invalidated"])
+
     def test_model_refinement_preserves_owner_criteria_and_keeps_additional_handoff_obligations(self):
         owner = acceptance_contract([{"id": "AC-01", "text": "Deterministic system identity"}])
         proposed = acceptance_contract([{"id": "AC-01", "text": "Deterministic system identity"},
@@ -50,7 +75,7 @@ class WorkflowConformance(unittest.TestCase):
         decision = workflow_transition(state, {"kind": "risk", "risk": "high"})
         self.assertEqual(decision["phase"], "test_design")
         self.assertEqual(decision["return_phase"], "verify")
-        self.assertEqual(set(decision["invalidated"]), {"candidate", "reviews", "ci", "approval"})
+        self.assertEqual(set(decision["invalidated"]), {"candidate", "reviews", "ci", "approval", "work_authorization"})
         decision = workflow_transition(decision, {"kind": "advance"})
         self.assertEqual(decision["phase"], "chief_plan")
         decision = workflow_transition(decision, {"kind": "advance"})
