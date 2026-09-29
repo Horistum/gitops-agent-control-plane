@@ -29,6 +29,7 @@ def transition(engine, event, phase=None):
             fields = {"candidate": ("candidate_evidence", "acceptance", "obligations"),
                       "ci": ("ci_evidence", "integration_evidence", "integration_obligations"),
                       "approval": ("approval", "approval_required"), "baseline": ("baseline", "independent_baseline"),
+                      "work_authorization": ("work_approval", "work_approval_required"),
                       "plan": ("plan", "working_set"), "test_design": ("test_design",),
                       "context": ("memory", "requested_files", "search_results")}
             for field in fields.get(group, ()):

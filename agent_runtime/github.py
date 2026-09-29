@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from urllib import error, parse, request
-from control_plane_core import require_revision_identity, evaluate_trusted_checks
+from control_plane_core import require_revision_identity, evaluate_ci_recovery
 from .git import sha
 from .credentials import CredentialResolver
-from .io import Closed, Unavailable, canonical, loads
+from .io import Closed, ExternalPending, Unavailable, canonical, loads
 
 
 class NoRedirect(request.HTTPRedirectHandler):
@@ -43,7 +43,9 @@ class GitHub:
             if optional and exc.code == 404:
                 return None
             if exc.code in {408, 409, 429, 500, 502, 503, 504}:
-                raise Unavailable(f"GitHub HTTP {exc.code}; writes require reconciliation") from None
+                delay = exc.headers.get("Retry-After", "0") if exc.headers else "0"
+                raise Unavailable(f"GitHub HTTP {exc.code}; writes require reconciliation",
+                                  retry_after=int(delay) if str(delay).isdigit() else 0) from None
             raise Closed(f"GitHub HTTP {exc.code}; authority/credential gate closed") from None
         except (error.URLError, TimeoutError):
             raise Unavailable("GitHub observation unavailable") from None
@@ -67,7 +69,7 @@ class GitHub:
         observed = [{"id": row.get("id"), "name": row.get("name"),
                      "app_id": row["app"].get("id") if isinstance(row.get("app"), dict) else None,
                      "status": row.get("status"), "conclusion": row.get("conclusion")} for row in rows]
-        evaluation = evaluate_trusted_checks(self.config["required_checks"], observed)
+        evaluation = evaluate_ci_recovery(self.config["required_checks"], observed)
         return {"sha": revision, **evaluation, "checks": observed}
 
     def pull(self, number):
@@ -163,9 +165,9 @@ class GitHub:
         if pull.get("state") != "open" or pull.get("draft"):
             raise Closed("Pull request is not ready for merge")
         if pull.get("mergeable") is not True or pull.get("mergeable_state") != "clean":
-            raise Unavailable("GitHub mergeability/review/strict checks are not ready")
+            raise ExternalPending("GitHub mergeability/review/strict checks are not ready")
         if not self.checks(head)["passed"]:
-            raise Unavailable("Exact candidate checks are not successful")
+            raise ExternalPending("Exact candidate checks are not successful")
         result = self.api(self.prefix + f"/pulls/{number}/merge", "PUT", {"sha": head, "merge_method": "merge"})
         if result.get("merged") is not True:
             raise Unavailable("Merge outcome not confirmed; reconcile pull request")

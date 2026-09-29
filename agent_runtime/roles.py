@@ -6,6 +6,7 @@ from control_plane_core import (evidence_status_valid, fingerprint, merge_author
 from .contracts import criteria
 from .io import Closed
 from .workflow import transition
+from .authorization import work_gate
 
 
 def repair(engine, target, feedback):
@@ -23,6 +24,9 @@ def role_step(engine):
     task, policy = engine.task, engine.policy
     phase = task["phase"]
     if transition(engine, {"kind": "risk"})["phase"] != phase:
+        return
+    planning = phase in {"architect", "test_design", "chief_plan"}
+    if not planning and not work_gate(engine):
         return
     if phase == "tester" and task["frozen_tests"]:
         edits = task["frozen_tests"]["edits"]
@@ -55,6 +59,8 @@ def role_step(engine):
     if output["verdict"] != "ready":
         raise Closed("Unsupported role transition")
     if routed["phase"] != phase:
+        return
+    if not planning and not work_gate(engine):
         return
     if phase in {"reviewer", "challenge_review", "architect_accept", "chief_accept"}:
         expected = criteria(engine.item())
@@ -96,6 +102,8 @@ def role_step(engine):
 
 def apply_step(engine):
     task, policy = engine.task, engine.policy
+    if not work_gate(engine):
+        return
     role = task["phase"].removeprefix("apply_")
     output = task["proposal"]
     tester = role == "tester"
@@ -117,6 +125,8 @@ def apply_step(engine):
     if tester:
         task["production_head"] = task["head"]
     task["head"] = result["head"]
+    task["candidate_critical_paths"] = [path for path in engine.repo.changed(task["base"], task["head"])
+                                        if path_allowed(path, policy["critical_paths"])]
     # Retain candidate objects across interruption and rejected attempts.
     engine.repo.text("update-ref", "refs/heads/agent/" + engine.state["run_id"] + "/" + task["id"] +
                      "/" + str(task["attempt"]), task["head"])

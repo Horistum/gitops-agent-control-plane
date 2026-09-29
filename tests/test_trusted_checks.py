@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from control_plane_core import evaluate_trusted_checks, trusted_checks_pass
 from agent_runtime.github import GitHub
-from agent_runtime.io import Closed, Unavailable
+from agent_runtime.io import Closed
 from agent_runtime.lifecycle import lifecycle_step
 
 REQUIRED = [{"name": "unit", "app_id": 1}]
@@ -72,7 +72,7 @@ class TrustedCheckTests(unittest.TestCase):
         return GitHub({"repository": "example/project", "required_checks": REQUIRED}, "main",
                       transport=lambda *args: {"check_runs": copy.deepcopy(rows)})
 
-    def test_conflict_neither_repairs_candidate_nor_holds_postmerge_for_either_order(self):
+    def test_conflict_stops_without_product_repair_for_either_order(self):
         for rows in permutations([GOOD, {**GOOD, "conclusion": "failure"}]):
             for phase in ("ci", "postmerge"):
                 with self.subTest(order=rows, phase=phase):
@@ -81,16 +81,21 @@ class TrustedCheckTests(unittest.TestCase):
                     self.assertEqual((result["passed"], result["failed"], result["status"]), (False, False, "conflict"))
                     holds = []
                     engine = SimpleNamespace(
-                        task={"phase": phase, "merge_sha": REVISION, "head": REVISION, "base": BASE},
+                        state={"pending": None},
+                        task={"phase": phase, "risk": "low", "head": REVISION, "base": BASE,
+                              **({"merge_sha": REVISION} if phase == "postmerge" else {})},
                         repo=SimpleNamespace(parents=lambda _: [BASE, REVISION]),
                         github=github, hold=lambda reason: holds.append(reason),
                     )
                     with patch("agent_runtime.lifecycle.candidate_gate", return_value=True), \
                          patch("agent_runtime.lifecycle.repair") as repair:
-                        with self.assertRaisesRegex(Unavailable, "conflict"):
+                        with self.assertRaisesRegex(Closed, "malformed or conflicting"):
                             lifecycle_step(engine)
                         repair.assert_not_called()
                     self.assertEqual(holds, [])
+                    self.assertEqual(engine.task["phase"], phase)
+                    self.assertEqual((engine.task["head"], engine.task["base"]), (REVISION, BASE))
+                    self.assertEqual(engine.state, {"pending": None})
 
     def test_wrong_revision_is_rejected_and_malformed_app_cannot_pass(self):
         rows = [{"id": 42, "name": "unit", "head_sha": BASE, "app": {"id": 1},

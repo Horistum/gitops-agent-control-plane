@@ -1,6 +1,6 @@
 # Release and versioning policy
 
-Current distribution: **1.9.2**.
+Current distribution: **1.10.0**.
 
 The distribution version in `pyproject.toml` and `control_plane_core.__version__`
 is separate from wire identities authored in
@@ -62,6 +62,17 @@ Registry publication is optional and separate. Confirm ownership of the actual
 package namespace, inspect the final archives, and use a separately approved
 publication workflow/credential. The repository's CI only builds/tests artifacts;
 it does not upload to PyPI, enable public visibility or grant release authority.
+
+## 1.10.0: shared autonomy and worker integration
+
+- Purpose-bound work-plan authorization and separate exact-candidate merge approval.
+- Typed, persisted technical recovery without relaxing scope, risk, budget or uncertain-effect gates.
+- A portable controller-brokered worker package, included in source locks, distributions and runtime fingerprints, with credential-free inspection of the pinned official CLI capabilities.
+- Shared scenarios exercise the actual production adapters. Package and controlled-runtime tests do not establish live model convergence or authorize deployment.
+
+Existing wire contract identities remain unchanged. Historical candidate approvals
+do not become work-plan authority; an eligible owner-operated runtime upgrade and
+fresh owner continuation remain required.
 
 ## 1.9.2: publication preparation
 

@@ -25,7 +25,9 @@ import venv
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("control_plane_core", "agent_runtime", "reference_runtime")
+PORTABLE_PACKAGES = ("control_plane_core", "agent_worker")
+PACKAGES = PORTABLE_PACKAGES + ("agent_runtime", "reference_runtime")
+PORTABLE_LOCK = "CONTROL-CORE.lock.json"
 SOURCE_DIRS = PACKAGES + ("docs", "config", "schemas", "examples", "scripts", "tests", ".github", "validation")
 LEGAL_FILES = ("LICENSE", "NOTICE", "TRADEMARKS.md")
 IGNORED_DIRS = {".git", ".demo", ".state", ".runtime", ".publication", ".audit", ".venv", "__pycache__", "build", "dist"}
@@ -50,7 +52,7 @@ def source_files(root: Path) -> dict[str, bytes]:
         if any(part in IGNORED_DIRS or part.endswith(".egg-info") for part in rel.parts):
             continue
         if len(rel.parts) == 1:
-            selected = path.name in {"LICENSE", "NOTICE", "pyproject.toml", "MANIFEST.in", ".gitignore"} or path.suffix == ".md" or path.name.startswith("requirements") and path.suffix == ".txt"
+            selected = path.name in {"LICENSE", "NOTICE", "pyproject.toml", "MANIFEST.in", ".gitignore", PORTABLE_LOCK} or path.suffix == ".md" or path.name.startswith("requirements") and path.suffix == ".txt"
         else:
             selected = rel.parts[0] in SOURCE_DIRS
         if not selected:
@@ -117,9 +119,32 @@ def read_wheel(path: Path) -> dict[str, bytes]:
         return {entry.filename: archive.read(entry) for entry in entries if not entry.is_dir()}
 
 
+def validate_portable_selection(expected: dict[str, bytes], version: str) -> None:
+    """Require the distribution's complete portable selection to match its lock."""
+    require(PORTABLE_LOCK in expected, "Release source is missing the portable lock")
+    lock = json.loads(expected[PORTABLE_LOCK])
+    require(isinstance(lock, dict) and lock.get("schema") == 2
+            and lock.get("packages") == list(PORTABLE_PACKAGES)
+            and lock.get("version") == version and isinstance(lock.get("files"), dict),
+            "Distribution portable lock metadata differs from release selection")
+    for name in lock["files"]:
+        member_path(name)
+    selected = {name: digest(data) for name, data in expected.items()
+                if PurePosixPath(name).parts[0] in PORTABLE_PACKAGES}
+    require(all(package + "/__init__.py" in selected for package in PORTABLE_PACKAGES),
+            "Distribution must include core and worker packages")
+    locked_packages = {name: value for name, value in lock["files"].items()
+                       if PurePosixPath(name).parts[0] in PORTABLE_PACKAGES}
+    require(selected == locked_packages, "Distribution portable package selection differs from its lock")
+    for name, value in lock["files"].items():
+        require(name in expected and digest(expected[name]) == value,
+                "Distribution lost or changed locked portable source: " + name)
+
+
 def validate_archives(sdist: Path, wheel: Path, expected: dict[str, bytes]) -> dict:
     source, installed = read_sdist(sdist), read_wheel(wheel)
     project = tomllib.loads(expected["pyproject.toml"].decode())["project"]
+    validate_portable_selection(expected, project["version"])
     # Every selected source input, not just one importable module, must survive.
     for name, data in expected.items():
         require(source.get(name) == data, f"Source archive lost or changed release input: {name}")
@@ -144,7 +169,7 @@ def validate_archives(sdist: Path, wheel: Path, expected: dict[str, bytes]) -> d
     allowed_wheel.update(f"{prefix}/licenses/{name}" for name in LEGAL_FILES)
     for name, data in expected.items():
         parts = PurePosixPath(name).parts
-        if parts[0] in PACKAGES and (name.endswith(".py") or parts[0] == "control_plane_core" and name.endswith((".md", ".json"))):
+        if parts[0] in PACKAGES and (name.endswith(".py") or parts[0] in PORTABLE_PACKAGES and name.endswith((".md", ".json"))):
             allowed_wheel.add(name)
             require(installed.get(name) == data, f"Wheel lost or changed package file: {name}")
     require(not set(installed) - allowed_wheel, "Unexpected wheel content")
@@ -177,6 +202,7 @@ def check_distribution(root: Path, output: Path) -> dict:
     backend_version = importlib.metadata.version("setuptools")
     require(int(backend_version.split(".")[0]) >= 77, "Install the declared setuptools>=77 build backend first")
     expected = source_files(root)
+    validate_portable_selection(expected, project["project"]["version"])
     output.mkdir(parents=True, exist_ok=True)
     logs: list[str] = []
     try:
@@ -190,6 +216,7 @@ def check_distribution(root: Path, output: Path) -> dict:
                 path.write_bytes(data)
                 path.chmod(0o755 if (root / name).stat().st_mode & 0o111 else 0o644)
             env = clean_env(work)
+            run([sys.executable, "-S", "scripts/sync_control_core.py", "--check"], snapshot, env, logs)
             run([sys.executable, "-c", "from setuptools.build_meta import build_sdist; build_sdist(" + repr(str(output)) + ")"], snapshot, env, logs)
             sdists = list(output.glob("*.tar.gz"))
             require(len(sdists) == 1, "Expected exactly one source archive")
@@ -208,12 +235,18 @@ def check_distribution(root: Path, output: Path) -> dict:
             wheels = list(output.glob("*.whl"))
             require(len(wheels) == 1, "Expected exactly one wheel")
             result = validate_archives(sdists[0], wheels[0], expected)
+            run([sys.executable, "-S", "scripts/sync_control_core.py", "--check"], extracted, env, logs)
             run([sys.executable, "-S", "scripts/check_publication.py"], extracted, env, logs)
             install = work / "venv"
             venv.EnvBuilder(with_pip=True).create(install)
             python = install / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             run([str(python), "-I", "-m", "pip", "install", "--no-index", "--no-deps", str(wheels[0])], work, env, logs)
-            probe = "import pathlib, control_plane_core, agent_runtime; assert control_plane_core.__version__ == " + repr(result["version"]) + "; assert pathlib.Path(control_plane_core.__file__).is_relative_to(" + repr(str(install)) + ")"
+            probe = ("import pathlib, control_plane_core, agent_worker, agent_runtime; "
+                     "from agent_worker import AppServerWorker, SourceBroker; "
+                     "from control_plane_core import technical_recovery, work_authorization, candidate_authorization; "
+                     "assert control_plane_core.__version__ == "
+                     + repr(result["version"]) + "; assert all(pathlib.Path(module.__file__).is_relative_to("
+                     + repr(str(install)) + ") for module in (control_plane_core, agent_worker, agent_runtime))")
             run([str(python), "-I", "-c", probe], work, env, logs)
             for command in project["project"]["scripts"]:
                 run([str(python.parent / command), "--help"], work, env, logs)

@@ -219,6 +219,71 @@
             ],
             "additionalProperties": false
           }
+        },
+        "worker": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "type": "string",
+              "const": "codex-app-server-broker/v1"
+            },
+            "experimental": {
+              "type": "boolean",
+              "const": true
+            },
+            "codex_version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "schema_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "max_tool_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 4000000
+            },
+            "max_frame_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 2000000
+            },
+            "max_output_bytes": {
+              "type": "integer",
+              "minimum": 4096,
+              "maximum": 16000000
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "smoke_attestation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            }
+          },
+          "required": [
+            "profile",
+            "experimental",
+            "codex_version",
+            "schema_sha256",
+            "max_tool_calls",
+            "max_tool_bytes",
+            "max_frame_bytes",
+            "max_output_bytes",
+            "timeout_seconds",
+            "smoke_attestation"
+          ]
         }
       },
       "required": [

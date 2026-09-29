@@ -27,6 +27,15 @@ class Closed(ReportedError):
 
 class Unavailable(ReportedError):
     """An external observation is temporarily unavailable; never infer success."""
+    def __init__(self, *args, retry_after=0, **kwargs):
+        if type(retry_after) is not int or retry_after < 0:
+            raise ValueError("Retry delay must be a nonnegative integer")
+        self.retry_after = min(retry_after, 3600)
+        super().__init__(*args, **kwargs)
+
+
+class ExternalPending(Unavailable):
+    """A successful observation proves external work is still pending."""
 
 
 class Busy(Closed):

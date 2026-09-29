@@ -31,8 +31,9 @@ COMMAND_HELP = {
     "diagnostics": "Read recent diagnostic events.",
     "review": "Open the authenticated local operator and candidate review UI.",
     "pause": "Stop advancement without changing the runtime binding.",
-    "continue": "Remove pause; does not clear a failed or policy-blocked hold.",
+    "continue": "Remove pause or explicitly renew an exhausted technical retry episode.",
     "approve": "Authorize the exact candidate binding after reviewing its evidence.",
+    "approve-work": "Authorize the accepted work plan, scenarios and source scope for this attempt.",
     "retry": "Resume a retryable held task after its cause is fixed; not an uncertain model call.",
     "reconcile": "Resume a replay-safe pending non-model effect.",
     "reconcile-effect": "Consume the original receipt of an exact pending model call; no new call.",
@@ -111,8 +112,10 @@ def action_guidance(store, decision):
     state, root = store.state, store.root.resolve()
     pending, task = state.get("pending") or {}, state.get("task") or {}
     code = (decision.get("diagnostic") or {}).get("code")
+    unstarted = pending.get("kind") == "model" and pending.get("dispatch_state") == "not_started"
+    technical_continue = decision.get("technical_continue_allowed", False)
     receipt = None
-    if pending.get("kind") == "model":
+    if pending.get("kind") == "model" and not unstarted:
         if not re.fullmatch(r"[0-9a-f]{64}", pending.get("id", "")):
             raise Closed("Invalid pending model effect identity")
         # Existence is not validation. Only reconcile-effect may establish that
@@ -121,7 +124,7 @@ def action_guidance(store, decision):
                    "present": (root / "receipts" / (pending["id"] + ".json")).is_file(),
                    "note": "Presence only; reconciliation validates the exact request and receipt."}
     actions = []
-    for name in decision["actions"] + (["approve"] if decision["approvable"] else []):
+    for name in decision["actions"] + ([decision["approval_action"]] if decision["approvable"] else []):
         args = []
         condition = "The controller rechecks the current state before executing."
         enabled = True
@@ -138,13 +141,15 @@ def action_guidance(store, decision):
                     condition = "A receipt is present; reconcile it instead of repeating the call."
                 elif not enabled:
                     condition = "No model-call budget remains. Retrying cannot reset it."
-        elif name == "approve":
+        elif name in {"approve", "approve-work"}:
             args = ["--binding", decision["binding"], "--decision-hash", decision["decision_hash"]]
-            condition = "Review the exact candidate, findings and evidence before approval."
+            condition = ("Review the plan, test scenarios and working files before authorizing work."
+                         if name == "approve-work" else "Review the exact candidate, findings and evidence before approval.")
         elif name in {"retry", "replan"}:
             condition = "Inspect the failure and correct its cause first. The model budget is not reset."
         elif name == "continue":
-            condition = "Only removes pause. A hold still requires its own recovery action."
+            condition = ("Explicitly renews this exhausted technical retry episode while preserving its pending effect and lifetime budgets."
+                         if technical_continue else "Only removes pause. A hold still requires its own recovery action.")
         elif name == "reconcile":
             condition = "Resume only the recorded replay-safe non-model effect; then run one tick."
         if state["status"] in {"COMPLETED", "CANCELLED"}:
@@ -167,11 +172,12 @@ def action_guidance(store, decision):
                 "condition": "Explicitly retires this eligible unchanged held attempt." if suspend else
                              "No pending effect or active task; keeps the run paused."})
             break
-    if (code not in {"RUNTIME_CHANGED", "AUTHORITY_CHANGED"} and not pending
+    if (code not in {"RUNTIME_CHANGED", "AUTHORITY_CHANGED"} and (not pending or unstarted)
             and not state["paused"] and state["status"] in {"RUNNING", "WAITING_EXTERNAL"}):
         actions.append({"id": "tick", "label": "Run one step", "description": COMMAND_HELP["tick"],
                         "command": _command(root, "tick"), "enabled": True,
-                        "condition": "Restore the unavailable dependency first." if state["status"] == "WAITING_EXTERNAL"
+                        "condition": "The model was not dispatched; retain its reservation and retry after the persisted technical deadline."
+                                     if unstarted else "Restore the unavailable dependency first." if state["status"] == "WAITING_EXTERNAL"
                                      else "May execute work and reserve a model call within the authorized budget."})
 
     preferred = None
@@ -179,11 +185,13 @@ def action_guidance(store, decision):
         if code == "RUNTIME_CHANGED":
             preferred = "upgrade" if state["paused"] else "pause"
         elif code != "AUTHORITY_CHANGED":
-            if pending:
+            if technical_continue:
+                preferred = "continue"
+            elif pending and not unstarted:
                 # Never recommend another paid dispatch as the default recovery.
                 preferred = "reconcile-effect" if pending["kind"] == "model" else "reconcile"
             elif decision["approvable"]:
-                preferred = "approve"
+                preferred = decision["approval_action"]
             elif state["status"] in {"RUNNING", "WAITING_EXTERNAL"}:
                 preferred = "continue" if state["paused"] else "tick"
             elif state["status"] == "FAILED":
@@ -210,7 +218,9 @@ def explanation_document(store, limit=10):
                    "WAITING_EXTERNAL": "The run is waiting for an external dependency.",
                    "NEEDS_DECISION": "The exact candidate requires owner review."}.get(state["status"], "The run is held; inspect the current decision.")
     if state.get("pending") and not diagnostic:
-        message = ("A model effect is pending. Its outcome must be established from the original receipt before continuing."
+        message = ("A reserved model call was not dispatched. Retry after its persisted technical deadline."
+                   if state["pending"].get("dispatch_state") == "not_started" else
+                   "A model effect is pending. Its outcome must be established from the original receipt before continuing."
                    if receipt else "A replay-safe non-model effect is pending and must be reconciled.")
     if state["paused"]:
         message = "Advancement is paused. " + message
@@ -224,7 +234,7 @@ def explanation_document(store, limit=10):
     try:
         usage = usage_report(store)
         usage = {key: usage[key] for key in ("reserved_calls", "recorded_calls", "unknown_outcomes",
-                                           "reported_tokens", "calls_without_usage", "billing_ready")}
+                                           "not_dispatched", "reported_tokens", "calls_without_usage", "billing_ready")}
     except Exception as exc:
         usage = {"reserved_calls": state["model_calls"], "recorded_calls": None, "unknown_outcomes": None}
         warnings.append("Receipt-derived usage unavailable: " + safe_text(exc))

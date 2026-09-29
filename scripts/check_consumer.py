@@ -8,6 +8,7 @@ live-provider test. The consumer's test code must be trusted by the operator.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -19,7 +20,7 @@ import sys
 import tarfile
 import tempfile
 
-from sync_control_core import inventory, metadata, sync
+from sync_control_core import LOCK, PACKAGES, TOOLING, check, inventory, metadata, safe_file, sync
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,13 +47,35 @@ def archive(consumer, commit, destination):
                 raise ValueError("Consumer contract gate refuses symlinks and special files")
 
 
-def check_consumer(consumer, commit, output):
+def overlay_snapshot(source, target, snapshot):
+    """Replace portable source only in the already isolated consumer archive.
+
+    A compatibility experiment deliberately tests different bytes from the
+    consumer's lock. Do not relax normal sync's protection of unmanaged work.
+    """
+    replaced = []
+    for relative in (*PACKAGES, *TOOLING, LOCK):
+        path = safe_file(target, relative)
+        if path.exists():
+            replaced.append(relative)
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+    sync(source, target, snapshot)
+    return replaced
+
+
+def check_consumer(consumer, commit, output, *, timeout=900):
+    consumer, output = consumer.resolve(), output.resolve()
+    if type(timeout) is not int or not 1 <= timeout <= 7200:
+        raise ValueError("Test timeout must be between 1 and 7200 seconds")
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("A full consumer commit SHA is required")
     if git(consumer, "rev-parse", "HEAD") != commit or git(consumer, "status", "--porcelain"):
         raise ValueError("Consumer must be the exact clean reviewed checkout")
-    if output == consumer or consumer in output.parents:
-        raise ValueError("Write the compatibility report outside the consumer checkout")
+    if any(output == root or root in output.parents for root in (consumer, ROOT.resolve())):
+        raise ValueError("Write the compatibility report outside both source checkouts")
     core_files = inventory(ROOT)
     with tempfile.TemporaryDirectory(prefix="core-consumer-") as directory:
         temp = Path(directory)
@@ -62,7 +85,7 @@ def check_consumer(consumer, commit, output):
         for relative in core_files:
             path = source / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / relative, path)
+            shutil.copy2(ROOT / relative, path)
         if inventory(source) != core_files:
             raise ValueError("Core changed while taking compatibility snapshot")
         git(source, "init", "-b", "main")
@@ -71,13 +94,31 @@ def check_consumer(consumer, commit, output):
         git(source, "add", ".")
         git(source, "-c", "commit.gpgsign=false", "commit", "-m", "Exact core compatibility snapshot")
         snapshot = git(source, "rev-parse", "HEAD")
-        sync(source, target, snapshot)
+        replaced = overlay_snapshot(source, target, snapshot)
         command = [sys.executable, "-S", "-m", "unittest", "discover", "-s", "tests", "-v"]
         env = {**os.environ, "PYTHONPATH": str(target), "PYTHONDONTWRITEBYTECODE": "1"}
+        preparation = []
+        manifest = target / "RELEASE-MANIFEST.json"
+        exit_code, stdout, stderr = 0, "", ""
+        if manifest.exists():
+            builder = target / "scripts/build_release_manifest.py"
+            if not builder.is_file():
+                raise ValueError("Archived release manifest has no trusted source inventory builder")
+            before = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            prepared = subprocess.run([sys.executable, "-S", str(builder)], cwd=target, env=env,
+                                      capture_output=True, text=True, timeout=60)
+            preparation.append({"command": [sys.executable, "-S", "scripts/build_release_manifest.py"],
+                                "exit_code": prepared.returncode, "path": "RELEASE-MANIFEST.json",
+                                "original_sha256": before,
+                                "snapshot_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()})
+            exit_code, stdout, stderr = prepared.returncode, prepared.stdout, prepared.stderr
         try:
-            result = subprocess.run(command, cwd=target, env=env, text=True,
-                                    capture_output=True, timeout=300)
-            exit_code, stdout, stderr = result.returncode, result.stdout, result.stderr
+            if exit_code == 0:
+                result = subprocess.run(command, cwd=target, env=env, text=True,
+                                        capture_output=True, timeout=timeout)
+                exit_code = result.returncode
+                stdout += result.stdout
+                stderr += result.stderr
         except subprocess.TimeoutExpired as exc:
             exit_code = 124
             stdout = exc.stdout or b""
@@ -85,15 +126,26 @@ def check_consumer(consumer, commit, output):
             stdout = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout
             stderr = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
         unchanged = inventory(target) == core_files and inventory(ROOT) == core_files
+        try:
+            lock_valid = check(target)["commit"] == snapshot
+        except (ValueError, OSError):
+            lock_valid = False
+        consumer_unchanged = (git(consumer, "rev-parse", "HEAD") == commit
+                              and not git(consumer, "status", "--porcelain"))
         tests = re.findall(r"^Ran (\d+) tests? in", stderr, re.MULTILINE)
+        count = int(tests[-1]) if tests else 0
         report = {"schema": 1, "scope": "consumer-source-compatibility",
                   "consumer_commit": commit, "core_snapshot_commit": snapshot,
                   "core_version": metadata(ROOT)["__version__"], "core_files": core_files,
                   "command": command, "exit_code": exit_code,
-                  "tests": int(tests[-1]) if tests else 0,
+                  "tests": count, "test_timeout_seconds": timeout,
+                  "temporary_portable_replacements": replaced,
+                  "snapshot_metadata_preparation": preparation,
                   "core_unchanged_during_tests": unchanged,
-                  "passed": exit_code == 0 and bool(tests) and unchanged,
-                  "live_provider_validation": False}
+                  "snapshot_lock_valid": lock_valid,
+                  "consumer_unchanged_during_tests": consumer_unchanged,
+                  "passed": exit_code == 0 and count > 0 and unchanged and lock_valid and consumer_unchanged,
+                  "live_provider_validation": False, "release_validation": False}
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         output.with_suffix(".log").write_text(stdout + "\n" + stderr)
@@ -105,8 +157,9 @@ def main():
     parser.add_argument("--consumer", type=Path, required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args()
-    report = check_consumer(args.consumer.resolve(), args.expected_commit, args.output.resolve())
+    report = check_consumer(args.consumer.resolve(), args.expected_commit, args.output.resolve(), timeout=args.timeout)
     print(json.dumps({k: v for k, v in report.items() if k != "core_files"}, indent=2))
     return 0 if report["passed"] else 1
 

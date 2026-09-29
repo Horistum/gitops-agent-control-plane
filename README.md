@@ -3,11 +3,14 @@
 **A provider-neutral trust and governance layer for bounded software delivery
 through Git, maintained by the Horistum project.**
 
-Version 1.9.2 includes `agent_runtime`: it reads an owner-authorized goal, obtains
+Version 1.10.0 includes `agent_runtime`: it reads an owner-authorized goal, obtains
 real proposals from an operator-selected JSON command provider or optional Codex CLI, applies bounded
 edits, executes tests in rootless Podman, reviews the actual candidate, publishes
 a GitHub PR, verifies trusted CI, merges by exact SHA and verifies the merge again.
 The shared `control_plane_core` owns the phase, authority and acceptance decisions.
+
+See [portable development and synchronization](docs/PORTABLE-DEVELOPMENT.md)
+for the shared source and adapter validation workflow.
 
 The separate `demo`/`loop` commands use **deterministic fixtures** to reproduce
 faults and verifier limits. They do not establish AI reasoning quality. Operational
@@ -22,7 +25,10 @@ controller. The primary integration is `reasoning.kind=command`: your adapter
 owns its model API and returns data; this controller owns execution and release
 authority. Codex remains supported as an explicit owner-operated alternative.
 Claude, Copilot and other agents need adapters satisfying this protocol; their
-unrestricted tool sessions are not automatically governed by it.
+unrestricted tool sessions are not automatically governed by it. The optional
+[brokered Codex worker](docs/BROKERED-WORKER.md) exposes bounded controller-owned
+source tools within a phase-private session. It requires explicit configuration,
+a pinned CLI/schema and target-host live commissioning.
 
 The runtime is **single-host and owner-operated**, with durable local JSON state,
 effect receipts and a per-run writer lock. This is the supported storage design;
@@ -65,9 +71,11 @@ an already recorded effect. The state directory contains private source/proposal
 receipts and must remain outside the product checkout.
 
 A model may request files, exact line ranges, literal searches and bounded PR facts, propose implementation or independent tests, and
-reject an actual candidate during review. It cannot execute tools, choose build
-commands, widen goal authority or approve a merge. Human approval, when required
-by the configured risk and merge limits, names the exact current candidate binding.
+reject an actual candidate during review. The compatibility transport exposes
+data only; the optional worker exposes source read/search and authorized staging
+only. Neither can choose build commands, widen goal authority or approve a merge.
+Required implementation permission binds the accepted work plan; required merge
+permission separately binds the exact verified candidate.
 
 The [operations guide](docs/OPERATIONS.md) covers setup, execution, approval,
 recovery, image preparation and safe runtime upgrades. Local-only execution is

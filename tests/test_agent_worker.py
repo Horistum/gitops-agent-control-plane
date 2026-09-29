@@ -1,0 +1,162 @@
+"""Controlled subprocess tests of the sustained worker boundary, without providers."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from agent_worker import AppServerWorker, SourceBroker, WorkerError, WorkerIndeterminate
+from agent_worker.capabilities import inspect_cli
+from agent_worker.protocol import atomic, fingerprint
+
+FIXTURE = Path(__file__).parent / "fixtures" / "worker_app_server.py"
+SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string", "enum": ["ready"]},
+    "edits": {"type": "array", "items": {"type": "object"}}}, "required": ["verdict", "edits"], "additionalProperties": False}
+
+class WorkerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup); self.root = Path(self.temp.name)
+        self.argv = [sys.executable, str(FIXTURE)]
+        report = inspect_cli(self.argv)
+        self.profile = {"profile": "codex-app-server-broker/v1", "experimental": True,
+            "codex_version": report["codex_version"], "schema_sha256": report["schema_sha256"],
+            "max_tool_calls": 8, "max_tool_bytes": 100_000, "max_frame_bytes": 100_000,
+            "max_output_bytes": 1_000_000, "timeout_seconds": 5,
+            "smoke_attestation": str(self.root / "smoke.json")}
+        self.authorized = []
+
+    def worker(self, scenario="normal"):
+        worker = AppServerWorker(self.profile, self.root / "home", self.root / "workers",
+                                argv=self.argv + ["--scenario", scenario])
+        # This deliberately controlled local record only exercises the gate; it
+        # must never be presented as target-host live smoke evidence.
+        atomic(Path(self.profile["smoke_attestation"]), {"identity": worker.smoke_identity(), "passed": True, "model_called": True})
+        return worker
+
+    def broker(self, writable=True):
+        def read(path):
+            if path != "src/service.py": return {"missing": True}
+            return {"text": "value = 1\n", "sha256": hashlib.sha256(b"value = 1\n").hexdigest()}
+        def authorize(edits):
+            if any(edit["path"] != "src/service.py" for edit in edits): raise WorkerError("Outside concrete working set")
+            self.authorized.append(edits)
+        return SourceBroker(read, lambda value: {"paths": ["src/service.py"]}, authorize, writable=writable)
+
+    def execute(self, worker, run_id="run-1", binding=None, writable=True):
+        return worker.execute(binding or {"task": "one", "phase": "developer", "head": "exact"},
+                              "Use broker then return JSON", SCHEMA, self.broker(writable), run_id)
+
+    def state(self):
+        return json.loads((self.root / "home" / "fixture-state.json").read_text())
+
+    def test_one_turn_retrieves_and_revises_overlay_then_resumes_without_duplicate_usage(self):
+        worker = self.worker()
+        with patch.dict(os.environ, {"GH_TOKEN": "no", "OPENAI_API_KEY": "no", "SSH_AUTH_SOCK": "/not-mounted"}):
+            first = self.execute(worker)
+        self.assertEqual(first["result"]["edits"][0]["content"], "value = 3\n")
+        self.assertEqual(first["result"]["edits"][0]["expected_sha256"], hashlib.sha256(b"value = 1\n").hexdigest())
+        self.assertEqual(first["worker"]["tool_calls"], 4); self.assertFalse(first["worker"]["resumed"])
+        self.assertEqual(self.execute(worker), first); self.assertEqual(self.state()["turns"], 1)
+        second = self.execute(worker, "run-2")
+        self.assertTrue(second["worker"]["resumed"]); self.assertEqual(second["usage"]["input_tokens"], 10)
+        self.assertEqual(self.state()["threads"], 1); self.assertEqual(self.state()["turns"], 2)
+
+    def test_cross_phase_and_changed_authority_use_separate_threads(self):
+        worker = self.worker(); self.execute(worker)
+        for index, binding in enumerate(({"task": "one", "phase": "reviewer", "head": "exact"},
+                                         {"task": "one", "phase": "developer", "head": "new"})):
+            value = self.execute(worker, "other-" + str(index), binding, writable=False)
+            self.assertFalse(value["worker"]["resumed"]); self.assertEqual(value["result"]["edits"], [])
+        self.assertEqual(self.state()["threads"], 3)
+
+    def test_unknown_outcome_same_operation_never_relaunches_and_new_operation_starts_fresh(self):
+        worker = self.worker("crash")
+        with self.assertRaises(WorkerIndeterminate): self.execute(worker)
+        with self.assertRaises(WorkerIndeterminate): self.execute(worker)
+        self.assertEqual(self.state()["turns"], 1)
+        healthy = self.worker()
+        self.assertFalse(self.execute(healthy, "owner-retry-operation")["worker"]["resumed"])
+        self.assertEqual(self.state()["turns"], 2)
+
+    def test_replayed_request_cannot_change_input(self):
+        worker = self.worker(); self.execute(worker)
+        with self.assertRaisesRegex(WorkerError, "request changed"):
+            worker.execute({"task": "one", "phase": "developer", "head": "exact"}, "changed", SCHEMA, self.broker(), "run-1")
+        self.assertEqual(self.state()["turns"], 1)
+
+    def test_malicious_protocol_or_builtin_tools_fail_closed(self):
+        for scenario in ("forbidden-item", "forbidden-request", "wrong-thread", "changed-duplicate", "malformed"):
+            with self.subTest(scenario=scenario):
+                with self.assertRaises(WorkerIndeterminate): self.execute(self.worker(scenario), scenario)
+
+    def test_bad_effective_config_stops_before_a_turn(self):
+        with self.assertRaisesRegex(WorkerError, "effective capability"):
+            self.execute(self.worker("bad-config"))
+        self.assertFalse((self.root / "home" / "fixture-state.json").exists())
+
+    def test_schema_pin_and_missing_smoke_stop_before_provider(self):
+        worker = self.worker(); Path(self.profile["smoke_attestation"]).unlink()
+        with self.assertRaisesRegex(WorkerError, "smoke is required"): worker.preflight()
+        self.profile["schema_sha256"] = "0" * 64
+        with self.assertRaisesRegex(WorkerError, "schema differs"): self.worker().preflight()
+        self.assertFalse((self.root / "home" / "fixture-state.json").exists())
+
+    def test_duplicate_tool_call_is_replayed_without_double_application(self):
+        value = self.execute(self.worker("duplicate"))
+        self.assertEqual(value["worker"]["tool_calls"], 4)
+        self.assertEqual(len(self.authorized), 3)
+
+    def test_tool_operation_and_byte_bounds(self):
+        self.profile["max_tool_calls"] = 1
+        with self.assertRaises(WorkerIndeterminate): self.execute(self.worker())
+        self.assertEqual(self.authorized, [])
+
+    def test_broker_rejects_traversal_scope_stale_hash_and_cumulative_patch(self):
+        broker = self.broker()
+        with self.assertRaises(WorkerError): broker.call("read_source", {"path": "../auth.json", "start_line": 1, "end_line": 2})
+        with self.assertRaises(WorkerError): broker.call("command", {})
+        for path, old in (("other.py", "absent"), ("src/service.py", "stale")):
+            with self.assertRaises(WorkerError): broker.call("stage_edits", {"edits": [{"path": path, "expected_sha256": old, "delete": False, "content": "change"}]})
+        self.assertEqual(broker.overlay, {})
+        broker.max_patch_bytes = 1
+        with self.assertRaises(WorkerError): broker.call("stage_edits", {"edits": [{"path": "src/service.py", "expected_sha256": hashlib.sha256(b"value = 1\n").hexdigest(), "delete": False, "content": "change"}]})
+        self.assertEqual(broker.overlay, {})
+
+    def test_completed_receipt_recovery_needs_no_preflight_or_process(self):
+        worker = self.worker(); authority = {"task": "one", "phase": "developer", "head": "exact"}
+        outer = {"request_hash": "outer", "role": "developer", "run_id": "run-1"}
+        receipt = worker.execute(authority, "Use broker then return JSON", SCHEMA, self.broker(), "run-1", external_identity=outer)
+        fresh = self.worker()
+        with patch.object(fresh, "preflight", side_effect=AssertionError("No preflight on recovery")):
+            self.assertEqual(fresh.recover_completed(authority, "Use broker then return JSON", SCHEMA, self.broker(), "run-1"), receipt)
+            self.assertEqual(fresh.recover_bound(authority, "run-1", "", outer), receipt)
+            with self.assertRaises(WorkerError): fresh.recover_bound(authority, "run-1", "", {**outer, "request_hash": "changed"})
+        self.assertEqual(self.state()["turns"], 1)
+
+    def test_commissioning_reuses_passed_turn_and_unknown_needs_explicit_retry(self):
+        from agent_worker.smoke import run_smoke
+        home = self.root / "home"
+        first = run_smoke(self.profile, home, argv=self.argv)
+        self.assertEqual(run_smoke(self.profile, home, argv=self.argv), first)
+        self.assertEqual(self.state()["turns"], 1)
+        Path(self.profile["smoke_attestation"]).unlink()
+        # Completed inner receipt also restores a lost outer smoke attestation.
+        self.assertEqual(run_smoke(self.profile, home, argv=self.argv)["operation"], first["operation"])
+        self.assertEqual(self.state()["turns"], 1)
+        with self.assertRaises(WorkerIndeterminate):
+            run_smoke(self.profile, home, argv=self.argv + ["--scenario", "crash"], retry_smoke=True)
+        # A prior successful attestation must not hide a newly authorized unknown turn.
+        with self.assertRaises(WorkerIndeterminate): run_smoke(self.profile, home, argv=self.argv)
+        self.assertEqual(self.state()["turns"], 2)
+        recovered = run_smoke(self.profile, home, argv=self.argv, retry_smoke=True)
+        self.assertNotEqual(recovered["operation"], first["operation"])
+        self.assertEqual(self.state()["turns"], 3)
+
+    def test_correctable_tool_errors_are_bounded_and_fixed_within_one_turn(self):
+        value = self.execute(self.worker("corrected-input"))
+        self.assertEqual(value["worker"]["tool_calls"], 6)
+        self.assertEqual(value["result"]["edits"][0]["content"], "value = 3\n")
+        self.assertEqual(self.state()["turns"], 1)
+        self.assertEqual(len(self.authorized), 3)

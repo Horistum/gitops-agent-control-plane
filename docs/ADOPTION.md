@@ -11,10 +11,11 @@ in the consumer repository, not in this public reference.
 The current version is exported as `control_plane_core.__version__` and declared
 in `pyproject.toml`. Supported decisions are exported from the package root and
 from `workflow`, `decisions`, `execution`, `acceptance`, `verification`, `schema`,
-`usage` and `prompting`, each with explicit public exports. No runtime dependency
+`usage`, `authorization` and `prompting`, each with explicit public exports. No runtime dependency
 or reference configuration is required to import the pure core.
 
-The distribution also contains `agent_runtime`, `reference_runtime`, and the
+The distribution also contains the optional `agent_worker`, `agent_runtime`,
+`reference_runtime`, and the
 `agent-control` CLI. Importing the core does not require deploying those runtimes.
 The phase graph includes independent execution on the original code before
 candidate verification. Missing specification identity or candidate test errors
@@ -85,8 +86,9 @@ correctness. See [VERIFICATION](VERIFICATION.md) and [OPERATIONS](OPERATIONS.md)
 
 ### 5. Preserve exact revision identities
 
-Bind evidence and approvals to head, base, specification, goal and policy. Verify
-both merge parents and the actual merged product. A base refresh or replan
+Bind execution evidence and merge approvals to head, base, specification, goal
+and policy. Bind implementation permission to the accepted plan and concrete scope
+independently of its moving implementation head. Verify both merge parents and the actual merged product. A base refresh or replan
 invalidates old evidence and approvals. Use provider-side protected-ref or
 compare-and-swap mechanisms; never infer completion from a model declaration.
 
@@ -102,7 +104,9 @@ merge before cancellation or retirement.
 
 `control_plane_core` is the canonical portable implementation. A consumer may
 vendor an exact reviewed snapshot using `CONTROL-CORE.lock.json` and the supplied
-synchronization tool. The lock retains file hashes, source commit, version,
+synchronization tool. Schema 2 also covers optional worker and contract tooling.
+Shared changes may originate in a trusted development consumer and be exported
+back into this reference; see [portable development](PORTABLE-DEVELOPMENT.md). The lock retains file hashes, source commit, version,
 contract, Apache license and NOTICE. It is not a runtime auto-update mechanism.
 
 | Concern | Pure core | Consumer responsibility |
@@ -131,7 +135,9 @@ python3 -m unittest discover -s tests -v
 The consumer must provide the synchronization/check tooling it adopts. Review
 those ordinary source changes and run consumer CI before deployment. A newer
 reference commit does not automatically change a source lock or live service.
-Source synchronization rejects linked or locally diverged core packages.
+Source synchronization rejects linked or locally diverged portable packages.
+Initial unmanaged targets require identical reviewed bytes and explicit adoption;
+see the two-commit provenance procedure in the portable development guide.
 
 ### Validation boundary
 

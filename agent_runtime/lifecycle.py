@@ -5,9 +5,10 @@ from control_plane_core import (acceptance_evidence, completion_transition, eval
     fingerprint, merge_authority, path_allowed, require_merge_identity, require_revision_identity,
     test_criteria, test_failure_kind, verification_transition)
 from .contracts import criteria
-from .io import Closed, Unavailable
+from .io import Closed, ExternalPending
 from .roles import repair
 from .workflow import require_evidence, transition
+from .authorization import work_gate
 
 
 def observe(engine, phase, head, *, external=False):
@@ -149,6 +150,10 @@ def refresh_base(engine, observed):
 
 def lifecycle_step(engine):
     task, phase = engine.task, engine.task["phase"]
+    if (phase not in {"baseline", "postmerge", "done"}
+            and (engine.state.get("pending") or {}).get("kind") != "merge"
+            and not task.get("merge_sha") and not work_gate(engine)):
+        return
     if phase in {"baseline", "verify", "independent_baseline", "independent_verify"}:
         verification_step(engine)
     elif phase == "publish":
@@ -164,16 +169,18 @@ def lifecycle_step(engine):
             return
         if engine.github:
             task["ci_evidence"] = engine.github.checks(task["head"])
-            if task["ci_evidence"].get("failed"):
+            if task["ci_evidence"].get("action") == "stop":
+                raise Closed("Trusted CI evidence is malformed or conflicting; product repair is not authorized")
+            if task["ci_evidence"].get("action") == "repair":
                 repair(engine, "developer", {"phase": "ci", "checks": task["ci_evidence"]})
                 return
             if not task["ci_evidence"]["passed"]:
-                raise Unavailable(f"Waiting for exact candidate trusted checks ({task['ci_evidence'].get('status', 'pending')})")
+                raise ExternalPending(f"Waiting for exact candidate trusted checks ({task['ci_evidence'].get('status', 'pending')})")
             if any(row["kind"] == "ci" and "integration" in row["targets"] for row in criteria(engine.item())):
                 pull = engine.github.pull(task["pr"]["number"])
                 engine.github.identity(pull, task["base"], task["head"])
                 if pull.get("mergeable") is not True or not pull.get("merge_commit_sha"):
-                    raise Unavailable("Waiting for an exact integration merge")
+                    raise ExternalPending("Waiting for an exact integration merge")
                 integration = engine.repo.fetch_merge(pull["merge_commit_sha"])
                 require_merge_identity(task["base"], task["head"], engine.repo.parents(integration))
                 task["integration_evidence"] = observe(engine, "integration", integration, external=True)
@@ -193,7 +200,9 @@ def lifecycle_step(engine):
             if not candidate_gate(engine):
                 return
         require_evidence(engine, "integration")
-        critical = any(path_allowed(path, engine.policy["critical_paths"]) for path in engine.repo.changed(task["base"], task["head"]))
+        task["candidate_critical_paths"] = [path for path in engine.repo.changed(task["base"], task["head"])
+                                            if path_allowed(path, engine.policy["critical_paths"])]
+        critical = bool(task["candidate_critical_paths"])
         authority = merge_authority(task["risk"], risk_ceiling=engine.goal["risk_ceiling"],
                                     auto_merge_ceiling=engine.goal["auto_merge_ceiling"], critical=critical)
         if authority["blocked"]:
@@ -201,7 +210,7 @@ def lifecycle_step(engine):
         from .decisions import approval_binding
         binding = approval_binding(engine.state)
         if authority["requires_approval"] and task.get("approval") != binding:
-            task["approval_required"] = binding
+            task.update(approval_required=binding, approval_purpose="candidate-merge")
             engine.hold("Owner approval required for this exact candidate", kind="NEEDS_DECISION", approvable=True)
             return
         result = engine.store.effect("merge", {"base": task["base"], "head": task["head"], "approval": task.get("approval")},
@@ -219,11 +228,13 @@ def lifecycle_step(engine):
         task["merge_parents"] = engine.repo.parents(merged)
         if engine.github:
             task["postmerge_checks"] = engine.github.checks(merged)
-            if task["postmerge_checks"].get("failed"):
+            if task["postmerge_checks"].get("action") == "stop":
+                raise Closed("Trusted merged-commit CI evidence is malformed or conflicting")
+            if task["postmerge_checks"].get("action") == "repair":
                 engine.hold("Trusted merged-commit CI failed; completion remains blocked")
                 return
             if not task["postmerge_checks"]["passed"]:
-                raise Unavailable(f"Waiting for exact merged-commit trusted checks ({task['postmerge_checks'].get('status', 'pending')})")
+                raise ExternalPending(f"Waiting for exact merged-commit trusted checks ({task['postmerge_checks'].get('status', 'pending')})")
         receipt = observe(engine, phase, merged, external=True)
         if not receipt["passed"] or not preserved(task, receipt) or not frozen_intact(engine, merged):
             engine.hold("Merged commit failed independent verification; next item is blocked")

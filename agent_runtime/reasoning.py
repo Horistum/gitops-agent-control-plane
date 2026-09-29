@@ -49,6 +49,26 @@ class Reasoning:
         self.config = configuration
         self.credentials = credentials or CredentialResolver()
         self._prepared_environment = None
+        self.worker = None
+
+    def bind_controller(self, engine):
+        if self.config.get("worker") is not None:
+            from .worker import ReferenceWorker
+            self.worker = ReferenceWorker(self, engine)
+
+    def recover_completed(self, payload):
+        if self.worker is None:
+            return None
+        from agent_worker import WorkerError
+        phase = payload["phase"]
+        try:
+            value = self.worker.execute(payload, ROLE_SCHEMAS[phase], ROLE_INSTRUCTIONS[phase], recover_only=True)
+            if value is not None:
+                value["result"] = normalize_role_output(value["result"])
+                validate_instance(value["result"], ROLE_SCHEMAS[phase])
+            return value
+        except WorkerError as exc:
+            raise Closed(str(exc)) from exc
 
     def prepare(self):
         """Local/broker preparation only; no model dispatch or persisted secrets."""
@@ -56,6 +76,14 @@ class Reasoning:
         if not shutil.which(self.config["argv"][0]):
             raise Unavailable("Reasoning executable is unavailable before dispatch", code="REASONING_EXECUTABLE_UNAVAILABLE",
                               details={"executable": self.config["argv"][0]})
+        if self.config.get("worker") is not None:
+            if self.worker is None:
+                raise Closed("Worker reasoning is not bound to a controller")
+            from agent_worker import WorkerError
+            try:
+                self.worker.transport.preflight()
+            except WorkerError as exc:
+                raise Closed(str(exc)) from exc
         if self.config["kind"] == "command":
             try:
                 self._prepared_environment = self.credentials.provider_environment(self.config)
@@ -93,6 +121,13 @@ class Reasoning:
                             raise Closed("Invalid provider readiness handshake")
                         report["checks"]["adapter"] = "passed"
             return report
+        if self.config.get("worker") is not None:
+            from agent_worker import AppServerWorker, WorkerError
+            try:
+                return AppServerWorker(self.config["worker"], self.config["codex_home"],
+                    Path(self.config["codex_home"]) / "worker-preflight", argv=self.config["argv"]).preflight()
+            except WorkerError as exc:
+                raise Closed(str(exc)) from exc
         help_text = run(self.config["argv"] + ["exec", "--help"], limit=200_000).stdout.decode()
         for flag in ("--ignore-user-config", "--ignore-rules", "--output-schema", "--ephemeral"):
             if flag not in help_text:
@@ -121,6 +156,17 @@ class Reasoning:
         phase = payload["phase"]
         schema = ROLE_SCHEMAS[phase]
         instructions = SHARED_INSTRUCTIONS + "\n" + ROLE_INSTRUCTIONS[phase]
+        if self.config.get("worker") is not None:
+            if self.worker is None:
+                raise Closed("Worker reasoning is not bound to a controller")
+            from agent_worker import WorkerError
+            try:
+                value = self.worker.execute(payload, schema, ROLE_INSTRUCTIONS[phase])
+                value["result"] = normalize_role_output(value["result"])
+                validate_instance(value["result"], schema)
+                return value
+            except WorkerError as exc:
+                raise Unavailable(str(exc)) from exc
         with tempfile.TemporaryDirectory(prefix="agent-reasoning-") as directory:
             root = Path(directory)
             environment = isolated_environment(root)

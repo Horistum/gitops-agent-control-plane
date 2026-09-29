@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 import uuid
+import time
 from control_plane_core import (CoreError, context_checkpoint, context_files, context_view,
     evaluate_goal_conditions, fingerprint, goal_projection, recovery_actions,
     risk_rank)
@@ -13,7 +14,7 @@ from .contracts import ROLE_SCHEMAS, criteria, validate_configuration, normalize
 from .discovery import initial_discovery
 from .git import GitRepository
 from .github import GitHub
-from .io import Closed, Unavailable, canonical, locked, read_json
+from .io import Closed, ExternalPending, Unavailable, canonical, locked, read_json
 from .reasoning import Reasoning
 from .store import Store, runtime_fingerprint, validate_authority
 from .diagnostics import record, safe_text
@@ -21,8 +22,9 @@ from .verification import Verification
 
 
 class Controller:
-    def __init__(self, root, *, reasoning=None, verification=None, github=None):
+    def __init__(self, root, *, reasoning=None, verification=None, github=None, clock=time.time):
         self.root = Path(root).resolve()
+        self.clock = clock
         self.store = Store(self.root)
         self.policy, self.goal = self.store.state["policy"], self.store.state["goal"]
         validate_authority(self.store.state)
@@ -34,6 +36,9 @@ class Controller:
         self.verification = verification or Verification(self.policy["execution"])
         self.github = github or (GitHub(self.policy["publication"], self.policy["base_branch"])
                                  if self.policy["publication"]["kind"] == "github" else None)
+        bind = getattr(self.reasoning, "bind_controller", None)
+        if bind is not None:
+            bind(self)
 
     @classmethod
     def start(cls, root, policy, goal, *, trusted_local=False):
@@ -92,21 +97,20 @@ class Controller:
                                           operation="tick", phase=phase, kind=status)
         if self.task:
             self.task.update(resume_phase=self.task["phase"], phase="await_human", hold_kind=kind,
-                             approvable=approvable, retryable=kind == "FAILED")
+                             approvable=approvable, retryable=False)
 
     def reconcile_model(self, binding):
         """Restore only a held call's execution frame; the next tick consumes its receipt."""
         pending = self.state.get("pending")
         if not pending or pending.get("kind") != "model" or pending.get("id") != binding:
             raise Closed("Model reconciliation must name the exact pending effect")
-        receipt = self.store.read_receipt(binding)
         request = pending["request"]
         task = self.task or {}
         expected = {"kind": "model", "policy_hash": self.state["policy_hash"],
                     "runtime_hash": self.state["runtime_hash"], "run_id": self.state["run_id"],
                     "epoch": self.state["effect_epoch"], "item": task.get("id"),
                     "attempt": task.get("attempt"), "turn": task.get("turn", 0)}
-        if (receipt["request"] != request or fingerprint(request) != binding
+        if (fingerprint(request) != binding
                 or any(request.get(key) != value for key, value in expected.items())):
             raise Closed("Pending model receipt authority or attempt differs")
         payload = request["payload"]
@@ -129,6 +133,10 @@ class Controller:
                     restored.pop(key, None)
         if role_view(restored, phase) != payload["task"]:
             raise Closed("Model execution frame changed; cannot reuse old evidence")
+        self.store.recover_model_receipt(binding, getattr(self.reasoning, "recover_completed", None))
+        receipt = self.store.read_receipt(binding)
+        if receipt["request"] != request:
+            raise Closed("Pending model receipt request differs")
         holder.clear()
         holder.update(restored)
         self.state.update(status="RUNNING", phase=phase if self.task else "reconcile")
@@ -160,12 +168,16 @@ class Controller:
                    "sources": sources, "omitted_paths": omitted, "memory": previous,
                    "authority": {key: self.policy[key] for key in ("allowed_paths", "test_paths", "protected_paths")},
                    "criteria": criteria(self.item()) if self.task else [], **(extra or {})}
+        if self.policy["reasoning"].get("worker") is not None:
+            from .worker import binding
+            payload["worker_binding"] = binding(self, task, phase)
         if len(canonical(payload)) > limits["context_bytes"] + 200_000:
             raise Closed("Complete model input exceeds prompt limit", code="CONTEXT_LIMIT")
         try:
             result = self.store.effect("model", payload,
                 lambda identity: self.reasoning.execute({**payload, "effect_id": identity}),
-                prepare=getattr(self.reasoning, "prepare", None))
+                prepare=getattr(self.reasoning, "prepare", None),
+                recover=getattr(self.reasoning, "recover_completed", None))
         finally:
             discard = getattr(self.reasoning, "discard_preparation", None)
             if discard:
@@ -246,6 +258,7 @@ class Controller:
     def tick(self):
         from .roles import role_step, apply_step
         from .lifecycle import lifecycle_step
+        from .recovery import technical_failure, technical_status
         with locked(self.root):
             self.store.state = Store(self.root).state
             if (self.state["policy_hash"] != fingerprint({"policy": self.policy, "goal": self.goal})
@@ -254,6 +267,9 @@ class Controller:
             if self.state["runtime_hash"] != runtime_fingerprint():
                 raise Closed("Runtime changed during this run", code="RUNTIME_CHANGED")
             if self.state["paused"] or (not self.state.get("owner_intent") and self.state["status"] in {"COMPLETED", "CANCELLED", "NEEDS_DECISION", "FAILED", "BLOCKED_POLICY"}):
+                return self.summary()
+            recovery = technical_status(self.state, int(self.clock()))
+            if recovery["action"] in {"wait", "exhausted"}:
                 return self.summary()
             self.state["status"] = "RUNNING"
             self.state.pop("reason", None)
@@ -271,9 +287,24 @@ class Controller:
                     apply_step(self)
                 else:
                     lifecycle_step(self)
-            except Unavailable as exc:
+                self.state.pop("technical_recovery", None)
+            except ExternalPending as exc:
                 self.state.update(status="WAITING_EXTERNAL", reason=safe_text(exc))
+                self.state.pop("technical_recovery", None)
                 self.state["diagnostic"] = record(self.root, self.state, exc=exc, operation="tick", phase=phase)
+            except Unavailable as exc:
+                try:
+                    recovery = technical_failure(self, exc, int(self.clock()))
+                except Closed as unknown:
+                    self.hold(str(unknown), kind="BLOCKED_POLICY", exc=unknown, phase=phase)
+                else:
+                    if recovery["action"] == "exhausted":
+                        exhausted = Closed("Technical retry budget exhausted; explicit owner continuation is required",
+                                           code="TECHNICAL_RETRY_EXHAUSTED")
+                        self.hold(str(exhausted), kind="FAILED", exc=exhausted, phase=phase)
+                    else:
+                        self.state.update(status="WAITING_EXTERNAL", reason=safe_text(exc))
+                        self.state["diagnostic"] = record(self.root, self.state, exc=exc, operation="tick", phase=phase)
             except (Closed, CoreError, SchemaValidationError, ValueError) as exc:
                 self.hold(str(exc), kind="BLOCKED_POLICY", exc=exc, phase=phase)
             except Exception as exc:

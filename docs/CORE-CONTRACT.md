@@ -17,8 +17,12 @@ and goal JSON snapshots define paths, risk and merge ceilings, dependencies, typ
 acceptance, budgets, executable commands, providers and `machine_conditions`.
 Product edits and model output cannot change these snapshots.
 
-The owner account authenticates CLI actions. Approval binds exact base, candidate,
-specification, risk, policy, runtime and run identity. Replan reconciles a published
+The owner account authenticates CLI actions. `approve-work` binds the accepted
+plan, scenarios, concrete working set, attempt, base, specification, risk, policy,
+runtime and run identity. Scoped implementation/test repair preserves this work
+authority; planning or authority drift revokes it. `approve` grants only merge
+authority over the exact verified candidate. The two purposes are not
+interchangeable, and historical approvals cannot acquire a new purpose. Replan reconciles a published
 PR and preserves frozen tests and risk. Cancel reconciles and verifies any observed
 merge before stopping. Retrying does not reset the lifetime call budget. See
 [OPERATIONS.md](OPERATIONS.md) for the command contract.

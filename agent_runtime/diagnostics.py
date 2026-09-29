@@ -75,12 +75,18 @@ def safe_data(value, *, secrets=(), depth=0):
 
 def recovery_steps(code, state):
     pending = state.get("pending") or {}
+    if code == "APPROVAL_REQUIRED" and (state.get("task") or {}).get("approval_purpose") == "work-plan":
+        return ["Review the accepted plan, test scenarios and working files; use approve-work for this exact work binding. Merge approval remains a separate decision."]
     if code == "AUTHORITY_CHANGED":
         return ["Restore the exact authorized policy and goal snapshot, or prepare a separately authorized run. Do not rewrite its hash."]
     if code == "RUNTIME_CHANGED":
         steps = ["Pause this run with the installed controller; pause does not accept the new runtime."] if not state.get("paused") else []
         return steps + ["Resolve pending effects using the original runtime, if present. Then use upgrade at a quiescent boundary.",
                         "Upgrade requires no active task, or --suspend for an eligible unchanged held attempt. Continue only after the upgrade succeeds."]
+    if code == "TECHNICAL_RETRY_EXHAUSTED":
+        return ["Correct the technical failure, then use explicit continue to renew this exact exhausted retry episode. Pending effects and lifetime budgets are preserved."]
+    if pending.get("kind") == "model" and pending.get("dispatch_state") == "not_started":
+        return ["This reserved model call was not dispatched. Restore the dependency and retry after the persisted technical deadline; keep the existing reservation."]
     if pending.get("kind") == "model":
         return ["The previous model call may have executed. Inspect its exact pending effect and receipt before continuing.",
                 "Use reconcile-effect with a restored valid receipt. Without a receipt, retry-effect explicitly authorizes another potentially charged call."]

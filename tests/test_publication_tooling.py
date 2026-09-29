@@ -129,7 +129,14 @@ class ArchiveChecks(unittest.TestCase):
     def fixture(self):
         expected = {"pyproject.toml": b'[project]\nname = "example"\nversion = "1.2.3"\nrequires-python = ">=3.11"\n[project.scripts]\nagent = "agent_runtime.cli:main"\n',
                     "README.md": b"Example description", "LICENSE": b"license", "NOTICE": b"notice", "TRADEMARKS.md": b"marks",
-                    "agent_runtime/cli.py": b"def main(): pass\n"}
+                    "agent_runtime/cli.py": b"def main(): pass\n",
+                    "control_plane_core/__init__.py": b'__version__ = "1.2.3"\n',
+                    "agent_worker/__init__.py": b'"""Portable worker."""\n',
+                    "agent_worker/capabilities.json": b'{"schema": 1}\n'}
+        expected[distribution.PORTABLE_LOCK] = json.dumps({"schema": 2, "version": "1.2.3",
+            "packages": list(distribution.PORTABLE_PACKAGES),
+            "files": {name: distribution.digest(data) for name, data in expected.items()
+                      if name.split("/")[0] in distribution.PORTABLE_PACKAGES}}).encode()
         prefix = "example-1.2.3.dist-info/"
         metadata = ("Metadata-Version: 2.4\nName: example\nVersion: 1.2.3\nLicense-Expression: Apache-2.0\n"
                     "Requires-Python: >=3.11\nDescription-Content-Type: text/markdown\n"
@@ -137,13 +144,15 @@ class ArchiveChecks(unittest.TestCase):
         wheel = {prefix + "METADATA": metadata, prefix + "entry_points.txt": b"[console_scripts]\nagent = agent_runtime.cli:main\n",
                  "agent_runtime/cli.py": expected["agent_runtime/cli.py"]}
         wheel.update({prefix + "licenses/" + name: expected[name] for name in distribution.LEGAL_FILES})
+        wheel.update({name: data for name, data in expected.items()
+                      if name.split("/")[0] in distribution.PORTABLE_PACKAGES})
         return expected, wheel
 
     def test_archive_validation_checks_legal_metadata_and_unexpected_content(self):
         expected, wheel = self.fixture()
         with patch.object(distribution, "read_sdist", return_value=expected), patch.object(distribution, "read_wheel", return_value=wheel):
             self.assertEqual("1.2.3", distribution.validate_archives(None, None, expected)["version"])
-        for mutation in ("notice", "version", "dependency", "extra", "source-extra"):
+        for mutation in ("notice", "version", "dependency", "extra", "source-extra", "lock", "worker", "worker-data"):
             installed, archived = deepcopy(wheel), deepcopy(expected)
             key = "example-1.2.3.dist-info/METADATA"
             if mutation == "notice":
@@ -154,10 +163,42 @@ class ArchiveChecks(unittest.TestCase):
                 installed[key] = b"Requires-Dist: private-package\n" + installed[key]
             elif mutation == "extra":
                 installed["agent_runtime/.env"] = b"private"
+            elif mutation == "lock":
+                archived.pop(distribution.PORTABLE_LOCK)
+            elif mutation == "worker":
+                installed.pop("agent_worker/__init__.py")
+            elif mutation == "worker-data":
+                installed.pop("agent_worker/capabilities.json")
             else:
                 archived[".env"] = b"private"
             with self.subTest(mutation=mutation), patch.object(distribution, "read_sdist", return_value=archived), patch.object(distribution, "read_wheel", return_value=installed), self.assertRaises(ValueError):
                 distribution.validate_archives(None, None, expected)
+
+    def test_portable_selection_rejects_missing_lock_worker_and_diverged_bytes(self):
+        expected, _ = self.fixture()
+        distribution.validate_portable_selection(expected, "1.2.3")
+        for mutation in ("lock", "worker", "changed-worker", "unlocked-worker"):
+            selected = deepcopy(expected)
+            if mutation == "lock":
+                selected.pop(distribution.PORTABLE_LOCK)
+            elif mutation == "worker":
+                selected.pop("agent_worker/__init__.py")
+            elif mutation == "changed-worker":
+                selected["agent_worker/__init__.py"] += b"# changed\n"
+            else:
+                selected["agent_worker/new.py"] = b"# missing from lock\n"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                distribution.validate_portable_selection(selected, "1.2.3")
+
+    def test_source_selection_includes_root_lock_worker_and_worker_data(self):
+        expected, _ = self.fixture()
+        for name, data in expected.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        selected = distribution.source_files(self.root)
+        for name in (distribution.PORTABLE_LOCK, "agent_worker/__init__.py", "agent_worker/capabilities.json"):
+            self.assertEqual(selected[name], expected[name])
 
     def test_build_environment_does_not_inherit_credentials_or_pythonpath(self):
         with patch.dict(os.environ, {"GH_TOKEN": "fixture-value", "PYTHONPATH": "/private", "PIP_INDEX_URL": "https://private.invalid"}):
