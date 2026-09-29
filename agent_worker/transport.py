@@ -21,6 +21,53 @@ CONFIG = {"forced_login_method": "chatgpt", "model_provider": "openai", "approva
 FORBIDDEN_ITEMS = {"commandExecution", "fileChange", "mcpToolCall", "webSearch", "collabAgentToolCall",
                    "imageGeneration", "localShellCall", "computerUse", "browserUse"}
 
+def informational_notification(message):
+    """Validate only the inert notice shapes in the pinned 0.153.4 schema.
+
+    Startup notices can race config/read responses. They neither authorize a
+    tool nor replace the effective configuration and permission checks.
+    """
+    method = message.get("method")
+    fields = {"warning": ("message", {"message", "threadId"}),
+              "configWarning": ("summary", {"summary", "details", "path", "range"}),
+              "deprecationNotice": ("summary", {"summary", "details"})}
+    if not isinstance(method, str) or method not in fields:
+        return False
+    required, allowed = fields[method]
+    params = message.get("params")
+    valid = (set(message) <= {"method", "params", "jsonrpc", "emittedAtMs"}
+             and message.get("jsonrpc", "2.0") == "2.0"
+             and isinstance(params, dict) and required in params and set(params) <= allowed)
+    if valid and "emittedAtMs" in message:
+        # ServerNotification carries an optional signed int64 timestamp outside
+        # params; it is metadata only, never a clock or authorization input.
+        stamp = message["emittedAtMs"]
+        valid = type(stamp) is int and -(1 << 63) <= stamp < (1 << 63)
+    if valid:
+        valid = isinstance(params[required], str) and all(
+            value is None or isinstance(value, str)
+            for key, value in params.items() if key not in {required, "range"})
+    if valid and params.get("range") is not None:
+        span = params["range"]
+        valid = isinstance(span, dict) and set(span) == {"start", "end"}
+        if valid:
+            valid = all(isinstance(position, dict) and set(position) == {"line", "column"}
+                        and all(type(value) is int and value >= 0 for value in position.values())
+                        for position in span.values())
+    if not valid:
+        raise WorkerError("Malformed informational app-server notification: " + method)
+    return True
+
+
+def method_label(value):
+    # Unknown protocol names are untrusted. Never include parameters, private
+    # notice text, terminal controls or unbounded content in diagnostics.
+    if not isinstance(value, str):
+        return "<invalid-method>"
+    return "".join(char if char.isascii() and (char.isalnum() or char in "/_-.") else "?"
+                   for char in value[:96])
+
+
 class _Connection:
     def __init__(self, argv, cwd, env, profile):
         self.profile = profile; self.deadline = time.monotonic() + profile["timeout_seconds"]
@@ -106,9 +153,11 @@ class _Connection:
                 on_event(message)
             elif "id" in message:
                 raise WorkerError("Unexpected app-server request before authorized turn")
+            elif informational_notification(message):
+                pass
             elif message.get("method") not in {"thread/started", "thread/status/changed", "account/updated",
                                                 "account/rateLimits/updated", "model/verification", "remoteControl/status/changed"}:
-                raise WorkerError("Unexpected app-server notification before authorized turn")
+                raise WorkerError("Unexpected app-server notification before authorized turn: " + method_label(message.get("method")))
 
 def _lookup(config, dotted):
     current = config

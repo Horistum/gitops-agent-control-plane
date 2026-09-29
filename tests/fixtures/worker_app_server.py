@@ -37,8 +37,8 @@ def send(value):
 def answer(request, value):
     send({"id": request["id"], "result": value})
 
-def event(method, params):
-    send({"method": method, "params": params})
+def event(method, params, **metadata):
+    send({"method": method, "params": params, **metadata})
 
 def blank(schema, name=""):
     if "enum" in schema:
@@ -55,7 +55,21 @@ for line in sys.stdin:
     request = json.loads(line); method = request.get("method"); params = request.get("params", {})
     if method == "initialize": answer(request, {"userAgent": "controlled-fixture"})
     elif method == "initialized": pass
-    elif method == "config/read": answer(request, {"config": config})
+    elif method == "config/read":
+        if scenario == "startup-notices-after-config": answer(request, {"config": config})
+        if scenario in {"startup-notices", "startup-notices-after-config"}:
+            event("warning", {"message": "Informational startup warning", "threadId": None}, emittedAtMs=1790648857904)
+            event("deprecationNotice", {"summary": "Informational deprecation", "details": None})
+            event("configWarning", {"summary": "Informational config warning", "details": "Fixture detail",
+                "path": "/fixture/config.toml", "range": {"start": {"line": 1, "column": 1}, "end": {"line": 1, "column": 2}}}, emittedAtMs=1790648857905)
+        elif scenario == "startup-bad-notice": event("warning", {"message": {"private": "never log notice parameters"}})
+        elif scenario == "startup-bad-timestamp": event("configWarning", {"summary": "Bad timestamp"}, emittedAtMs=True)
+        elif scenario == "startup-bad-range": event("configWarning", {"summary": "Bad range", "range": {"start": {"line": True, "column": 1}, "end": {"line": 2, "column": 1}}})
+        elif scenario == "startup-notice-action": event("deprecationNotice", {"summary": "Ignored action", "action": "execute"})
+        elif scenario == "startup-notice-request": send({"id": 90, "method": "warning", "params": {"message": "Reply required"}})
+        elif scenario == "startup-forbidden": event("item/started", {"item": {"type": "commandExecution"}})
+        elif scenario == "startup-unknown": event("unknown/private\nnotice", {"private": "never log notice parameters"})
+        if scenario != "startup-notices-after-config": answer(request, {"config": config})
     elif method == "permissionProfile/list": answer(request, {"data": [{"id": "worker_broker", "allowed": True}], "nextCursor": None})
     elif method in ("thread/start", "thread/resume"):
         if method == "thread/start":

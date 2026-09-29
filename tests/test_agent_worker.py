@@ -160,3 +160,22 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(value["result"]["edits"][0]["content"], "value = 3\n")
         self.assertEqual(self.state()["turns"], 1)
         self.assertEqual(len(self.authorized), 3)
+
+    def test_informational_startup_notices_can_arrive_before_or_after_config_response(self):
+        for scenario in ("startup-notices", "startup-notices-after-config"):
+            with self.subTest(scenario=scenario):
+                value = self.execute(self.worker(scenario), scenario)
+                self.assertEqual(value["result"]["edits"][0]["content"], "value = 3\n")
+        self.assertEqual(self.state()["turns"], 2)
+
+    def test_malformed_or_actionable_startup_notifications_fail_before_dispatch(self):
+        for scenario in ("startup-bad-notice", "startup-bad-range", "startup-bad-timestamp", "startup-notice-action",
+                         "startup-notice-request", "startup-forbidden", "startup-unknown"):
+            with self.subTest(scenario=scenario):
+                with self.assertRaises(WorkerError) as failure:
+                    self.execute(self.worker(scenario), scenario)
+                self.assertNotIn("never log notice parameters", str(failure.exception))
+                self.assertNotIn("\n", str(failure.exception))
+                if scenario == "startup-unknown":
+                    self.assertIn("unknown/private?notice", str(failure.exception))
+                self.assertFalse((self.root / "home" / "fixture-state.json").exists())
