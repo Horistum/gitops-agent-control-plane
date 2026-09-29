@@ -32,7 +32,8 @@ def repositories(root):
     if not path.exists(): return {REFERENCE_REPOSITORY}
     value = json.loads(path.read_text())
     rows = value.get("repositories") if isinstance(value, dict) else None
-    if (not isinstance(value, dict) or set(value) != {"schema", "repositories"} or value["schema"] != 1
+    if (not isinstance(value, dict) or set(value) != {"schema", "repositories"}
+            or type(value["schema"]) is not int or value["schema"] != 1
             or not isinstance(rows, list) or not 1 <= len(rows) <= 16
             or any(not isinstance(row, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", row) for row in rows)):
         raise ValueError("Invalid approved portable source origins")
@@ -254,6 +255,8 @@ def main(argv=None):
     parser.add_argument("--adopt-identical", action="store_true")
     parser.add_argument("--export-only", action="store_true", help="Copy portable bytes without recording development-origin provenance in the target")
     args = parser.parse_args(argv)
+    if args.export_only and (args.check or args.record):
+        parser.error("--export-only requires a source transfer, not --check or --record")
     if args.target.is_symlink() or args.source is not None and args.source.is_symlink():
         parser.error("Linked source/target roots are forbidden")
     target = args.target.resolve()

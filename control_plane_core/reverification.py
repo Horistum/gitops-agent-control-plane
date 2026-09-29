@@ -13,17 +13,19 @@ AUTHORITY_FIELDS = (
     "risk", "critical_paths", "baseline_receipt", "baseline", "counterfactual_receipt",
     "independent_baseline", "independent_receipt", "test_receipt", "candidate_evidence",
     "workflow_contract", "item_revision", "proposed_tests", "production_head",
+    "work_approval", "human_approval", "approval", "work_approval_required",
+    "approval_required", "approval_purpose",
 )
 
 
 def authority(task, *, policy, goal, runtime):
     return {"policy": policy, "goal": goal, "runtime": runtime,
-            "task": {key: copy.deepcopy(task.get(key)) for key in AUTHORITY_FIELDS},
+            "task_hash": fingerprint({key: task.get(key) for key in AUTHORITY_FIELDS}),
             "reverifications": task.get("reverifications", 0)}
 
 
 def failed_observation(current, phase, observation):
-    if phase not in PHASES or not isinstance(observation, dict) or not observation:
+    if not isinstance(phase, str) or phase not in PHASES or not isinstance(observation, dict) or not observation:
         raise CoreError("Reverification requires a completed verification observation")
     return {"contract": "verification-recovery/v1", "authority": copy.deepcopy(current),
             "phase": phase, "observation": copy.deepcopy(observation),
@@ -36,7 +38,8 @@ def binding(task, current):
     if (task.get("phase") != "await_human" or task.get("pending") or task.get("approvable")
             or task.get("hold_kind") != "FAILED" or type(count) is not int
             or not 0 <= count < MAX_REVERIFICATIONS or not isinstance(record, dict)
-            or record.get("contract") != "verification-recovery/v1" or record.get("phase") not in PHASES
+            or record.get("contract") != "verification-recovery/v1"
+            or not isinstance(record.get("phase"), str) or record["phase"] not in PHASES
             or record.get("phase") != task.get("resume_phase") or record.get("authority") != current
             or not isinstance(record.get("observation"), dict)
             or record.get("observation_hash") != fingerprint(record["observation"])):

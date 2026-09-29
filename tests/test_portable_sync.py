@@ -1,5 +1,6 @@
 """Exercise portable source transfer using real independent Git repositories."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -17,6 +18,13 @@ CONSUMER = "ExampleOrg/development-controller"
 
 
 class PortableTransferTests(unittest.TestCase):
+    def test_export_cannot_report_success_for_a_check_or_record(self):
+        for action in ("--check", "--record"):
+            with self.subTest(action=action), patch("sys.stderr", new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as raised:
+                    transfer.main([action, "--export-only"])
+                self.assertEqual(raised.exception.code, 2)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
