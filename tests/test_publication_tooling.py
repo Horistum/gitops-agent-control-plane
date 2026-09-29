@@ -68,6 +68,25 @@ class SourceChecks(unittest.TestCase):
         self.assertTrue(any("Unpinned" in x for x in errors))
         self.assertTrue(any("Privileged" in x for x in errors))
 
+    def test_identity_scan_covers_python_json_and_tracked_files_outside_release_roots(self):
+        private = source.PRIVATE_DOC.pattern.split("|")[1]
+        for name in ("scripts/accidental.py", "schemas/accidental.json"):
+            (self.root / name).write_text(private)
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / "outside.json").write_text(private)
+        subprocess.run(["git", "-C", str(self.root), "add", "outside.json"], check=True)
+        errors = source.inspect_source(self.root)
+        for name in ("scripts/accidental.py", "schemas/accidental.json", "outside.json"):
+            self.assertTrue(any(name in error and "Private consumer" in error for error in errors), errors)
+
+    def test_detector_exception_does_not_allow_another_line_or_changed_fixture(self):
+        private = source.PRIVATE_DOC.pattern.split("|")[1]
+        for name in source.IDENTITY_EXCEPTIONS:
+            original = (ROOT / name).read_bytes()
+            self.assertEqual(source.inspect_identities({name: original}), [])
+            self.assertTrue(source.inspect_identities({name: original + ("\n" + private).encode()}))
+            self.assertTrue(source.inspect_identities({"another.py": original}))
+
     def test_source_selection_never_follows_links_or_includes_local_state(self):
         (self.root / ".state").mkdir()
         (self.root / ".state/private.json").write_text("private")
@@ -172,6 +191,17 @@ class ArchiveChecks(unittest.TestCase):
             else:
                 archived[".env"] = b"private"
             with self.subTest(mutation=mutation), patch.object(distribution, "read_sdist", return_value=archived), patch.object(distribution, "read_wheel", return_value=installed), self.assertRaises(ValueError):
+                distribution.validate_archives(None, None, expected)
+
+    def test_both_built_archives_reject_private_identity_even_in_generated_metadata(self):
+        private = source.PRIVATE_DOC.pattern.split("|")[1].encode()
+        for target in ("sdist", "wheel"):
+            expected, wheel = self.fixture(); archived = deepcopy(expected)
+            if target == "sdist": archived["PKG-INFO"] = private
+            else: wheel["example-1.2.3.dist-info/METADATA"] += b"\n" + private
+            with self.subTest(target=target), patch.object(distribution, "read_sdist", return_value=archived), \
+                    patch.object(distribution, "read_wheel", return_value=wheel), \
+                    self.assertRaisesRegex(ValueError, target + " private identity check"):
                 distribution.validate_archives(None, None, expected)
 
     def test_portable_selection_rejects_missing_lock_worker_and_diverged_bytes(self):

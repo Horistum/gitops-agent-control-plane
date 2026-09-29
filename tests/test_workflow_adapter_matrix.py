@@ -12,7 +12,7 @@ SPEC.loader.exec_module(MATRIX)
 
 class WorkflowAdapterMatrixTests(unittest.TestCase):
     def test_actual_controller_safety_matrix(self):
-        profile = "reference" if (ROOT / "agent_runtime").is_dir() else "flow"
+        profile = "reference" if (ROOT / "agent_runtime").is_dir() else "consumer"
         for name in MATRIX.SCENARIOS:
             with self.subTest(scenario=name):
                 report = MATRIX.worker(profile, ROOT, ROOT, [name])

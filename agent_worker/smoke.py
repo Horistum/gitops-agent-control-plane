@@ -7,23 +7,19 @@ from pathlib import Path
 import tempfile
 import uuid
 from .broker import EDIT_SCHEMA, SourceBroker
-from .protocol import WorkerError, atomic, read_record
+from .protocol import WorkerError, atomic, exclusive_lock, fingerprint, read_record
 from .transport import AppServerWorker
 
 
-def run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
-    import fcntl
+def run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False, adapter_identity=None):
     directory = Path(profile["smoke_attestation"] + ".worker")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (directory / "commissioning.lock").open("a") as guard:
-        try:
-            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise WorkerError("Another commissioning process owns the worker smoke") from exc
-        return _run_smoke(profile, home, argv=argv, model=model, retry_smoke=retry_smoke)
+    with exclusive_lock(directory / "commissioning.lock"):
+        return _run_smoke(profile, home, argv=argv, model=model, retry_smoke=retry_smoke,
+                          adapter_identity=adapter_identity)
 
 
-def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
+def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False, adapter_identity=None):
     original = "def answer():\n    return 1\n"; replacement = "def answer():\n    return 2\n"
     observed = []
     def read(path):
@@ -45,14 +41,24 @@ def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
     attestation_path = Path(profile["smoke_attestation"])
     directory = attestation_path.parent / (attestation_path.name + ".worker")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    worker = AppServerWorker(profile, home, directory, argv=argv)
+    worker = AppServerWorker(profile, home, directory, argv=argv, adapter_identity=adapter_identity)
     worker.preflight(require_smoke=False)
-    identity = worker.smoke_identity()
-    intent_path = directory / "commissioning.json"
-    if attestation_path.exists() and not retry_smoke:
+    identity = worker.smoke_identity(model)
+    intent_path = directory / ("commissioning-" + fingerprint(model) + ".json")
+    records = []
+    if attestation_path.exists():
         prior = read_record(attestation_path)
-        if prior.get("identity") == identity and prior.get("passed") is True and prior.get("model_called") is True:
-            return prior
+        records = prior.get("attestations", [prior])
+        if not isinstance(records, list): raise WorkerError("Malformed smoke attestation collection")
+        for record in records:
+            if not isinstance(record, dict): raise WorkerError("Malformed smoke attestation")
+            if (not retry_smoke and record.get("identity") == identity
+                    and record.get("passed") is True and record.get("model_called") is True):
+                return record
+    # Earlier runtime intents also fence a possibly dispatched commissioning.
+    legacy_intent = directory / "commissioning.json"
+    if legacy_intent.exists() and not retry_smoke:
+        raise WorkerError("Legacy smoke intent requires review and explicit --retry-smoke")
     previous = read_record(intent_path) if intent_path.exists() else None
     if previous and not retry_smoke:
         if previous["identity"] != identity:
@@ -67,7 +73,11 @@ def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
             # older successful attestation eligible for activation.
             archived = read_record(attestation_path)
             atomic(directory / ("attestation-before-" + intent["operation"] + ".json"), archived)
-            attestation_path.unlink()
+            records = [row for row in records if row.get("identity", {}).get("model", "") != model]
+            if records:
+                atomic(attestation_path, {"schema": 2, "attestations": records})
+            else:
+                attestation_path.unlink()
             import os
             parent_fd = os.open(attestation_path.parent, os.O_RDONLY | os.O_DIRECTORY)
             try: os.fsync(parent_fd)
@@ -84,8 +94,9 @@ def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
     attestation = {"identity": identity, "passed": True, "model_called": True,
                    "experimental": True, "observed_tools": value["worker"]["tool_names"], "usage": value["usage"],
                    "operation": intent["operation"],
-                   "limitations": "Synthetic broker smoke; not a product baseline or protection against a compromised CLI/OS."}
-    atomic(attestation_path, attestation)
+                   "limitations": "Synthetic source-broker smoke bound to adapter authority code; does not execute adapter authorization, a product baseline, or establish protection against a compromised CLI/OS."}
+    records = [row for row in records if row.get("identity", {}).get("model", "") != model]
+    atomic(attestation_path, {"schema": 2, "attestations": records + [attestation]})
     atomic(intent_path, {**intent, "status": "completed"})
     return attestation
 
@@ -93,16 +104,16 @@ def _run_smoke(profile, home, *, argv=("codex",), model="", retry_smoke=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True)
-    parser.add_argument("--adapter", required=True, choices=("flow", "reference"))
+    parser.add_argument("--adapter-module", required=True, help="Reviewed local adapter module exposing smoke_configuration(policy)")
+    parser.add_argument("--model", help="One model from the adapter's configured model set")
     parser.add_argument("--retry-smoke", action="store_true", help="Explicitly authorize another potentially billed turn after reviewing prior outcome")
     args = parser.parse_args(); policy = read_record(Path(args.policy))
-    if args.adapter == "flow":
-        profile, home, argv = policy["agent_worker"], policy["codex_home"], ["codex"]
-        model = policy.get("models", {}).get("default", "")
-    else:
-        config = policy["reasoning"]; profile, home, argv = config["worker"], config["codex_home"], config["argv"]
-        model = config["model"]
-    result = run_smoke(profile, home, argv=argv, model=model, retry_smoke=args.retry_smoke)
+    import importlib
+    configuration = importlib.import_module(args.adapter_module).smoke_configuration(policy)
+    model = args.model if args.model is not None else configuration.pop("default_model")
+    configuration.pop("default_model", None)
+    if model not in configuration.pop("models"): raise WorkerError("Smoke model is outside the configured model set")
+    result = run_smoke(**configuration, model=model, retry_smoke=args.retry_smoke)
     print(json.dumps({"passed": result["passed"], "model_called": True, "identity": result["identity"]}, indent=2))
 
 if __name__ == "__main__":

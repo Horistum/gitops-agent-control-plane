@@ -115,14 +115,13 @@ def retry_preconditions(*, baseline, regressions, negative_control):
 
 
 def recovery_actions(task, limits):
+    """Legacy retry remains a rejected wire value; use typed recovery protocols.
+
+    Technical outages use technical_recovery; completed verification uses the
+    exact binding in reverification. A generic task flag grants neither action.
+    """
     held = task.get("phase") == "await_human" and not task.get("pending")
-    budget = task.get("agent_budget", {}).get("used", task.get("agent_calls", 0))
-    exhausted = (task.get("context_rounds", 0) >= limits.get("max_context_rounds", 8) or
-                 budget >= limits.get("max_agent_calls_per_task", 18) or
-                 task.get("failure_code") in {"CONTEXT_LIMIT", "CONTEXT_STALLED", "EVIDENCE_UNAVAILABLE", "PROMPT_LIMIT", "PROTOCOL_LIMIT"})
-    return {"retry": bool(held and not task.get("approvable") and task.get("retryable") is True and
-                          task.get("recovery_kind") in {"transport", "not_dispatched"} and
-                          task.get("hold_kind") == "FAILED" and not exhausted),
+    return {"retry": False,
             "replan": bool(held and not task.get("merge_sha") and
                            task.get("owner_replans", 0) < limits.get("max_owner_replans", 2))}
 

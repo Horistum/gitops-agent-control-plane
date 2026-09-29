@@ -90,7 +90,7 @@ class Controller:
         from .workflow import transition
         transition(self, {"kind": "advance"}, old)
 
-    def hold(self, reason, *, kind="FAILED", approvable=False, exc=None, phase=None):
+    def hold(self, reason, *, kind="FAILED", approvable=False, exc=None, phase=None, verification_receipt=None):
         status = "NEEDS_DECISION" if approvable else kind
         self.state.update(status=status, reason=safe_text(reason))
         self.state["diagnostic"] = record(self.root, self.state, exc=exc, message=reason,
@@ -98,6 +98,10 @@ class Controller:
         if self.task:
             self.task.update(resume_phase=self.task["phase"], phase="await_human", hold_kind=kind,
                              approvable=approvable, retryable=False)
+            self.task.pop("verification_recovery", None)
+            if verification_receipt is not None:
+                from .reverification import record_failure
+                record_failure(self, self.task["resume_phase"], verification_receipt)
 
     def reconcile_model(self, binding):
         """Restore only a held call's execution frame; the next tick consumes its receipt."""

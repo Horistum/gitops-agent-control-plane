@@ -18,11 +18,26 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = "CONTROL-CORE.lock.json"
-REPOSITORIES = {"Horistum/gitops-agent-control-plane", "Horistum/FlowAi-control"}
+REFERENCE_REPOSITORY = "Horistum/gitops-agent-control-plane"
+ORIGINS = "PORTABLE-ORIGINS.json"
 PACKAGES = ("control_plane_core", "agent_worker")
 TOOLING = ("scripts/sync_control_core.py", "scripts/check_workflow_adapters.py",
            "tests/test_portable_sync.py", "tests/test_workflow_adapter_matrix.py",
            "tests/test_agent_worker.py", "tests/fixtures/worker_app_server.py")
+
+
+def repositories(root):
+    """Consumer trust belongs to reviewed local configuration, not portable code."""
+    path = safe_file(root, ORIGINS)
+    if not path.exists(): return {REFERENCE_REPOSITORY}
+    value = json.loads(path.read_text())
+    rows = value.get("repositories") if isinstance(value, dict) else None
+    if (not isinstance(value, dict) or set(value) != {"schema", "repositories"}
+            or type(value["schema"]) is not int or value["schema"] != 1
+            or not isinstance(rows, list) or not 1 <= len(rows) <= 16
+            or any(not isinstance(row, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", row) for row in rows)):
+        raise ValueError("Invalid approved portable source origins")
+    return set(rows)
 
 
 def metadata(root):
@@ -93,7 +108,7 @@ def check(root):
         raise ValueError("Portable source lock must be an object")
     declared, schema = metadata(root), value.get("schema")
     if (type(schema) is not int or schema not in {1, 2}
-            or value.get("repository") not in REPOSITORIES
+            or value.get("repository") not in repositories(root)
             or not isinstance(value.get("commit"), str)
             or not re.fullmatch(r"[0-9a-f]{40}", value["commit"])
             or value.get("files") != inventory(root, legacy=schema == 1)
@@ -114,7 +129,7 @@ def git(root, *args):
 
 
 def snapshot(source, commit, repository):
-    if repository not in REPOSITORIES or not re.fullmatch(r"[0-9a-f]{40}", commit):
+    if repository not in repositories(source) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("An approved source repository and full commit are required")
     if git(source, "rev-parse", "HEAD").decode().strip() != commit:
         raise ValueError("Source HEAD differs from the requested commit")
@@ -173,13 +188,15 @@ def record(root, commit, repository):
 
 
 def sync(source, target, commit, repository="Horistum/gitops-agent-control-plane",
-         *, adopt_identical=False):
+         *, adopt_identical=False, export_only=False):
     if source.resolve() == target.resolve():
         raise ValueError("Use --record for this checkout; transfer requires separate roots")
     value, data = snapshot(source, commit, repository)
     if target.is_symlink() or not target.is_dir():
         raise ValueError("Target must be an existing regular directory")
     safe_file(target, LOCK)
+    if not export_only and repository not in repositories(target):
+        raise ValueError("Source origin is not approved by the target; use --export-only and record the target's reviewed commit")
     has_core = (target / "control_plane_core").exists()
     if not has_core and any(safe_file(target, p).exists() for p in PACKAGES + TOOLING):
         raise ValueError("Unmanaged partial portable target cannot be overwritten")
@@ -207,6 +224,11 @@ def sync(source, target, commit, repository="Horistum/gitops-agent-control-plane
             atomic_write(target / path, content, mode)
         for path in set(existing) - set(data):
             (target / path).unlink()
+        if export_only:
+            # Never publish a private development origin in a public candidate.
+            # Leave the previous lock untouched until the exported bytes are
+            # committed locally and --record binds that exact target commit.
+            return {"exported": True, "record_required": True, "commit": commit, "files": value["files"]}
         atomic_write(target / LOCK, encode(value))
         return check(target)
     except BaseException:
@@ -226,13 +248,15 @@ def main(argv=None):
     parser.add_argument("--source", type=Path)
     parser.add_argument("--target", type=Path, default=ROOT)
     parser.add_argument("--commit")
-    parser.add_argument("--repository", choices=sorted(REPOSITORIES),
-                        default="Horistum/gitops-agent-control-plane")
+    parser.add_argument("--repository", default=REFERENCE_REPOSITORY)
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--check", action="store_true")
     action.add_argument("--record", action="store_true")
     parser.add_argument("--adopt-identical", action="store_true")
+    parser.add_argument("--export-only", action="store_true", help="Copy portable bytes without recording development-origin provenance in the target")
     args = parser.parse_args(argv)
+    if args.export_only and (args.check or args.record):
+        parser.error("--export-only requires a source transfer, not --check or --record")
     if args.target.is_symlink() or args.source is not None and args.source.is_symlink():
         parser.error("Linked source/target roots are forbidden")
     target = args.target.resolve()
@@ -246,7 +270,11 @@ def main(argv=None):
         if args.source is None or not args.commit:
             parser.error("--source and --commit are required")
         value = sync(args.source.resolve(), target, args.commit, args.repository,
-                     adopt_identical=args.adopt_identical)
+                     adopt_identical=args.adopt_identical, export_only=args.export_only)
+    if args.export_only:
+        print(json.dumps({"exported": True, "record_required": True,
+                          "commit": value["commit"], "files": len(value["files"])}))
+        return
     print(json.dumps({"verified": True, "repository": value["repository"],
                       "commit": value["commit"], "version": value["version"],
                       "files": len(value["files"])}))

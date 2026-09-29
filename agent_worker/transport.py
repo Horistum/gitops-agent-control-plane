@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 from .capabilities import DISABLED_FEATURES, inspect_cli
-from .protocol import ToolInputError, WorkerError, WorkerIndeterminate, atomic, canonical, fingerprint, loads, read_record, validate_profile
+from .protocol import ToolInputError, WorkerError, WorkerIndeterminate, atomic, canonical, exclusive_lock, fingerprint, loads, read_record, validate_profile
 
 CONFIG = {"forced_login_method": "chatgpt", "model_provider": "openai", "approval_policy": "never",
           "web_search": "disabled", "mcp_servers": {}, "features.code_mode.enabled": False,
@@ -204,30 +204,35 @@ class AppServerWorker:
     arbitrary shell is safe in the authenticated process: no shell is provided.
     Product effects exist only in the caller's separately bounded source broker.
     """
-    def __init__(self, profile, home, state_dir, *, argv=("codex",)):
+    def __init__(self, profile, home, state_dir, *, argv=("codex",), adapter_identity=None):
         self.profile = validate_profile(profile); self.home = Path(home); self.state_dir = Path(state_dir)
         self.argv = list(argv); self._checked = None
+        self.adapter_identity = adapter_identity or "standalone-source-broker/v1"
 
-    def preflight(self, *, require_smoke=True):
+    def preflight(self, *, require_smoke=True, model=""):
         validate_home(self.home)
-        report = inspect_cli(self.argv, self.profile["codex_version"], self.profile["schema_sha256"])
+        report = self._checked or inspect_cli(self.argv, self.profile["codex_version"], self.profile["schema_sha256"])
         if require_smoke:
             path = Path(self.profile["smoke_attestation"])
             if not path.exists(): raise WorkerError("Target-host worker smoke is required before activation")
             smoke = read_record(path)
-            if smoke.get("identity") != self.smoke_identity() or smoke.get("passed") is not True or smoke.get("model_called") is not True:
-                raise WorkerError("Worker smoke does not match this reviewed runtime/profile")
+            records = smoke.get("attestations", [smoke])
+            if not isinstance(records, list) or not any(isinstance(row, dict)
+                    and row.get("identity") == self.smoke_identity(model)
+                    and row.get("passed") is True and row.get("model_called") is True for row in records):
+                raise WorkerError("Worker smoke does not match this reviewed runtime/profile/model/adapter")
         self._checked = report
         return report
 
-    def smoke_identity(self):
+    def smoke_identity(self, model=""):
         source = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(__file__).parent.glob("*.py"))}
         return {"profile_hash": fingerprint(self.profile), "worker_source_hash": fingerprint(source),
-                "codex_version": self.profile["codex_version"], "schema_sha256": self.profile["schema_sha256"]}
+                "codex_version": self.profile["codex_version"], "schema_sha256": self.profile["schema_sha256"],
+                "model": model, "adapter_authority_hash": self.adapter_identity}
 
     def recover_completed(self, binding, prompt, output_schema, broker, run_id, model=""):
         """Read an exact completed local result without process, authentication or model I/O."""
-        identity = {"binding": binding, "model": model, "profile": fingerprint(self.profile)}
+        identity = self.effect_identity(binding, model)
         request_hash = fingerprint({"identity": identity, "prompt": prompt,
             "schema": output_schema, "tools": broker.tools, "run_id": run_id})
         record = self.state_dir / fingerprint(identity) / (fingerprint(run_id) + ".json")
@@ -240,7 +245,7 @@ class AppServerWorker:
 
     def recover_bound(self, binding, run_id, model, external_identity):
         """Recover by the controller's already durable request hash, without rebuilding context."""
-        identity = {"binding": binding, "model": model, "profile": fingerprint(self.profile)}
+        identity = self.effect_identity(binding, model)
         record = self.state_dir / fingerprint(identity) / (fingerprint(run_id) + ".json")
         if not record.exists():
             return None
@@ -250,18 +255,19 @@ class AppServerWorker:
         return prior["receipt"] if prior.get("status") == "completed" else None
 
     def execute(self, binding, prompt, output_schema, broker, run_id, model="", *, commissioning=False, external_identity=None):
-        if self._checked is None: self.preflight(require_smoke=not commissioning)
+        self.preflight(require_smoke=not commissioning, model=model)
         if not isinstance(binding, dict) or not binding or not isinstance(run_id, str) or not run_id:
             raise WorkerError("Worker requires controller-created authority and effect identities")
-        identity = {"binding": binding, "model": model, "profile": fingerprint(self.profile)}
+        identity = self.effect_identity(binding, model)
         session_key = fingerprint(identity); request_hash = fingerprint({"identity": identity, "prompt": prompt,
             "schema": output_schema, "tools": broker.tools, "run_id": run_id})
         root = self.state_dir / session_key; root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        import fcntl
-        with (root / "lock").open("a") as guard:
-            try: fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc: raise WorkerError("Another worker owns this session") from exc
+        with exclusive_lock(root / "lock"):
             return self._execute(root, identity, request_hash, prompt, output_schema, broker, run_id, model, external_identity)
+
+    def effect_identity(self, binding, model):
+        return {"binding": binding, "model": model, "profile": fingerprint(self.profile),
+                "adapter_authority_hash": self.adapter_identity}
 
     def _execute(self, root, identity, request_hash, prompt, output_schema, broker, run_id, model, external_identity):
         record = root / (fingerprint(run_id) + ".json")

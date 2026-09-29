@@ -11,6 +11,7 @@ import configparser
 from email.parser import BytesParser
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -52,7 +53,7 @@ def source_files(root: Path) -> dict[str, bytes]:
         if any(part in IGNORED_DIRS or part.endswith(".egg-info") for part in rel.parts):
             continue
         if len(rel.parts) == 1:
-            selected = path.name in {"LICENSE", "NOTICE", "pyproject.toml", "MANIFEST.in", ".gitignore", PORTABLE_LOCK} or path.suffix == ".md" or path.name.startswith("requirements") and path.suffix == ".txt"
+            selected = path.name in {"LICENSE", "NOTICE", "pyproject.toml", "MANIFEST.in", ".gitignore", PORTABLE_LOCK, "PORTABLE-ORIGINS.json"} or path.suffix == ".md" or path.name.startswith("requirements") and path.suffix == ".txt"
         else:
             selected = rel.parts[0] in SOURCE_DIRS
         if not selected:
@@ -143,6 +144,11 @@ def validate_portable_selection(expected: dict[str, bytes], version: str) -> Non
 
 def validate_archives(sdist: Path, wheel: Path, expected: dict[str, bytes]) -> dict:
     source, installed = read_sdist(sdist), read_wheel(wheel)
+    spec = importlib.util.spec_from_file_location("archive_publication_check", Path(__file__).with_name("check_publication.py"))
+    publication = importlib.util.module_from_spec(spec); spec.loader.exec_module(publication)
+    for label, files in (("sdist", source), ("wheel", installed)):
+        errors = publication.inspect_identities(files)
+        require(not errors, label + " private identity check failed: " + "; ".join(errors))
     project = tomllib.loads(expected["pyproject.toml"].decode())["project"]
     validate_portable_selection(expected, project["version"])
     # Every selected source input, not just one importable module, must survive.
@@ -177,7 +183,8 @@ def validate_archives(sdist: Path, wheel: Path, expected: dict[str, bytes]) -> d
     entrypoints.read_string(installed.get(f"{prefix}/entry_points.txt", b"").decode())
     require(entrypoints.has_section("console_scripts") and dict(entrypoints["console_scripts"]) == project["scripts"], "Console entry point drift")
     return {"version": project["version"], "source_files_checked": len(expected),
-            "wheel_files_checked": len(installed), "legal_files": list(LEGAL_FILES)}
+            "wheel_files_checked": len(installed), "legal_files": list(LEGAL_FILES),
+            "identity_scan": {"sdist": True, "wheel": True}}
 
 
 def clean_env(home: Path) -> dict[str, str]:

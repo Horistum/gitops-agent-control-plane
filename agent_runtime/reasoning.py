@@ -123,9 +123,11 @@ class Reasoning:
             return report
         if self.config.get("worker") is not None:
             from agent_worker import AppServerWorker, WorkerError
+            from .worker import authority_identity
             try:
                 return AppServerWorker(self.config["worker"], self.config["codex_home"],
-                    Path(self.config["codex_home"]) / "worker-preflight", argv=self.config["argv"]).preflight()
+                    Path(self.config["codex_home"]) / "worker-preflight", argv=self.config["argv"],
+                    adapter_identity=authority_identity()).preflight(model=self.config["model"])
             except WorkerError as exc:
                 raise Closed(str(exc)) from exc
         help_text = run(self.config["argv"] + ["exec", "--help"], limit=200_000).stdout.decode()

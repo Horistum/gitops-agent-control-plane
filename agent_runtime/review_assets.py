@@ -184,7 +184,8 @@ async function act(name) {
   const current = shown, request = ++generation; invalidate();
   try {
     await api("/api/action", {method: "POST", body: JSON.stringify({action: name,
-      binding: current.pending_effect, decision_hash: current.decision_hash, reason: el("reason").value,
+      binding: name === "reverify" ? current.reverification_binding : current.pending_effect,
+      decision_hash: current.decision_hash, reason: el("reason").value,
       accept_duplicate_cost: name === "retry-effect"})});
     if (request === generation) await load();
   } catch (error) { if (request === generation) showError(error); }

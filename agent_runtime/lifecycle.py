@@ -14,6 +14,8 @@ from .authorization import work_gate
 def observe(engine, phase, head, *, external=False):
     task = engine.task
     request = {"phase": phase, "head": head, "base": task["base"], "spec_hash": task["spec_hash"], "external": external}
+    if task.get("reverifications"):
+        request["reverification"] = task["reverifications"]
     return engine.store.effect("verify", request, lambda _: engine.verification.observe(
         engine.repo, head, task["base"], task["spec_hash"], cases=external))
 
@@ -70,7 +72,7 @@ def verification_step(engine):
                  and (not expected or any(row["exit_code"] != 0 for row in receipt["commands"])))
         if not valid:
             if task["frozen_tests"]:
-                engine.hold("Previously accepted negative control no longer holds; frozen tests require diagnosis")
+                engine.hold("Previously accepted negative control no longer holds; frozen tests require diagnosis", verification_receipt=receipt)
             else:
                 task["head"] = task["production_head"]
                 task.pop("proposed_tests", None)
@@ -83,7 +85,7 @@ def verification_step(engine):
     receipt = observe(engine, phase, task["head"], external=phase == "independent_verify")
     if phase == "baseline":
         if not receipt["passed"]:
-            engine.hold("Original product baseline failed; no model implementation can repair undeclared work")
+            engine.hold("Original product baseline failed; no model implementation can repair undeclared work", verification_receipt=receipt)
             return
         task["baseline"] = receipt
         transition(engine, {"kind": "verification", "passed": True})
@@ -96,7 +98,7 @@ def verification_step(engine):
         if target == "developer" and preserved(task, receipt):
             repair(engine, target, {"phase": phase, "observation": receipt})
         else:
-            engine.hold("Ambiguous verification or missing retained identities; diagnosis required")
+            engine.hold("Ambiguous verification or missing retained identities; diagnosis required", verification_receipt=receipt)
         return
     if phase == "independent_verify":
         if not frozen_intact(engine, task["head"]):
@@ -231,18 +233,20 @@ def lifecycle_step(engine):
             if task["postmerge_checks"].get("action") == "stop":
                 raise Closed("Trusted merged-commit CI evidence is malformed or conflicting")
             if task["postmerge_checks"].get("action") == "repair":
-                engine.hold("Trusted merged-commit CI failed; completion remains blocked")
+                engine.hold("Trusted merged-commit CI failed; completion remains blocked", verification_receipt={
+                    "head": merged, "base": task["base"], "spec_hash": task["spec_hash"],
+                    "checks": task["postmerge_checks"], "passed": False})
                 return
             if not task["postmerge_checks"]["passed"]:
                 raise ExternalPending(f"Waiting for exact merged-commit trusted checks ({task['postmerge_checks'].get('status', 'pending')})")
         receipt = observe(engine, phase, merged, external=True)
         if not receipt["passed"] or not preserved(task, receipt) or not frozen_intact(engine, merged):
-            engine.hold("Merged commit failed independent verification; next item is blocked")
+            engine.hold("Merged commit failed independent verification; next item is blocked", verification_receipt=receipt)
             return
         results, evidence = observations(engine, receipt, "postmerge")
         obligations = evaluate_obligations(criteria(engine.item()), results, stage="postmerge")
         if not obligations["complete"]:
-            engine.hold("Post-merge acceptance is incomplete")
+            engine.hold("Post-merge acceptance is incomplete", verification_receipt={"receipt": receipt, "obligations": obligations})
             return
         # Revalidate prior item evidence on this final product revision. Completion
         # of one item may not hide a later regression in an earlier item.

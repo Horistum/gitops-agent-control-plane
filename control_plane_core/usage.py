@@ -1,6 +1,6 @@
 """Pure, bounded provider token-usage validation shared by every consumer.
 
-Moved out of agent_runtime so Flow and other consumers apply the identical
+Moved out of agent_runtime so all consuming adapters apply the identical
 accounting rule instead of reimplementing it against their own receipts.
 """
 from __future__ import annotations

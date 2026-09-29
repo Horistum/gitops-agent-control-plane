@@ -34,9 +34,9 @@ class ExecutionConformance(unittest.TestCase):
             with self.subTest(bounds=bounds), self.assertRaises(CoreError):
                 technical_recovery({}, **{"now": 1, **bounds})
 
-    def test_manual_retry_requires_explicit_typed_technical_failure(self):
+    def test_legacy_retry_flags_cannot_replace_typed_recovery_protocols(self):
         task = dict(phase="await_human", hold_kind="FAILED", retryable=True, recovery_kind="transport")
-        self.assertTrue(recovery_actions(task, {})["retry"])
+        self.assertFalse(recovery_actions(task, {})["retry"])
         for changed in ({"recovery_kind": None}, {"retryable": False}, {"hold_kind": "BLOCKED_POLICY"},
                         {"pending": {"id": "unknown"}}, {"approvable": True},
                         {"agent_calls": 18}, {"context_rounds": 8}, {"failure_code": "PROTOCOL_LIMIT"}):

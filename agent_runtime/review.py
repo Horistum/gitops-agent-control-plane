@@ -69,7 +69,7 @@ def create_server(root, token, *, port=8765):
             if self.path == "/api/action":
                 if (not isinstance(value, dict) or set(value) != {"action", "binding", "decision_hash", "reason", "accept_duplicate_cost"}
                         or not isinstance(value["action"], str)
-                        or value["action"] not in {"pause", "continue", "retry", "retry-effect", "reconcile-effect", "reconcile", "replan", "cancel"}
+                        or value["action"] not in {"pause", "continue", "reverify", "retry-effect", "reconcile-effect", "reconcile", "replan", "cancel"}
                         or not isinstance(value["decision_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["decision_hash"])
                         or not isinstance(value["reason"], str) or len(value["reason"]) > 1000
                         or type(value["accept_duplicate_cost"]) is not bool

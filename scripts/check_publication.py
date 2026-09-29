@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import ast
 import html
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
 import sys
+import subprocess
 import tomllib
 from urllib.parse import unquote, urlsplit
 
@@ -19,7 +22,50 @@ REQUIRED = ("LICENSE", "NOTICE", "TRADEMARKS.md", "MAINTAINERS.md", "CONTRIBUTIN
             "docs/GITHUB-SETTINGS.md", ".github/CODEOWNERS", ".github/repository-settings.json",
             ".github/dependabot.yml", ".github/PULL_REQUEST_TEMPLATE.md")
 PRIVATE_DOC = re.compile(r"(?i:flowai(?:[-_/ ]?control)?)|flow_loop|AR-04C|Legion|\bFlow\b")
+IDENTITY_EXCEPTIONS = {'scripts/check_publication.py': ['865ea5f57ee87486c74d6b40320a7a93459ff02b4e02cf166c4f49931ed15b67'], 'tests/test_publication_tooling.py': ['479cba25aa4a254a57e04b1561677637060f1e216b19724100d03d302e1bac81']}
 LOCAL_LINK = re.compile(r"\[[^\]\n]*\]\(([^\s)]+)(?:\s+['\"][^)]*)?\)")
+
+
+def inspect_identities(files):
+    """Inspect names and every UTF-8 source/metadata payload, including archives.
+
+    Exceptions authorize exact lines in the detector and its negative fixture,
+    never whole extensions, directories, production code or changed lines.
+    """
+    errors = []
+    for name, raw in sorted(files.items()):
+        if PRIVATE_DOC.search(name):
+            errors.append("Private consumer identity in publication path: " + name)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            if Path(name).suffix.lower() in {".py", ".json", ".md", ".toml", ".yml", ".yaml", ".txt", ".in", ".sh"}:
+                errors.append("Unreadable publication text: " + name)
+            continue
+        for line in text.splitlines():
+            if PRIVATE_DOC.search(line) and hashlib.sha256(line.encode()).hexdigest() not in IDENTITY_EXCEPTIONS.get(name, ()):
+                errors.append("Private consumer identity/deployment detail in publication file: " + name)
+                break
+    return errors
+
+
+def publication_files(root):
+    spec = importlib.util.spec_from_file_location("publication_inventory", Path(__file__).with_name("check_distribution.py"))
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    files = module.source_files(root)
+    if (root / ".git").exists():
+        selected = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        for raw in selected.split(b"\0"):
+            if not raw: continue
+            name = raw.decode("utf-8"); path = root / name
+            ancestor = root
+            for part in Path(name).parts:
+                ancestor /= part
+                if ancestor.is_symlink(): raise ValueError("Publication source symlink: " + name)
+            if path.is_file() and path.stat().st_size > module.MAX_BYTES:
+                raise ValueError("Publication source exceeds file bound: " + name)
+            if path.is_file(): files[name] = path.read_bytes()
+    return files
 
 
 def markdown_anchors(text: str) -> set[str]:
@@ -100,6 +146,7 @@ def inspect_source(root: Path) -> list[str]:
     except (KeyError, ValueError, TypeError, OSError) as exc:
         errors.append(f"Invalid publication metadata: {type(exc).__name__}")
 
+    errors.extend(inspect_identities(publication_files(root)))
     documents = list(root.glob("*.md"))
     for directory in ("docs", "validation", ".github", "examples", "schemas"):
         documents.extend((root / directory).rglob("*.md"))
@@ -107,8 +154,6 @@ def inspect_source(root: Path) -> list[str]:
         if any(part in {".demo", "__pycache__", "build"} for part in path.relative_to(root).parts):
             continue
         text = path.read_text(encoding="utf-8")
-        if PRIVATE_DOC.search(text):
-            errors.append(f"Private consumer identity/deployment detail in public document: {path.relative_to(root)}")
         for link in LOCAL_LINK.findall(text):
             parsed = urlsplit(link.strip("<>"))
             if parsed.scheme or parsed.netloc or not (parsed.path or parsed.fragment):
@@ -143,9 +188,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         errors = inspect_source(args.root.resolve())
-    except (OSError, UnicodeError) as exc:
+    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as exc:
         errors = [f"Unreadable source input: {type(exc).__name__}"]
-    report = {"schema": 1, "scope": "repository-files-only", "passed": not errors,
+    report = {"schema": 2, "scope": "tracked-and-release-source-files", "passed": not errors,
               "errors": errors, "live_github_settings_verified": False,
               "history_secrets_reviewed": False, "legal_clearance_verified": False,
               "public_visibility_authorized": False}

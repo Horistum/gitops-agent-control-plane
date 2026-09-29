@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitops-agent-control-core"
-version = "1.10.0"
+version = "1.10.1"
 description = "Provider-neutral trust and governance for bounded software delivery"
 readme = "README.md"
 requires-python = ">=3.11"

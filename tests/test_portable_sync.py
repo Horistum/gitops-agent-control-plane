@@ -1,5 +1,6 @@
 """Exercise portable source transfer using real independent Git repositories."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -13,10 +14,17 @@ SPEC = importlib.util.spec_from_file_location("portable_transfer", ROOT / "scrip
 transfer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(transfer)
 REFERENCE = "Horistum/gitops-agent-control-plane"
-FLOW = "Horistum/FlowAi-control"
+CONSUMER = "ExampleOrg/development-controller"
 
 
 class PortableTransferTests(unittest.TestCase):
+    def test_export_cannot_report_success_for_a_check_or_record(self):
+        for action in ("--check", "--record"):
+            with self.subTest(action=action), patch("sys.stderr", new_callable=io.StringIO):
+                with self.assertRaises(SystemExit) as raised:
+                    transfer.main([action, "--export-only"])
+                self.assertEqual(raised.exception.code, 2)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -24,6 +32,7 @@ class PortableTransferTests(unittest.TestCase):
         self.source = self.repository("source")
         self.target = self.root / "target"
         self.target.mkdir()
+        (self.target / transfer.ORIGINS).write_text(json.dumps({"schema": 1, "repositories": [REFERENCE, CONSUMER]}))
 
     def git(self, root, *args):
         return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.PIPE).decode().strip()
@@ -31,6 +40,7 @@ class PortableTransferTests(unittest.TestCase):
     def repository(self, name):
         root = self.root / name
         root.mkdir()
+        (root / transfer.ORIGINS).write_text(json.dumps({"schema": 1, "repositories": [REFERENCE, CONSUMER]}))
         self.git(root, "init", "-q")
         self.git(root, "config", "user.name", "Portable fixture")
         self.git(root, "config", "user.email", "fixture@example.invalid")
@@ -56,15 +66,15 @@ class PortableTransferTests(unittest.TestCase):
         initial = self.transfer()
         self.assertEqual(initial["repository"], REFERENCE)
         self.git(self.target, "init", "-q")
-        self.git(self.target, "config", "user.name", "Flow fixture")
+        self.git(self.target, "config", "user.name", "Consumer fixture")
         self.git(self.target, "config", "user.email", "fixture@example.invalid")
         (self.target / "control_plane_core/authorization.py").write_text("PURPOSE = 'work-plan/v1'\n")
         (self.target / "agent_worker").mkdir()
         (self.target / "agent_worker/__init__.py").write_text('PROFILE = "brokered-session/v1"\n')
         sha = self.commit(self.target)
-        transfer.record(self.target, sha, FLOW)
-        result = transfer.sync(self.target, self.source, sha, FLOW, adopt_identical=False)
-        self.assertEqual(result["repository"], FLOW)
+        transfer.record(self.target, sha, CONSUMER)
+        result = transfer.sync(self.target, self.source, sha, CONSUMER, adopt_identical=False)
+        self.assertEqual(result["repository"], CONSUMER)
         self.assertEqual(result["commit"], sha)
         self.assertEqual(transfer.inventory(self.source), transfer.inventory(self.target))
         self.assertEqual(result["packages"], ["control_plane_core", "agent_worker"])
@@ -74,8 +84,8 @@ class PortableTransferTests(unittest.TestCase):
         sha = self.commit(self.source)
         shutil.copytree(self.source / "control_plane_core", self.target / "control_plane_core")
         with self.assertRaisesRegex(ValueError, "Unmanaged"):
-            transfer.sync(self.source, self.target, sha, FLOW)
-        transfer.sync(self.source, self.target, sha, FLOW, adopt_identical=True)
+            transfer.sync(self.source, self.target, sha, CONSUMER)
+        transfer.sync(self.source, self.target, sha, CONSUMER, adopt_identical=True)
         self.assertEqual(transfer.check(self.target)["commit"], sha)
 
     def test_dirty_or_wrong_source_cannot_mutate_target(self):
@@ -85,7 +95,7 @@ class PortableTransferTests(unittest.TestCase):
         for commit in (sha, "0" * 40):
             with self.assertRaises(ValueError):
                 transfer.sync(self.source, self.target, commit)
-        self.assertEqual(list(self.target.iterdir()), [])
+        self.assertEqual([p.name for p in self.target.iterdir()], [transfer.ORIGINS])
 
     def test_target_drift_cannot_be_discarded_even_with_adopt_flag(self):
         self.transfer()
@@ -94,22 +104,43 @@ class PortableTransferTests(unittest.TestCase):
         before = path.read_bytes()
         with self.assertRaises(ValueError):
             transfer.sync(self.source, self.target, self.git(self.source, "rev-parse", "HEAD"),
-                          FLOW, adopt_identical=True)
+                          CONSUMER, adopt_identical=True)
         self.assertEqual(path.read_bytes(), before)
 
     def test_same_bytes_can_record_new_provenance_without_rewriting_commit_identity(self):
         self.transfer()
         sha = self.git(self.source, "rev-parse", "HEAD")
-        value = transfer.record(self.source, sha, FLOW)
+        value = transfer.record(self.source, sha, CONSUMER)
         self.assertEqual(value["commit"], sha)
         self.assertEqual(self.git(self.source, "rev-parse", "HEAD"), sha)
 
     def test_unknown_repository_and_short_commit_rejected(self):
         sha = self.commit(self.source)
-        for repository, commit in (("attacker/example", sha), (FLOW, sha[:12])):
+        for repository, commit in (("attacker/example", sha), (CONSUMER, sha[:12])):
             with self.assertRaises(ValueError):
                 transfer.sync(self.source, self.target, commit, repository)
         self.assertFalse((self.target / transfer.LOCK).exists())
+
+    def test_public_export_keeps_origin_private_until_local_source_is_pinned(self):
+        self.transfer()
+        (self.target / transfer.ORIGINS).write_text(json.dumps({"schema": 1, "repositories": [REFERENCE]}))
+        old = (self.target / transfer.LOCK).read_bytes()
+        (self.source / "control_plane_core/new.py").write_text("VALUE = 1\n")
+        sha = self.commit(self.source)
+        with self.assertRaisesRegex(ValueError, "origin is not approved"):
+            transfer.sync(self.source, self.target, sha, CONSUMER)
+        report = transfer.sync(self.source, self.target, sha, CONSUMER, export_only=True)
+        self.assertTrue(report["record_required"])
+        self.assertEqual((self.target / transfer.LOCK).read_bytes(), old)
+        self.assertNotIn(CONSUMER.encode(), old)
+        with self.assertRaises(ValueError): transfer.check(self.target)
+        self.git(self.target, "init", "-q")
+        self.git(self.target, "config", "user.name", "Public fixture")
+        self.git(self.target, "config", "user.email", "fixture@example.invalid")
+        target_sha = self.commit(self.target)
+        final = transfer.record(self.target, target_sha, REFERENCE)
+        self.assertEqual(final["commit"], target_sha)
+        self.assertEqual(final["files"], report["files"])
 
     def test_source_and_target_symlinks_rejected_before_changes(self):
         self.transfer()
@@ -117,7 +148,7 @@ class PortableTransferTests(unittest.TestCase):
         outside.mkdir()
         (self.source / "agent_worker").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(ValueError):
-            transfer.snapshot(self.source, self.git(self.source, "rev-parse", "HEAD"), FLOW)
+            transfer.snapshot(self.source, self.git(self.source, "rev-parse", "HEAD"), CONSUMER)
         (self.source / "agent_worker").unlink()
         (self.target / "control_plane_core/NOTICE.md").unlink()
         (self.target / "control_plane_core/NOTICE.md").symlink_to(outside / "untouched")
